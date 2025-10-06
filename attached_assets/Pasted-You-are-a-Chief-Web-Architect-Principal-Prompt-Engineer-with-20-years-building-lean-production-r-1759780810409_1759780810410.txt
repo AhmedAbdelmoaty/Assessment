@@ -1,0 +1,246 @@
+You are a Chief Web Architect & Principal Prompt Engineer with 20+ years building lean, production-ready web apps and 20+ years designing highly reliable, instruction-following prompts for LLMs. You think like a systems designer (clear interfaces, tight scope, deterministic state flow) and a UX lead (simple, readable, bilingual, RTL/LTR clean). Your deliverable must be a minimal, high-quality MVP that runs locally with zero extra setup.
+
+Tech & Scope (follow literally)
+
+Backend: Node.js + Express only.
+
+Frontend: ONE HTML file (landing + chat in the same document), one CSS, one JS (vanilla). No React/TS/Prisma/DB/WebSockets.
+
+State: In-memory (Map) per sessionId (cookie or localStorage).
+
+OpenAI: Use OPENAI_API_KEY from Secrets. Chat Completions for (a) MCQ generation and (b) final report. Nothing else.
+
+Do NOT create any extra modules beyond what’s listed. No TypeScript/TSX. No databases. No classifier/clarifier files. No RAG/YouTube.
+
+Project structure
+project/
+  server/
+    index.js            // Express routes + session store + OpenAI calls
+    prompts/
+      system.js         // Single, central system prompt (intake-friendly wording, MCQ, report)
+  public/
+    index.html          // One-page app: landing section + chat section (toggle)
+    styles.css          // Light, modern styles (RTL/LTR aware)
+    app.js              // Chat logic: intake (conversational), assessment engine, report render
+
+One-page UX (index.html)
+
+Language toggle (AR/EN) with proper RTL/LTR switching.
+
+Logo slot in the hero area.
+
+Hero text (both languages embedded; show based on current language):
+
+Arabic:
+مرحبًا بك! أنا مستشارك التعليمي.
+هدفي مساعدتك في تعلم تحليل البيانات، سنقيّم مستواك خطوة بخطوة، وفي النهاية ستحصل على خطة تعلم واضحة تناسب هدفك.
+
+English:
+Welcome! I'm your learning advisor.
+We'll assess your data-analysis level step by step, and you'll get a clear learning plan tailored to your goal.
+
+Start CTA switches the view from the landing section to the chat section within the same HTML.
+
+Chat section has:
+
+Bubble interface (system/user).
+
+A single, always-visible input box at the bottom. When choices appear, keep the input box visible. If the user selects “Other”, focus the same input box for free text (no extra modal/field).
+
+Chips/radio for choices, a searchable country dropdown (ISO-3166) with client-side filtering.
+
+Conversational intake (exact order; validation as separate messages)
+
+Each prompt is a separate system message; each validation error is a separate system message. Use AR/EN labels based on current language.
+
+Name (free text): must contain at least two words. If invalid → send a correction message and re-ask.
+
+Email: simple regex; if invalid → correction message and re-ask.
+
+Age band:
+EN: ["16–17","18–24","25–34","35–44","45–54","55+"]
+AR: ["16–17","18–24","25–34","35–44","45–54","55+"]
+
+Country: dropdown of ISO-3166 with search.
+
+job_nature / department (choices + “Other”):
+EN: ["Accounting/Finance","Sales","Marketing","Operations","HR","IT/Data","Customer Support","Product/Engineering","Supply Chain/Logistics","Healthcare","Education","Real Estate","Manufacturing","Government/Public","Freelance/Consulting","Other"]
+AR: ["المالية/المحاسبة","المبيعات","التسويق","العمليات","الموارد البشرية","تقنية المعلومات/البيانات","خدمة العملاء","المنتج/الهندسة","سلسلة الإمداد/اللوجستيات","الرعاية الصحية","التعليم","العقارات","التصنيع","القطاع الحكومي/العام","عمل حر/استشارات","أخرى"]
+If “Other” → focus the same bottom input for free text.
+
+experience_years_band (choices):
+EN: ["<1y","1–2y","3–5y","6–9y","10–14y","15y+"]
+AR: ["أقل من سنة","1–2 سنوات","3–5 سنوات","6–9 سنوات","10–14 سنة","15+ سنة"]
+
+job_title_exact (free text). Placeholder example: “Generative AI & Automation Associate”.
+
+sector / industry (choices + “Other”):
+EN: ["Real Estate","Retail/E-commerce","Banking/Finance","Telecom","FMCG","Healthcare","Education","Manufacturing","Media/Advertising","Travel/Hospitality","Government/Public","Technology/Software","Other"]
+AR: ["العقارات","التجزئة/التجارة الإلكترونية","البنوك/المالية","الاتصالات","السلع الاستهلاكية السريعة","الرعاية الصحية","التعليم","التصنيع","الإعلام/الإعلان","السفر/الضيافة","الحكومي/العام","التقنية/البرمجيات","أخرى"]
+If “Other” → free text in the same input.
+
+Learning reason:
+EN: ["Career shift","Promotion","Project need","Skill refresh","Academic"]
+AR: ["تغيير مسار","ترقية","احتياج مشروع","تحديث مهارة","أكاديمي"]
+
+After successful intake, send a short system message like:
+EN: “Thanks — I’ve tailored your assessment based on your profile. Let’s begin.”
+AR: “شكرًا — خصصت التقييم وفق بياناتك. لنبدأ.”
+
+Descriptive Statistics Assessment — MCQ only (2 per level)
+
+Always MCQ, single correct answer, 3–5 plausible choices, concise wording.
+
+Personalize contexts/examples by sector, job nature, experience, and user profile.
+
+Language = current UI language (clean AR/EN; keep function tokens in backticks if any).
+
+Levels & clusters (must not ask outside these)
+
+Level 1 — Foundations
+
+Measurement Scales & Data Types — nominal/ordinal/interval/ratio; numeric/categorical/datetime; valid summaries per scale.
+
+Central Tendency Basics — mean vs. median vs. mode; when each is appropriate; simple numeric interpretations.
+
+Basic Spread & Distribution Shape — range and qualitative shape (symmetry/skew, modality); read basic histograms/frequency tables.
+
+Level 2 — Core Applied Descriptives
+
+Quantiles, IQR & Boxplots — quartiles/percentiles, IQR, Tukey fences; side-by-side boxplots for group comparison.
+
+Standard Deviation & Variability Metrics — variance/SD, coefficient of variation; interpret spread relative to scale and mean.
+
+Grouped Summaries (Categorical × Numeric) — per-group mean/median/IQR, weighted vs. unweighted summaries, pivots; side-by-side box/violin/bar charts for descriptive comparisons.
+
+Level 3 — Professional Descriptive Skills
+
+Z-Scores & Standardization — compare across units/scales; compute and interpret standardized values.
+
+Skewness, Kurtosis & Q–Q Diagnostics — descriptive shape measures; read Q–Q plots; choose transformations for clearer summaries.
+
+Correlation vs. Covariance (Bivariate) — magnitude/direction and units; read scatterplots; beware nonlinearity/heteroscedasticity.
+
+Deterministic progression (implement exactly)
+
+For each level (L1 → L2 → L3), generate two distinct MCQs covering different clusters inside that level (avoid asking the same cluster twice if possible).
+
+Both correct → advance to the next level.
+
+One correct, one wrong → advance to the next level, record the wrong MCQ’s cluster as a Gap.
+
+Both wrong → retry with two new questions (same level, different clusters if possible) once only.
+If the retry also results in both wrong, stop here. Do not go to higher levels.
+
+If we stopped early, all clusters in higher, unvisited levels are considered Gaps.
+
+Evaluation is local/deterministic: match the selected choice string to correct_answer. Keep per-session evidence:
+
+evidence: [
+  { level: "L1|L2|L3", cluster: "central_tendency_basics", correct: true|false },
+  ...
+]
+
+Model I/O formats (strict)
+MCQ JSON (model → server)
+{
+  "kind": "question",
+  "level": "L1|L2|L3",
+  "cluster": "central_tendency_basics",
+  "type": "mcq",
+  "prompt": "…localized prompt…",
+  "choices": ["…","…","…","…"],
+  "correct_answer": "…",
+  "rationale": "One or two short lines explaining why the answer is correct."
+}
+
+Final report JSON (model → server)
+
+Single opening line (≤ 2 short sentences) tailored to performance.
+
+Strengths: concise cluster names (not long headings).
+
+Gaps: concise cluster names.
+
+One overall stats_level only: Beginner | Intermediate | Advanced.
+
+No links, no sources.
+
+{
+  "kind": "final_report",
+  "message": "Short opening...\nStrengths:\n- ...\nGaps:\n- ...",
+  "strengths": ["central tendency basics","measurement scales"],
+  "gaps": ["iqr & boxplots","z-scores"],
+  "stats_level": "Intermediate"
+}
+
+server/index.js — routes & memory shape
+
+In-memory sessions.set(sessionId, { lang, intake, level: "L1", attempts: 0, evidence: [], gaps: [], finished: false }).
+
+Routes:
+
+POST /api/intake/next → drives the next intake prompt; validates previous answer; returns the next message + optional choices/dropdown spec.
+
+POST /api/assess/next → requests a new MCQ from the model for the current level+cluster window (pass profile + disallowed clusters asked in this level).
+
+POST /api/assess/answer → checks choice vs correct_answer, updates evidence, enforces progression rules, decides next step or stop.
+
+POST /api/report → sends the full evidence + inferred Strengths/Gaps (engine may pre-mark gaps from unvisited higher levels) to the model to produce the final_report JSON above.
+
+Keep the system prompt in prompts/system.js and call it with parameters { lang, profile, level, allowedClusters, avoidClusters, evidence }.
+
+prompts/system.js — responsibilities
+
+Bilingual output (AR/EN) based on lang. Use short, clear phrasing.
+
+When asked for an MCQ:
+
+Use only clusters from the current level.
+
+Personalize scenario to the profile (sector, job nature, experience, job title).
+
+Produce valid MCQ JSON with one correct answer from the choices.
+
+Avoid repeating the same cluster/wording within the level.
+
+When asked for the final report:
+
+Write the opening line (≤ 2 short sentences).
+
+Strengths/Gaps are concise cluster names; no single-function bullets; no links.
+
+One overall stats level (Beginner/Intermediate/Advanced) computed from performance evidence.
+
+public/app.js — chat flow
+
+Render each system/user message as a bubble.
+
+Always keep the bottom input visible; when choices are present render them as chips; when country is requested show a searchable dropdown list; when “Other” is chosen, focus the same input for free text.
+
+Orchestrate: intake → L1 2 MCQs → rule check → L2 2 MCQs → rule check → L3 2 MCQs (or stop per rules) → /api/report → render the final message.
+
+Design
+
+Minimal, modern, accessible. Generous spacing, rounded corners, subtle shadows.
+
+RTL switch for Arabic.
+
+CSS kept in a single file.
+
+Final constraints
+
+No database.
+
+No TypeScript/TSX/React/Prisma.
+
+
+Use only the files and structure listed above.
+
+Must run locally with:
+
+npm i
+node server/index.js
+
+
+Then open http://localhost:5000/ → landing section → Start → chat section (same page).
