@@ -433,6 +433,11 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
+// Root route - serve index.html
+app.get('/', (req, res) => {
+  res.sendFile(join(process.cwd(), 'public', 'index.html'));
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
