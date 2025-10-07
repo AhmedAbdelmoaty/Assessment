@@ -138,10 +138,12 @@
             });
             
             const data = await response.json();
-            sessionId = data.sessionId;
+            console.log('[CLIENT] Initial intake response:', data);
             
+            sessionId = data.sessionId;
             hideTypingIndicator();
-            addSystemMessage(data.message, data.choices, data.dropdown);
+            
+            renderIntakeStep(data);
             
         } catch (error) {
             console.error('Error starting intake:', error);
@@ -182,20 +184,33 @@
             });
             
             const data = await response.json();
+            console.log('[CLIENT] Intake response:', data);
+            
             hideTypingIndicator();
             
-            if (data.validation) {
-                addSystemMessage(data.message);
+            // Handle validation error
+            if (data.error) {
+                if (data.message) {
+                    addSystemMessage(data.message);
+                } else {
+                    console.error('[CLIENT] Error response missing message:', data);
+                }
                 return;
             }
             
-            addSystemMessage(data.message, data.choices, data.dropdown);
-            
-            if (data.isComplete) {
+            // Handle completion
+            if (data.done) {
+                if (data.message) {
+                    addSystemMessage(data.message);
+                }
                 currentStep = 'assessment';
                 updateProgress(1);
                 setTimeout(() => startAssessment(), 1000);
+                return;
             }
+            
+            // Render next step
+            renderIntakeStep(data);
             
         } catch (error) {
             console.error('Error in intake:', error);
@@ -204,6 +219,25 @@
                 'عذراً، حدث خطأ. يرجى المحاولة مرة أخرى.' : 
                 'Sorry, an error occurred. Please try again.');
         }
+    }
+    
+    function renderIntakeStep(data) {
+        // Validate prompt exists
+        if (!data.prompt) {
+            console.error('[CLIENT] Missing prompt in intake step:', data);
+            return;
+        }
+        
+        // Show prompt message
+        addSystemMessage(data.prompt);
+        
+        // Render input based on type
+        if (data.type === 'chips' && data.options) {
+            addChoiceChips(data.options);
+        } else if (data.type === 'country' && data.options) {
+            addDropdown(data.options);
+        }
+        // For 'text' type, user will use the default input box
     }
     
     async function handleChoiceSelection(chip) {
@@ -369,7 +403,12 @@
         scrollToBottom();
     }
     
-    function addSystemMessage(text, choices = null, dropdown = null) {
+    function addSystemMessage(text) {
+        if (!text) {
+            console.error('[CLIENT] Attempted to render blank bot message');
+            return;
+        }
+        
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble system';
         bubble.innerHTML = `
@@ -379,15 +418,6 @@
             <div class="message-content">${escapeHtml(text)}</div>
         `;
         chatMessages.appendChild(bubble);
-        
-        if (choices) {
-            addChoiceChips(choices);
-        }
-        
-        if (dropdown) {
-            addDropdown(dropdown);
-        }
-        
         scrollToBottom();
     }
     

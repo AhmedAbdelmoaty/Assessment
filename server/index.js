@@ -20,6 +20,141 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key"
 });
 
+// Canonical intake model
+const INTAKE_ORDER = [
+  "name_full",
+  "email",
+  "age_band",
+  "country",
+  "job_nature",
+  "experience_years_band",
+  "job_title_exact",
+  "sector",
+  "learning_reason"
+];
+
+const INTAKE_CATALOG = {
+  name_full: {
+    type: 'text',
+    prompt: {
+      en: "Hello! Let's start by getting to know you. What is your full name?",
+      ar: "مرحبًا! لنبدأ بالتعرف عليك. ما هو اسمك الكامل؟"
+    },
+    validation_error: {
+      en: "Please enter your full name (at least first and last name)",
+      ar: "يرجى إدخال الاسم الكامل (الاسم الأول والأخير على الأقل)"
+    }
+  },
+  email: {
+    type: 'text',
+    prompt: {
+      en: "What is your email address?",
+      ar: "ما هو عنوان بريدك الإلكتروني؟"
+    },
+    validation_error: {
+      en: "Please enter a valid email address",
+      ar: "يرجى إدخال عنوان بريد إلكتروني صحيح"
+    }
+  },
+  age_band: {
+    type: 'chips',
+    prompt: {
+      en: "What is your age range?",
+      ar: "ما هي فئتك العمرية؟"
+    },
+    options: {
+      en: ["16–17", "18–24", "25–34", "35–44", "45–54", "55+"],
+      ar: ["16–17", "18–24", "25–34", "35–44", "45–54", "55+"]
+    }
+  },
+  country: {
+    type: 'country',
+    prompt: {
+      en: "Which country do you live in?",
+      ar: "في أي دولة تقيم؟"
+    },
+    options: {
+      en: [
+        "Afghanistan", "Albania", "Algeria", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
+        "Bahrain", "Bangladesh", "Belarus", "Belgium", "Bolivia", "Brazil", "Bulgaria", "Cambodia",
+        "Canada", "Chile", "China", "Colombia", "Costa Rica", "Croatia", "Cyprus", "Czech Republic",
+        "Denmark", "Ecuador", "Egypt", "Estonia", "Finland", "France", "Georgia", "Germany", "Ghana",
+        "Greece", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
+        "Italy", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kuwait", "Latvia", "Lebanon", "Lithuania",
+        "Luxembourg", "Malaysia", "Mexico", "Morocco", "Netherlands", "New Zealand", "Nigeria", "Norway",
+        "Oman", "Pakistan", "Palestine", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania",
+        "Russia", "Saudi Arabia", "Singapore", "Slovakia", "Slovenia", "South Africa", "South Korea",
+        "Spain", "Sri Lanka", "Sudan", "Sweden", "Switzerland", "Syria", "Thailand", "Tunisia", "Turkey",
+        "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Venezuela", "Vietnam", "Yemen"
+      ],
+      ar: [
+        "أفغانستان", "ألبانيا", "الجزائر", "الأرجنتين", "أرمينيا", "أستراليا", "النمسا", "أذربيجان",
+        "البحرين", "بنغلاديش", "بيلاروسيا", "بلجيكا", "بوليفيا", "البرازيل", "بلغاريا", "كمبوديا",
+        "كندا", "تشيلي", "الصين", "كولومبيا", "كوستاريكا", "كرواتيا", "قبرص", "التشيك",
+        "الدنمارك", "الإكوادور", "مصر", "إستونيا", "فنلندا", "فرنسا", "جورجيا", "ألمانيا", "غانا",
+        "اليونان", "المجر", "آيسلندا", "الهند", "إندونيسيا", "إيران", "العراق", "أيرلندا", "إسرائيل",
+        "إيطاليا", "اليابان", "الأردن", "كازاخستان", "كينيا", "الكويت", "لاتفيا", "لبنان", "ليتوانيا",
+        "لوكسمبورغ", "ماليزيا", "المكسيك", "المغرب", "هولندا", "نيوزيلندا", "نيجيريا", "النرويج",
+        "عُمان", "باكستان", "فلسطين", "بيرو", "الفلبين", "بولندا", "البرتغال", "قطر", "رومانيا",
+        "روسيا", "السعودية", "سنغافورة", "سلوفاكيا", "سلوفينيا", "جنوب أفريقيا", "كوريا الجنوبية",
+        "إسبانيا", "سريلانكا", "السودان", "السويد", "سويسرا", "سوريا", "تايلاند", "تونس", "تركيا",
+        "أوكرانيا", "الإمارات", "بريطانيا", "الولايات المتحدة", "الأوروغواي", "فنزويلا", "فيتنام", "اليمن"
+      ]
+    }
+  },
+  job_nature: {
+    type: 'chips',
+    prompt: {
+      en: "What is the nature of your work or department?",
+      ar: "ما هو طبيعة عملك أو قسمك؟"
+    },
+    options: {
+      en: ["Accounting/Finance", "Sales", "Marketing", "Operations", "HR", "IT/Data", "Customer Support", "Product/Engineering", "Supply Chain/Logistics", "Healthcare", "Education", "Real Estate", "Manufacturing", "Government/Public", "Freelance/Consulting", "Other"],
+      ar: ["المالية/المحاسبة", "المبيعات", "التسويق", "العمليات", "الموارد البشرية", "تقنية المعلومات/البيانات", "خدمة العملاء", "المنتج/الهندسة", "سلسلة الإمداد/اللوجستيات", "الرعاية الصحية", "التعليم", "العقارات", "التصنيع", "القطاع الحكومي/العام", "عمل حر/استشارات", "أخرى"]
+    }
+  },
+  experience_years_band: {
+    type: 'chips',
+    prompt: {
+      en: "How many years of experience do you have?",
+      ar: "كم سنة من الخبرة لديك؟"
+    },
+    options: {
+      en: ["<1y", "1–2y", "3–5y", "6–9y", "10–14y", "15y+"],
+      ar: ["أقل من سنة", "1–2 سنوات", "3–5 سنوات", "6–9 سنوات", "10–14 سنة", "15+ سنة"]
+    }
+  },
+  job_title_exact: {
+    type: 'text',
+    prompt: {
+      en: "What is your exact job title?",
+      ar: "ما هو مسماك الوظيفي بالضبط؟"
+    }
+  },
+  sector: {
+    type: 'chips',
+    prompt: {
+      en: "Which sector or industry do you work in?",
+      ar: "في أي قطاع أو صناعة تعمل؟"
+    },
+    options: {
+      en: ["Real Estate", "Retail/E-commerce", "Banking/Finance", "Telecom", "FMCG", "Healthcare", "Education", "Manufacturing", "Media/Advertising", "Travel/Hospitality", "Government/Public", "Technology/Software", "Other"],
+      ar: ["العقارات", "التجزئة/التجارة الإلكترونية", "البنوك/المالية", "الاتصالات", "السلع الاستهلاكية السريعة", "الرعاية الصحية", "التعليم", "التصنيع", "الإعلام/الإعلان", "السفر/الضيافة", "الحكومي/العام", "التقنية/البرمجيات", "أخرى"]
+    }
+  },
+  learning_reason: {
+    type: 'chips',
+    prompt: {
+      en: "What is your reason for wanting to learn data analysis?",
+      ar: "ما هو سبب رغبتك في تعلم تحليل البيانات؟"
+    },
+    options: {
+      en: ["Career shift", "Promotion", "Project need", "Skill refresh", "Academic"],
+      ar: ["تغيير مسار", "ترقية", "احتياج مشروع", "تحديث مهارة", "أكاديمي"]
+    }
+  }
+};
+
 // Level and cluster definitions
 const LEVELS = {
   L1: {
@@ -45,21 +180,6 @@ const LEVELS = {
   }
 };
 
-// Country list (ISO-3166)
-const COUNTRIES = [
-  "Afghanistan", "Albania", "Algeria", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan",
-  "Bahrain", "Bangladesh", "Belarus", "Belgium", "Bolivia", "Brazil", "Bulgaria", "Cambodia",
-  "Canada", "Chile", "China", "Colombia", "Croatia", "Cyprus", "Czech Republic", "Denmark",
-  "Ecuador", "Egypt", "Estonia", "Finland", "France", "Georgia", "Germany", "Ghana",
-  "Greece", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland",
-  "Israel", "Italy", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kuwait", "Latvia",
-  "Lebanon", "Lithuania", "Luxembourg", "Malaysia", "Mexico", "Morocco", "Netherlands", "New Zealand",
-  "Nigeria", "Norway", "Oman", "Pakistan", "Peru", "Philippines", "Poland", "Portugal",
-  "Qatar", "Romania", "Russia", "Saudi Arabia", "Singapore", "Slovakia", "Slovenia", "South Africa",
-  "South Korea", "Spain", "Sri Lanka", "Sweden", "Switzerland", "Thailand", "Turkey", "Ukraine",
-  "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Venezuela", "Vietnam"
-];
-
 // Initialize or get session
 function getSession(sessionId) {
   if (!sessions.has(sessionId)) {
@@ -67,6 +187,7 @@ function getSession(sessionId) {
       sessionId,
       lang: 'en',
       currentStep: 'intake',
+      intakeStepIndex: 0,
       intake: {},
       assessment: {
         currentLevel: 'L1',
@@ -81,6 +202,21 @@ function getSession(sessionId) {
   return sessions.get(sessionId);
 }
 
+// Validate intake input
+function validateIntakeInput(stepKey, value) {
+  if (stepKey === 'name_full') {
+    const words = value.trim().split(/\s+/);
+    return words.length >= 2;
+  }
+  
+  if (stepKey === 'email') {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(value);
+  }
+  
+  return value && value.trim().length > 0;
+}
+
 // POST /api/intake/next - Handle intake flow
 app.post('/api/intake/next', async (req, res) => {
   try {
@@ -88,144 +224,63 @@ app.post('/api/intake/next', async (req, res) => {
     const session = getSession(sessionId);
     session.lang = lang;
     
-    const intake = session.intake;
-    let nextStep = null;
-    let choices = null;
-    let dropdown = null;
-    let message = '';
-    let validation = null;
-
-    // Determine current intake step
-    if (!intake.name) {
-      if (answer) {
-        const words = answer.trim().split(/\s+/);
-        if (words.length < 2) {
-          validation = lang === 'ar' 
-            ? 'يرجى إدخال الاسم الكامل (الاسم الأول والأخير على الأقل)'
-            : 'Please enter your full name (at least first and last name)';
-        } else {
-          intake.name = answer;
-        }
+    console.log(`[INTAKE] Session: ${sessionId}, Step: ${session.intakeStepIndex}, Answer: ${answer}`);
+    
+    // If answer provided, validate and store
+    if (answer !== undefined && answer !== null) {
+      const currentStepKey = INTAKE_ORDER[session.intakeStepIndex];
+      const stepConfig = INTAKE_CATALOG[currentStepKey];
+      
+      if (!validateIntakeInput(currentStepKey, answer)) {
+        // Validation failed
+        const errorMessage = stepConfig.validation_error?.[lang] || 
+          (lang === 'ar' ? 'يرجى إدخال إجابة صحيحة' : 'Please enter a valid answer');
+        
+        console.log(`[INTAKE] Validation failed for ${currentStepKey}`);
+        return res.json({
+          error: true,
+          message: errorMessage
+        });
       }
       
-      if (!intake.name) {
-        message = lang === 'ar' 
-          ? 'مرحبًا! لنبدأ بالتعرف عليك. ما هو اسمك الكامل؟'
-          : 'Hello! Let\'s start by getting to know you. What is your full name?';
-      }
-    } else if (!intake.email) {
-      if (answer) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(answer)) {
-          validation = lang === 'ar' 
-            ? 'يرجى إدخال عنوان بريد إلكتروني صحيح'
-            : 'Please enter a valid email address';
-        } else {
-          intake.email = answer;
-        }
-      }
+      // Store valid answer
+      session.intake[currentStepKey] = answer;
+      session.intakeStepIndex++;
       
-      if (!intake.email) {
-        message = lang === 'ar' 
-          ? 'ما هو عنوان بريدك الإلكتروني؟'
-          : 'What is your email address?';
-      }
-    } else if (!intake.ageBand) {
-      if (answer) {
-        intake.ageBand = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'ما هي فئتك العمرية؟'
-          : 'What is your age range?';
-        choices = ["16–17","18–24","25–34","35–44","45–54","55+"];
-      }
-    } else if (!intake.country) {
-      if (answer) {
-        if (COUNTRIES.includes(answer)) {
-          intake.country = answer;
-        } else {
-          validation = lang === 'ar' 
-            ? 'يرجى اختيار دولة من القائمة'
-            : 'Please select a country from the list';
-        }
-      } else {
-        message = lang === 'ar' 
-          ? 'في أي دولة تقيم؟'
-          : 'Which country do you live in?';
-        dropdown = COUNTRIES;
-      }
-    } else if (!intake.jobNature) {
-      if (answer) {
-        intake.jobNature = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'ما هو طبيعة عملك أو قسمك؟'
-          : 'What is the nature of your work or department?';
-        choices = lang === 'ar' 
-          ? ["المالية/المحاسبة","المبيعات","التسويق","العمليات","الموارد البشرية","تقنية المعلومات/البيانات","خدمة العملاء","المنتج/الهندسة","سلسلة الإمداد/اللوجستيات","الرعاية الصحية","التعليم","العقارات","التصنيع","القطاع الحكومي/العام","عمل حر/استشارات","أخرى"]
-          : ["Accounting/Finance","Sales","Marketing","Operations","HR","IT/Data","Customer Support","Product/Engineering","Supply Chain/Logistics","Healthcare","Education","Real Estate","Manufacturing","Government/Public","Freelance/Consulting","Other"];
-      }
-    } else if (!intake.experienceYears) {
-      if (answer) {
-        intake.experienceYears = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'كم سنة من الخبرة لديك؟'
-          : 'How many years of experience do you have?';
-        choices = lang === 'ar' 
-          ? ["أقل من سنة","1–2 سنوات","3–5 سنوات","6–9 سنوات","10–14 سنة","15+ سنة"]
-          : ["<1y","1–2y","3–5y","6–9y","10–14y","15y+"];
-      }
-    } else if (!intake.jobTitle) {
-      if (answer) {
-        intake.jobTitle = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'ما هو مسماك الوظيفي بالضبط؟'
-          : 'What is your exact job title?';
-      }
-    } else if (!intake.sector) {
-      if (answer) {
-        intake.sector = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'في أي قطاع أو صناعة تعمل؟'
-          : 'Which sector or industry do you work in?';
-        choices = lang === 'ar' 
-          ? ["العقارات","التجزئة/التجارة الإلكترونية","البنوك/المالية","الاتصالات","السلع الاستهلاكية السريعة","الرعاية الصحية","التعليم","التصنيع","الإعلام/الإعلان","السفر/الضيافة","الحكومي/العام","التقنية/البرمجيات","أخرى"]
-          : ["Real Estate","Retail/E-commerce","Banking/Finance","Telecom","FMCG","Healthcare","Education","Manufacturing","Media/Advertising","Travel/Hospitality","Government/Public","Technology/Software","Other"];
-      }
-    } else if (!intake.learningReason) {
-      if (answer) {
-        intake.learningReason = answer;
-      } else {
-        message = lang === 'ar' 
-          ? 'ما هو سبب رغبتك في تعلم تحليل البيانات؟'
-          : 'What is your reason for wanting to learn data analysis?';
-        choices = lang === 'ar' 
-          ? ["تغيير مسار","ترقية","احتياج مشروع","تحديث مهارة","أكاديمي"]
-          : ["Career shift","Promotion","Project need","Skill refresh","Academic"];
-      }
-    } else {
-      // Intake complete
-      session.currentStep = 'assessment';
-      message = lang === 'ar' 
-        ? 'شكرًا — خصصت التقييم وفق بياناتك. لنبدأ.'
-        : 'Thanks — I\'ve tailored your assessment based on your profile. Let\'s begin.';
+      console.log(`[INTAKE] Answer stored for ${currentStepKey}, moving to step ${session.intakeStepIndex}`);
     }
-
-    res.json({
+    
+    // Check if intake is complete
+    if (session.intakeStepIndex >= INTAKE_ORDER.length) {
+      session.currentStep = 'assessment';
+      console.log('[INTAKE] Complete - moving to assessment');
+      return res.json({ 
+        done: true,
+        message: lang === 'ar' 
+          ? 'شكرًا — خصصت التقييم وفق بياناتك. لنبدأ.'
+          : 'Thanks — I\'ve tailored your assessment based on your profile. Let\'s begin.'
+      });
+    }
+    
+    // Get next step
+    const nextStepKey = INTAKE_ORDER[session.intakeStepIndex];
+    const nextStep = INTAKE_CATALOG[nextStepKey];
+    
+    const payload = {
       sessionId,
-      message: validation || message,
-      choices,
-      dropdown,
-      isComplete: session.currentStep === 'assessment',
-      validation: !!validation
-    });
+      stepKey: nextStepKey,
+      type: nextStep.type,
+      prompt: nextStep.prompt[lang],
+      options: nextStep.options?.[lang] || null,
+      lang
+    };
+    
+    console.log(`[INTAKE] Returning next step: ${nextStepKey}, type: ${nextStep.type}`);
+    res.json(payload);
 
   } catch (error) {
     console.error('Intake error:', error);
-    res.status(500).json({ error: 'Server error during intake' });
+    res.status(500).json({ error: true, message: 'Server error during intake' });
   }
 });
 
