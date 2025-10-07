@@ -433,14 +433,14 @@ app.post('/api/report', async (req, res) => {
   }
 });
 
-// Root route - serve index.html
-app.get('/', (req, res) => {
-  res.sendFile(join(process.cwd(), 'public', 'index.html'));
-});
-
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
+});
+
+// SPA fallback - must be last route (serves index.html for all non-API routes)
+app.get('*', (req, res) => {
+  res.sendFile(join(__dirname, '../public/index.html'));
 });
 
 const port = parseInt(process.env.PORT || '5000', 10);
