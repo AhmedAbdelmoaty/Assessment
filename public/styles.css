@@ -261,6 +261,10 @@ body {
     line-height: 1.6;
 }
 
+/* Let input/messages follow the text language naturally */
+.chat-input { direction: auto; }
+.message-content { unicode-bidi: plaintext; }
+
 .message-bubble.system .message-content {
     background: var(--card);
     color: var(--card-foreground);
@@ -791,4 +795,8 @@ body {
 
 [dir="rtl"] .input-wrapper {
     flex-direction: row-reverse;
+}
+/* Language helpers: keep LTR; only switch fonts for Arabic */
+html.lang-ar body {
+    font-family: var(--font-arabic);
 }

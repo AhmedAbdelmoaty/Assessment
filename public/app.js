@@ -8,6 +8,18 @@
     let currentStep = 'intake';
     let currentMCQ = null;
     let isProcessing = false;
+    let awaitingCustomInput = false;
+
+    function removeInteractiveUI() {
+        // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
+        document.querySelectorAll('.choice-chips, .dropdown-container')
+            .forEach(el => el.remove());
+    }
+
+    function isOtherValue(txt) {
+        const v = (txt || '').toString().trim().toLowerCase();
+        return v === 'other' || v === 'أخرى' || v === 'اخري' || v === 'اخرى';
+    } 
     
     // DOM elements
     const langButtons = document.querySelectorAll('.lang-btn');
@@ -50,14 +62,10 @@
             }
         });
         
-        // Update HTML dir and lang attributes
-        if (lang === 'ar') {
-            html.setAttribute('dir', 'rtl');
-            html.setAttribute('lang', 'ar');
-        } else {
-            html.setAttribute('dir', 'ltr');
-            html.setAttribute('lang', 'en');
-        }
+        // Keep layout LTR always; just switch language attribute and helper class
+        html.setAttribute('lang', lang === 'ar' ? 'ar' : 'en');
+        html.classList.toggle('lang-ar', lang === 'ar');
+        html.classList.toggle('lang-en', lang !== 'ar');
         
         // Toggle content visibility
         const allContent = document.querySelectorAll('[data-lang-content]');
@@ -170,6 +178,7 @@
     }
     
     async function handleIntakeAnswer(answer) {
+        awaitingCustomInput = false;
         showTypingIndicator();
         
         try {
@@ -222,6 +231,7 @@
     }
     
     function renderIntakeStep(data) {
+        removeInteractiveUI();
         // Validate prompt exists
         if (!data.prompt) {
             console.error('[CLIENT] Missing prompt in intake step:', data);
@@ -241,19 +251,36 @@
     }
     
     async function handleChoiceSelection(chip) {
-        // Visual feedback
+        // إشعار بصري على الاختيار
         const siblings = chip.parentElement.querySelectorAll('.choice-chip');
         siblings.forEach(c => c.classList.remove('selected'));
         chip.classList.add('selected');
-        
-        isProcessing = true;
+
+        // أخفِ قائمة الاختيارات فورًا
+        const container = chip.closest('.choice-chips');
+        if (container) container.remove();
+
         const choice = chip.textContent.trim();
+
+        // لو "Other/أخرى": ما نبعتش للخادم الآن
+        if (isOtherValue(choice) && currentStep === 'intake') {
+            awaitingCustomInput = true;
+            // رسالة إرشادية قصيرة حسب اللغة
+            addSystemMessage(currentLang === 'ar'
+                ? 'اكتب اختيارك المناسب في الصندوق.'
+                : 'Type your specific answer in the box.');
+            chatInput.focus();
+            return; // ننتظر إدخال المستخدم النصّي
+        }
+
+        // غير ذلك: نكمّل عادي
+        isProcessing = true;
         addUserMessage(choice);
-        
+
         if (currentStep === 'intake') {
             await handleIntakeAnswer(choice);
         }
-        
+
         isProcessing = false;
     }
     
@@ -276,17 +303,22 @@
         const country = item.getAttribute('data-country');
         const dropdown = item.parentElement;
         const search = dropdown.previousElementSibling;
-        
+
+        // عيّن القيمة وأغلق القائمة
         search.value = country;
         dropdown.classList.remove('active');
-        
+
+        // اخفِ حاوية القائمة بالكامل فورًا
+        const wrap = item.closest('.dropdown-container');
+        if (wrap) wrap.remove();
+
         isProcessing = true;
         addUserMessage(country);
-        
+
         if (currentStep === 'intake') {
             await handleIntakeAnswer(country);
         }
-        
+
         isProcessing = false;
     }
     
