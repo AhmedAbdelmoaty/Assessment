@@ -38,6 +38,10 @@ const INTAKE_ORDER = [
   "sector",
   "learning_reason",
 ];
+const INTAKE_OPENING = {
+  ar: "أهلاً 👋 قبل ما نبدأ، هحتاج منك بعض التفاصيل البسيطة علشان نخصّص الاسئلة حسب خبرتك وهدفك. هنكملها خطوة بخطوة",
+  en: "Hi 👋 Before we start, I’ll need a few quick details so I can tailor the questions to your experience and goals. We’ll go step by step."
+};
 
 // ⚠️ نحتفظ بنفس الكتالوج كما عندك (اختصرته هنا لتقليل الطول)
 // يمكنك إبقاء INTAKE_CATALOG كما هو في نسختك السابقة تمامًا (لا حاجة لتغييره)
@@ -51,42 +55,48 @@ try {
   // نسخة مصغرة للطوارئ لو ملف الكاش غير متوفر (يمكنك إزالته لو عندك الكائن الأصلي)
   INTAKE_CATALOG = {
     name_full: {
-      type: "text",
+      type: 'text',
       prompt: {
-        en: "Hello! Let's start by getting to know you. What is your full name?",
-        ar: "مرحبًا! لنبدأ بالتعرف عليك. ما هو اسمك الكامل؟",
+        en: "What’s your full name?",
+        ar: "ممكن تكتب اسمك الكامل؟"
       },
       validation_error: {
-        en: "Please enter your full name (at least first and last name)",
-        ar: "يرجى إدخال الاسم الكامل (الاسم الأول والأخير على الأقل)",
-      },
+        en: "Please enter your full name.",
+        ar: "من فضلك اكتب اسمك كامل."
+      }
     },
+
     email: {
-      type: "text",
+      type: 'text',
       prompt: {
-        en: "What is your email address?",
-        ar: "ما هو عنوان بريدك الإلكتروني؟",
+        en: "Could you enter your email address?",
+        ar: "ممكن تدخل بريدك الإلكتروني؟"
       },
       validation_error: {
-        en: "Please enter a valid email address",
-        ar: "يرجى إدخال عنوان بريد إلكتروني صحيح",
-      },
+        en: "That email doesn’t look valid. Please try again.",
+        ar: "البريد الالكتروني مش صحيح ممكن تكتبه مرة تانيه"
+      }
     },
+
     phone_number: {
-      type: "text",
+      type: 'text',
       prompt: {
-        en: "What is your mobile phone number?",
-        ar: "ما هو رقم هاتفك المحمول؟",
+        en: "What’s your mobile number?",
+        ar: "رقم موبايلك كام؟"
       },
       validation_error: {
-        en: "Please enter a valid phone number (digits only, 7–15 digits; country code optional).",
-        ar: "يرجى إدخال رقم هاتف صحيح (أرقام فقط، من 7 إلى 15 رقم؛ كود الدولة اختياري).",
-      },
+        en: "Phone number isn’t valid. Digits, spaces and an optional + are allowed.",
+        ar: "رقم الموبايل مش واضح. مسموح أرقام ومسافات و+"
+      }
     },
+
     
     country: {
       type: "country",
-      prompt: { en: "Which country do you live in?", ar: "في أي دولة تقيم؟" },
+      prompt: {
+        en: "Which country are you based in?",
+        ar: "من أي دولة بتكلّمنا؟"
+      },
       options: {
         en: [
           "Afghanistan", "Albania", "Algeria", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahrain", "Bangladesh",
@@ -116,7 +126,10 @@ try {
     },
     age_band: {
       type: "chips",
-      prompt: { en: "What is your age range?", ar: "ما هي فئتك العمرية؟" },
+      prompt: {
+        en: "Pick your age range:",
+        ar: "اختار فئتك العمرية:"
+      },
       options: {
         en: ["18–24", "25–34", "35–44", "45–54", "55+"],
         ar: ["18–24", "25–34", "35–44", "45–54", "55+"],
@@ -125,8 +138,8 @@ try {
     job_nature: {
       type: "chips",
       prompt: {
-        en: "What is the nature of your work or department?",
-        ar: "ما هو طبيعة عملك أو قسمك؟",
+        en: "Choose your department or nature of work:",
+        ar: "اختار طبيعة عملك او القسم الذي تعمل به:"
       },
       options: {
         en: [
@@ -139,11 +152,6 @@ try {
           "Customer Support",
           "Product/Engineering",
           "Supply Chain/Logistics",
-          "Healthcare",
-          "Education",
-          "Real Estate",
-          "Manufacturing",
-          "Government/Public",
           "Freelance/Consulting",
           "Other",
         ],
@@ -155,13 +163,7 @@ try {
           "الموارد البشرية",
           "تقنية المعلومات/البيانات",
           "خدمة العملاء",
-          "المنتج/الهندسة",
           "سلسلة الإمداد/اللوجستيات",
-          "الرعاية الصحية",
-          "التعليم",
-          "العقارات",
-          "التصنيع",
-          "القطاع الحكومي/العام",
           "عمل حر/استشارات",
           "أخرى",
         ],
@@ -171,7 +173,7 @@ try {
       type: "chips",
       prompt: {
         en: "How many years of experience do you have?",
-        ar: "كم سنة من الخبرة لديك؟",
+        ar: "عندك كام سنة خبرة ؟"
       },
       options: {
         en: ["<1y", "1–2y", "3–5y", "6–9y", "10–14y", "15y+"],
@@ -188,15 +190,15 @@ try {
     job_title_exact: {
       type: "text",
       prompt: {
-        en: "What is your exact job title?",
-        ar: "ما هو مسماك الوظيفي بالضبط؟",
-      },
+        en: "Type your exact job title:",
+        ar: "اكتب مسماك الوظيفي بشكل صحيح تماما"
+      }
     },
     sector: {
       type: "chips",
       prompt: {
-        en: "Which sector or industry do you work in?",
-        ar: "في أي قطاع أو صناعة تعمل؟",
+        en: "Choose your industry/sector:",
+        ar: "اختار قطاع شغلك:"
       },
       options: {
         en: [
@@ -204,7 +206,6 @@ try {
           "Retail/E-commerce",
           "Banking/Finance",
           "Telecom",
-          "FMCG",
           "Healthcare",
           "Education",
           "Manufacturing",
@@ -219,7 +220,6 @@ try {
           "التجزئة/التجارة الإلكترونية",
           "البنوك/المالية",
           "الاتصالات",
-          "السلع الاستهلاكية السريعة",
           "الرعاية الصحية",
           "التعليم",
           "التصنيع",
@@ -234,18 +234,17 @@ try {
     learning_reason: {
       type: "chips",
       prompt: {
-        en: "What is your reason for wanting to learn data analysis?",
-        ar: "ما هو سبب رغبتك في تعلم تحليل البيانات؟",
+        en: "Pick your main learning reason:",
+        ar: "اختار سبب التعلّم الأساسي:"
       },
       options: {
         en: [
           "Career shift",
           "Promotion",
-          "Project need",
           "Skill refresh",
           "Academic",
         ],
-        ar: ["تغيير مسار", "ترقية", "احتياج مشروع", "تحديث مهارة", "أكاديمي"],
+        ar: ["تغيير مسار", "ترقية", "تحديث مهارة", "أكاديمي"],
       },
     },
   };
@@ -280,6 +279,7 @@ function getSession(sessionId) {
       lang: "en",
       currentStep: "intake",
       intakeStepIndex: 0,
+      openingShown: false,
       intake: {},
       assessment: {
         currentLevel: "L1",
@@ -344,10 +344,23 @@ app.post("/api/intake/next", async (req, res) => {
       session.currentStep = "assessment";
       return res.json({
         done: true,
-        message:
-          lang === "ar"
-            ? "شكرًا — خصصت التقييم وفق بياناتك. لنبدأ."
-            : "Thanks — I've tailored your assessment based on your profile. Let's begin.",
+        message: lang === 'ar'
+        ? 'تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة'
+        : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.",
+      });
+    }
+    // If it's the very first call (no answer yet), show the opening line once
+    if ((answer === undefined || answer === null) &&
+        session.intakeStepIndex === 0 &&
+        !session.openingShown) {
+      session.openingShown = true;
+      return res.json({
+        sessionId,
+        stepKey: '__opening__',
+        type: 'info',
+        prompt: INTAKE_OPENING[lang],
+        lang,
+        autoNext: true // tell client to immediately fetch the next real step
       });
     }
 

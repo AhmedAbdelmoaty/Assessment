@@ -239,7 +239,7 @@
         }
     }
 
-    function renderIntakeStep(data) {
+    async function renderIntakeStep(data) {
         removeInteractiveUI();
         // Validate prompt exists
         if (!data.prompt) {
@@ -249,6 +249,28 @@
 
         // Show prompt message
         addSystemMessage(data.prompt);
+        // لو الرسالة افتتاحية فقط، نطلب الخطوة التالية فورًا (بدون انتظار إدخال)
+        if (data.autoNext) {
+            // استدعاء فوري للخطوة التالية بنفس الجلسة
+            showTypingIndicator();
+            try {
+                const resp = await fetch('/api/intake/next', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId,              // نفس الجلسة اللي رجعت مع الافتتاحية
+                        lang: currentLang       // اللغة الحالية
+                    })
+                });
+                const nextData = await resp.json();
+                hideTypingIndicator();
+                renderIntakeStep(nextData);     // نعرض سؤال الاسم كرسالة منفصلة
+            } catch (e) {
+                hideTypingIndicator();
+                console.error('Error fetching next step after opening:', e);
+            }
+            return; // ننهي هنا لأننا هنكمّل بعرض الخطوة التالية
+        }
 
         // Render input based on type
         if (data.type === "chips" && data.options) {

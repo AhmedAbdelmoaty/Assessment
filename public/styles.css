@@ -756,14 +756,25 @@ body {
         max-width: 85%;
     }
     
+    /* Grid layout for choices on mobile */
     .choice-chips {
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr)); /* اختياران في السطر */
+        gap: 8px; /* تقليل المسافات */
     }
-    
+
+    /* ضغط بسيط للشيبس مع لفّ النص */
     .choice-chip {
-        width: 100%;
+        width: auto;                 /* ما نخليشها 100% */
         text-align: center;
+        padding: 10px 12px;          /* أقل من الديسكتوب */
+        font-size: 14px;             /* أصغر شوية */
+        line-height: 1.3;
+        white-space: normal;         /* يسمح بلفّ النص */
+        word-break: break-word;      /* يكسر النص الطويل */
+        min-height: 44px;            /* مساحة لمس مريحة */
     }
+
     
     .progress-steps {
         gap: 8px;
