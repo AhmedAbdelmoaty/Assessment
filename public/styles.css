@@ -800,3 +800,12 @@ body {
 html.lang-ar body {
     font-family: var(--font-arabic);
 }
+/* Arabic/English in MCQ text: correct alignment & bidi */
+.mcq-question,
+.mcq-choice span {
+    direction: auto;            /* يحدد RTL/LTR تلقائيًا حسب أول حرف */
+    unicode-bidi: plaintext;    /* يمنع لخبطة العربي مع الإنجليزي داخل نفس السطر */
+    text-align: start;          /* لو RTL = يمين، لو LTR = يسار */
+    white-space: normal;        /* فك أي التفاف غير مرغوب */
+    word-break: break-word;     /* كسر الكلمات الطويلة إن لزم */
+}

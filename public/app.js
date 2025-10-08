@@ -302,11 +302,14 @@
         choice.classList.add("selected");
 
         isProcessing = true;
-        const choiceText = choice.textContent.trim();
-        addUserMessage(choiceText);
+        const idx = parseInt(choice.getAttribute('data-idx'), 10);
+        const choiceLabelOnly = (choice.querySelector('span')?.textContent || '').trim();
 
-        // Submit MCQ answer
-        await submitMCQAnswer(choiceText);
+        // اللي يظهر للمستخدم في فقاعة الشات = نص الاختيار فقط (بدون A/B)
+        addUserMessage(choiceLabelOnly);
+
+        // اللي يتبعت للسيرفر = فهرس الاختيار فقط (رقم)
+        await submitMCQAnswer(idx);
         isProcessing = false;
     }
 
@@ -360,6 +363,9 @@
     }
 
     async function submitMCQAnswer(userAnswer) {
+        // ملاحظة: الآن userAnswer هو فهرس الاختيار (رقم 0..N)،
+        // وليس نص الاختيار.
+
         showTypingIndicator();
 
         try {
@@ -368,25 +374,25 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     sessionId,
-                    userAnswer,
+                    userChoiceIndex: userAnswer, // ← نبعت الفهرس فقط
                 }),
             });
 
             const result = await response.json();
             hideTypingIndicator();
 
-            // Continue or finish assessment
+            // لا نعرض "صح/غلط" للمستخدم؛ فقط نكمل التدفق
             if (result.nextAction === "complete") {
                 currentStep = "report";
                 updateProgress(2);
-                setTimeout(() => generateReport(), 1500);
+                setTimeout(() => generateReport(), 1000);
             } else if (result.nextAction === "stop") {
                 currentStep = "report";
                 updateProgress(2);
-                setTimeout(() => generateReport(), 1500);
+                setTimeout(() => generateReport(), 1000);
             } else {
-                // Continue with next question
-                setTimeout(() => startAssessment(), 1500);
+                // سؤال تالي
+                setTimeout(() => startAssessment(), 800);
             }
         } catch (error) {
             console.error("Error submitting answer:", error);
@@ -394,10 +400,11 @@
             addSystemMessage(
                 currentLang === "ar"
                     ? "عذراً، حدث خطأ في معالجة الإجابة."
-                    : "Sorry, an error occurred processing your answer.",
+                    : "Sorry, an error occurred processing your answer."
             );
         }
     }
+
 
     async function generateReport() {
         showTypingIndicator();
@@ -543,18 +550,25 @@
             </div>
             <div class="mcq-question">${escapeHtml(mcq.prompt)}</div>
             <div class="mcq-choices">
-                ${mcq.choices
-                    .map(
-                        (choice, index) => `
-                    <div class="mcq-choice">
-                        <div class="choice-letter">${String.fromCharCode(65 + index)}</div>
-                        <span>${escapeHtml(choice)}</span>
-                    </div>
-                `,
-                    )
-                    .join("")}
+${mcq.choices.map((choice, index) => `
+  <div class="mcq-choice" data-idx="${index}">
+    <div class="choice-letter">${String.fromCharCode(65 + index)}</div>
+    <span>${escapeHtml(choice)}</span>
+  </div>
+`).join('')}
+
             </div>
         `;
+        // علّم عناصر النص بالاتجاه التلقائي واللغة الحالية
+        const qEl = container.querySelector('.mcq-question');
+        if (qEl) {
+            qEl.setAttribute('dir', 'auto');
+            qEl.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+        }
+        container.querySelectorAll('.mcq-choice span').forEach((el) => {
+            el.setAttribute('dir', 'auto');
+            el.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+        });
 
         chatMessages.appendChild(container);
         scrollToBottom();
