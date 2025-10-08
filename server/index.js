@@ -83,43 +83,26 @@ try {
         ar: "يرجى إدخال رقم هاتف صحيح (أرقام فقط، من 7 إلى 15 رقم؛ كود الدولة اختياري).",
       },
     },
-    
-    country: {
-      type: "country",
-      prompt: { en: "Which country do you live in?", ar: "في أي دولة تقيم؟" },
-      options: {
-        en: [
-          "Afghanistan", "Albania", "Algeria", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahrain", "Bangladesh",
-          "Belarus", "Belgium", "Bolivia", "Brazil", "Bulgaria", "Cambodia", "Canada", "Chile", "China", "Colombia",
-          "Costa Rica", "Croatia", "Cyprus", "Czech Republic", "Denmark", "Ecuador", "Egypt", "Estonia", "Finland", "France",
-          "Georgia", "Germany", "Ghana", "Greece", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq",
-          "Ireland", "Italy", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kuwait", "Latvia", "Lebanon", "Lithuania",
-          "Luxembourg", "Malaysia", "Mexico", "Morocco", "Netherlands", "New Zealand", "Nigeria", "Norway", "Oman", "Pakistan",
-          "Palestine", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Saudi Arabia", "Singapore",
-          "Slovakia", "Slovenia", "South Africa", "South Korea", "Spain", "Sri Lanka", "Sudan", "Sweden", "Switzerland", "Syria",
-          "Thailand", "Tunisia", "Turkey", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Venezuela",
-          "Vietnam", "Yemen"
-        ],
-        ar: [
-          "أفغانستان", "ألبانيا", "الجزائر", "الأرجنتين", "أرمينيا", "أستراليا", "النمسا", "أذربيجان", "البحرين", "بنغلاديش",
-          "بيلاروسيا", "بلجيكا", "بوليفيا", "البرازيل", "بلغاريا", "كمبوديا", "كندا", "تشيلي", "الصين", "كولومبيا",
-          "كوستاريكا", "كرواتيا", "قبرص", "التشيك", "الدنمارك", "الإكوادور", "مصر", "إستونيا", "فنلندا", "فرنسا",
-          "جورجيا", "ألمانيا", "غانا", "اليونان", "المجر", "آيسلندا", "الهند", "إندونيسيا", "إيران", "العراق",
-          "أيرلندا", "إيطاليا", "اليابان", "الأردن", "كازاخستان", "كينيا", "الكويت", "لاتفيا", "لبنان", "ليتوانيا",
-          "لوكسمبورغ", "ماليزيا", "المكسيك", "المغرب", "هولندا", "نيوزيلندا", "نيجيريا", "النرويج", "عُمان", "باكستان",
-          "فلسطين", "بيرو", "الفلبين", "بولندا", "البرتغال", "قطر", "رومانيا", "روسيا", "السعودية", "سنغافورة",
-          "سلوفاكيا", "سلوفينيا", "جنوب أفريقيا", "كوريا الجنوبية", "إسبانيا", "سريلانكا", "السودان", "السويد", "سويسرا", "سوريا",
-          "تايلاند", "تونس", "تركيا", "أوكرانيا", "الإمارات", "بريطانيا", "الولايات المتحدة", "الأوروغواي", "فنزويلا",
-          "فيتنام", "اليمن"
-        ]
-      }
-    },
     age_band: {
       type: "chips",
       prompt: { en: "What is your age range?", ar: "ما هي فئتك العمرية؟" },
       options: {
         en: ["18–24", "25–34", "35–44", "45–54", "55+"],
         ar: ["18–24", "25–34", "35–44", "45–54", "55+"],
+      },
+    },
+    country: {
+      type: "country",
+      prompt: { en: "Which country do you live in?", ar: "في أي دولة تقيم؟" },
+      options: {
+        en: [
+          "Egypt",
+          "United Arab Emirates",
+          "Saudi Arabia",
+          "United States",
+          "United Kingdom",
+        ],
+        ar: ["مصر", "الإمارات", "السعودية", "الولايات المتحدة", "بريطانيا"],
       },
     },
     job_nature: {
@@ -386,7 +369,7 @@ app.post("/api/assess/next", async (req, res) => {
       A.questionQueue.length === 0 || A.queueCursor >= A.questionQueue.length;
 
     if (needNewBatch) {
-      // 🔧 نجهّز بروفايل بالمفاتيح الصحيحة (تطابق intake)
+      // Prepare profile with the CORRECT keys for the prompt (fixing earlier mismatch)
       const profile = {
         job_nature: session.intake.job_nature || "",
         experience_years_band: session.intake.experience_years_band || "",
@@ -397,7 +380,9 @@ app.post("/api/assess/next", async (req, res) => {
 
       const attempt_type = A.attempts === 0 ? "first" : "retry";
       const avoid_stems =
-        attempt_type === "retry" ? A.lastAttemptStems[A.currentLevel] || [] : [];
+        attempt_type === "retry"
+          ? A.lastAttemptStems[A.currentLevel] || []
+          : [];
 
       const systemPrompt = getQuestionPromptBatch({
         lang: session.lang,
@@ -409,11 +394,9 @@ app.post("/api/assess/next", async (req, res) => {
 
       // Call OpenAI - JSON output
       const response = await openai.chat.completions.create({
-        model: "gpt-4o", // غيّر الموديل لو حبيت
+        model: "gpt-4o",
         messages: [{ role: "system", content: systemPrompt }],
         response_format: { type: "json_object" },
-        temperature: 0.2, // التزام أعلى بالتعليمات
-        top_p: 1,
         max_completion_tokens: 2048,
       });
 
@@ -427,7 +410,9 @@ app.post("/api/assess/next", async (req, res) => {
         batch.items.length !== 2
       ) {
         console.error("Invalid batch schema from model:", batch);
-        return res.status(500).json({ error: "Invalid question batch from model" });
+        return res
+          .status(500)
+          .json({ error: "Invalid question batch from model" });
       }
 
       // Store queue & reset cursor
@@ -437,10 +422,9 @@ app.post("/api/assess/next", async (req, res) => {
         difficulty: q.difficulty,
         prompt: q.prompt,
         choices: q.choices,
-        correct_index: q.correct_index, // ← بنحتاجه للمقارنة بالفهرس
-        qid: `${A.currentLevel}-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}-${idx}`,
+        correct_index: q.correct_index,
+        // Generate an internal qid for tracking
+        qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}-${idx}`,
       }));
       A.queueCursor = 0;
       A.answeredInCurrentAttempt = 0;
@@ -449,25 +433,15 @@ app.post("/api/assess/next", async (req, res) => {
     // Serve current question
     const current = A.questionQueue[A.queueCursor];
 
-    // 🧠 احفظ السؤال الحالي في الجلسة (للاحتياط/المرجعية)
-    A.currentQuestion = {
-      level: current.level,
-      cluster: current.cluster,
-      prompt: current.prompt,
-      choices: current.choices,
-      correct_index: current.correct_index,
-      difficulty: current.difficulty || null,
-      qid: current.qid,
-    };
-
-    // لا نكشف الإجابة الصحيحة للفرونت
+    // 🔒 لا نكشف الإجابة الصحيحة للفرونت
+    // لكن الواجهة الحالية ترسل correctAnswer مرة أخرى، فنرسل placeholder
     const mcqPayload = {
       kind: "question",
       level: current.level,
       cluster: current.cluster,
       prompt: current.prompt,
-      choices: current.choices, // خيارات نصية بلا A/B — الواجهة تضيف الحروف بصريًا
-      correct_answer: "__hidden__", // متروك Placeholder حفاظًا على توافق الواجهة الحالي
+      choices: current.choices,
+      correct_answer: "__hidden__", // لا تكشف الإجابة
       rationale: "", // لا تفسيرات
       questionNumber: A.queueCursor + 1,
       totalQuestions: 2,
@@ -480,11 +454,10 @@ app.post("/api/assess/next", async (req, res) => {
   }
 });
 
-// -------- Assessment: submit answer (compare by index & progress silently) --------
+// -------- Assessment: submit answer (compare silently & progress) --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
-    // 👇 الواجهة الآن ترسل فهرس الاختيار
-    const { sessionId, userChoiceIndex } = req.body;
+    const { sessionId, userAnswer } = req.body;
     const session = getSession(sessionId);
     const A = session.assessment;
 
@@ -492,17 +465,15 @@ app.post("/api/assess/answer", async (req, res) => {
       return res.status(400).json({ error: "No active question" });
     }
 
-    // السؤال الحالي من الطابور بحسب المؤشر
     const current = A.questionQueue[A.queueCursor];
 
-    // ✅ مقارنة رقمية دقيقة: الفهرس القادم من الفرونت مقابل correct_index
+    // Compare user's text with the correct choice text silently
+    const correctChoiceText = current.choices[current.correct_index];
     const isCorrect =
-      Number.isInteger(userChoiceIndex) &&
-      userChoiceIndex >= 0 &&
-      userChoiceIndex < (current.choices?.length || 0) &&
-      userChoiceIndex === current.correct_index;
+      (userAnswer ?? "").toString().trim().toLowerCase() ===
+      (correctChoiceText ?? "").toString().trim().toLowerCase();
 
-    // سجل الدليل
+    // Record evidence
     A.evidence.push({
       level: current.level,
       cluster: current.cluster,
@@ -510,14 +481,17 @@ app.post("/api/assess/answer", async (req, res) => {
       qid: current.qid,
     });
 
-    // تقدّم داخل الطابور والمحاولة
     A.queueCursor += 1;
     A.answeredInCurrentAttempt += 1;
 
     let nextAction = "continue";
 
-    // لو جاوب السؤالين في هذه المحاولة، قرّر التقدّم/الإعادة
-    if (A.answeredInCurrentAttempt >= 2 || A.queueCursor >= A.questionQueue.length) {
+    // If both questions for this attempt answered, decide progression
+    if (
+      A.answeredInCurrentAttempt >= 2 ||
+      A.queueCursor >= A.questionQueue.length
+    ) {
+      // Collect last two answers for this level attempt
       const lastTwo = A.evidence
         .filter((e) => e.level === A.currentLevel)
         .slice(-2);
@@ -525,32 +499,32 @@ app.post("/api/assess/answer", async (req, res) => {
       const wrongCount = 2 - correctCount;
 
       // حفظ stems آخر محاولة (لتجنّب تكرار حرفي في retry فقط)
-      A.lastAttemptStems[A.currentLevel] = (A.questionQueue || []).map((q) => q.prompt);
+      A.lastAttemptStems[A.currentLevel] = A.questionQueue.map((q) => q.prompt);
 
       if (wrongCount === 2) {
         if (A.attempts === 0) {
-          // إعادة مرة واحدة في نفس المستوى
+          // retry once
           A.attempts = 1;
           A.questionQueue = [];
           A.queueCursor = 0;
           A.answeredInCurrentAttempt = 0;
           nextAction = "retry_same_level";
         } else {
-          // فشل الإعادة → إنهاء
+          // failed retry -> stop
           session.currentStep = "report";
           nextAction = "stop";
         }
       } else {
-        // 2 صح أو 1 صح + 1 غلط ⇒ تقدّم
+        // advance
         if (A.currentLevel === "L1") A.currentLevel = "L2";
         else if (A.currentLevel === "L2") A.currentLevel = "L3";
         else {
-          // L3 انتهى
+          // Completed all levels
           session.currentStep = "report";
           nextAction = "complete";
         }
 
-        // صفّر حالة المستوى التالي
+        // Reset attempt/question queue for next level (if not finished)
         if (session.currentStep !== "report") {
           A.attempts = 0;
           A.questionQueue = [];
@@ -561,11 +535,13 @@ app.post("/api/assess/answer", async (req, res) => {
       }
     }
 
-    // لا نرسل “صح/غلط” أو تفسير للمستخدم
+    // ⚠️ لا نرسل “صح/غلط” أو تفسير للمستخدم
+    // الواجهة الحالية تعرض رسالة بناءً على result.correct؛ نُبقيه موجودًا الآن لتجنّب كسر الواجهة،
+    // لكن قيمته لا تؤثر على منطقنا الداخلي إطلاقًا.
     return res.json({
-      correct: isCorrect, // لو الواجهة لسه بتقرأه، ماشي؛ لكن ما نعرضش رسالة
+      correct: isCorrect, // الواجهة قد تستخدمه نصيًا؛ سنعالج إخفاء الرسائل في خطوة فرونت لاحقًا
       nextAction,
-      message: "",
+      message: "", // لا رسائل
       canProceed: nextAction !== "stop",
     });
   } catch (err) {
