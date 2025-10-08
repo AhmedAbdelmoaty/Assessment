@@ -559,6 +559,16 @@ ${mcq.choices.map((choice, index) => `
 
             </div>
         `;
+        // علّم عناصر النص بالاتجاه التلقائي واللغة الحالية
+        const qEl = container.querySelector('.mcq-question');
+        if (qEl) {
+            qEl.setAttribute('dir', 'auto');
+            qEl.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+        }
+        container.querySelectorAll('.mcq-choice span').forEach((el) => {
+            el.setAttribute('dir', 'auto');
+            el.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+        });
 
         chatMessages.appendChild(container);
         scrollToBottom();
