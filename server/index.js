@@ -4,9 +4,9 @@ import { dirname, join } from "path";
 import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import fs from "fs";
-
-// 🔹 استخدم دالة السؤال الواحد من system.js
 import { getQuestionPromptSingle } from "./prompts/system.js";
+import { getFinalReportPrompt } from "./prompts/report.js";
+import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -433,54 +433,152 @@ app.post("/api/assess/answer", async (req, res) => {
   }
 });
 
-// -------- Final report (same as before) --------
+// -------- Final report (LLM-generated narrative + safe local fallback) --------
 app.post("/api/report", async (req, res) => {
   try {
     const { sessionId } = req.body;
     const session = getSession(sessionId);
     const lang = session.lang || "en";
-    if (session.currentStep !== "report") {
-      return res.status(400).json({ error: "Not in report phase" });
-    }
 
-    const evidence = session.assessment.evidence;
+    // نبني التقرير مهما كانت الحالة، اعتمادًا على evidence المتاحة
+    const A = session.assessment || { evidence: [], currentLevel: "L1" };
+    const evidence = Array.isArray(A.evidence) ? A.evidence : [];
+
+    // strengths & gaps من الدليل
     const strengths = Array.from(new Set(evidence.filter(e => e.correct).map(e => e.cluster)));
     const gaps = Array.from(new Set(evidence.filter(e => !e.correct).map(e => e.cluster)));
 
+    // أضف مواضيع المستويات الأعلى كفرص نمو إن لم تُزر بعد
     const levelOrder = ["L1", "L2", "L3"];
-    const highestReached = session.assessment.currentLevel;
+    const highestReached = A.currentLevel || "L1";
     const idx = levelOrder.indexOf(highestReached);
     for (let i = idx + 1; i < levelOrder.length; i++) {
-      for (const c of LEVELS[levelOrder[i]].clusters) {
+      for (const c of (LEVELS[levelOrder[i]]?.clusters || [])) {
         if (!gaps.includes(c)) gaps.push(c);
       }
     }
 
-    let stats_level = "Beginner";
-    const correctTotal = evidence.filter(e => e.correct).length;
-    const total = evidence.length;
-    if (correctTotal >= 3 && total >= 4) stats_level = "Intermediate";
-    if (correctTotal >= 5) stats_level = "Advanced";
+    // أسماء بشرية
+    const strengths_display = strengths.map(c => humanizeCluster(c, lang));
+    const gaps_display = gaps.map(c => humanizeCluster(c, lang));
 
-    const enMsg = "Nice work—here are your descriptive statistics results.";
-    const arMsg = "عمل جيّد — إليك نتائجك في الإحصاء الوصفي.";
+    // عدّادات اختيارية
+    const total_questions = evidence.length;
+    const total_correct = evidence.filter(e => e.correct).length;
+    const summary_counts = {
+      total_questions,
+      total_correct,
+      total_wrong: Math.max(0, total_questions - total_correct),
+    };
+
+    // بروفايل للّغة
+    const profile = {
+      job_nature: session.intake?.job_nature || "",
+      experience_years_band: session.intake?.experience_years_band || "",
+      job_title_exact: session.intake?.job_title_exact || "",
+      sector: session.intake?.sector || "",
+      learning_reason: session.intake?.learning_reason || "",
+    };
+
+    // نص افتراضي محلي (fallback) لو فشل الLLM
+    const localFallback = (() => {
+      const intro = lang === "ar"
+        ? "نتائج تقييمك جاهزة. سنعرض موجزًا مختصرًا."
+        : "Your assessment results are ready. Here’s a short summary.";
+      const strengthsLine = strengths_display.length
+        ? (lang === "ar"
+            ? `نقاط قوة ظهرت: ${strengths_display.join("، ")}.`
+            : `Strengths noticed: ${strengths_display.join(", ")}.`)
+        : (lang === "ar" ? "لا توجد نقاط قوة واضحة حتى الآن." : "No clear strengths yet.");
+      const gapsLine = gaps_display.length
+        ? (lang === "ar"
+            ? `تحتاج لتعزيز في: ${gaps_display.join("، ")}.`
+            : `Areas to reinforce: ${gaps_display.join(", ")}.`)
+        : (lang === "ar" ? "لا توجد فجوات واضحة." : "No clear gaps.");
+      const cta = lang === "ar"
+        ? "تحب أشرح لك هذه النقاط خطوة بخطوة الآن؟"
+        : "Would you like me to explain these points step-by-step now?";
+      return `${intro}\n${strengthsLine}\n${gapsLine}\n${cta}`;
+    })();
+
+    // حاول نداء LLM، ولو فشل نرجع fallback بدون 500
+    let narrative = "";
+    try {
+      const systemPrompt = getFinalReportPrompt({
+        lang,
+        profile,
+        strengths_display,
+        gaps_display,
+        evidence: evidence.map(e => ({
+          level: e.level,
+          cluster_code: e.cluster,
+          cluster_display: humanizeCluster(e.cluster, lang),
+          correct: !!e.correct,
+        })),
+        summary_counts,
+      });
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "system", content: systemPrompt }],
+        temperature: 0.2,
+        top_p: 1,
+        max_completion_tokens: 512,
+      });
+
+      narrative = completion?.choices?.[0]?.message?.content?.trim() || "";
+      if (!narrative) {
+        console.warn("[/api/report] Empty LLM narrative, using local fallback.");
+      }
+    } catch (llmErr) {
+      // سجّل كل التفاصيل الممكنة للمساعدة في التشخيص
+      console.error("[/api/report] LLM error:", {
+        message: llmErr?.message,
+        status: llmErr?.status || llmErr?.response?.status,
+        data: llmErr?.response?.data,
+        stack: llmErr?.stack,
+      });
+      // لا نرمي 500 — نكمل بالFallback المحلي
+    }
 
     const report = {
       kind: "final_report",
-      message: lang === "ar" ? arMsg : enMsg,
+      message: narrative || localFallback,
       strengths,
       gaps,
-      stats_level,
+      strengths_display,
+      gaps_display,
+      stats_level: (() => {
+        if (total_correct >= 5) return "Advanced";
+        if (total_correct >= 3 && total_questions >= 4) return "Intermediate";
+        return "Beginner";
+      })(),
     };
 
+    // حدّث حالة الجلسة
     session.report = report;
     session.finished = true;
+    session.currentStep = "report";
+
     return res.json(report);
   } catch (err) {
-    console.error("Report generation error:", err);
-    res.status(500).json({ error: "Server error generating report" });
+    // في حالة خطأ غير متوقع تمامًا (قبل بناء الFallback)
+    console.error("Report generation fatal error:", err);
+    return res.status(200).json({
+      kind: "final_report",
+      message:
+        (session?.lang || "en") === "ar"
+          ? "نتائج تقييمك جاهزة بصورة مبسطة."
+          : "Your assessment results are ready in a simplified form.",
+      strengths: [],
+      gaps: [],
+      strengths_display: [],
+      gaps_display: [],
+      stats_level: "Beginner",
+    });
   }
 });
+
 
 // Health check
 app.get("/api/health", (req, res) => {

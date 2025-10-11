@@ -254,20 +254,20 @@
             // استدعاء فوري للخطوة التالية بنفس الجلسة
             showTypingIndicator();
             try {
-                const resp = await fetch('/api/intake/next', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                const resp = await fetch("/api/intake/next", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        sessionId,              // نفس الجلسة اللي رجعت مع الافتتاحية
-                        lang: currentLang       // اللغة الحالية
-                    })
+                        sessionId, // نفس الجلسة اللي رجعت مع الافتتاحية
+                        lang: currentLang, // اللغة الحالية
+                    }),
                 });
                 const nextData = await resp.json();
                 hideTypingIndicator();
-                renderIntakeStep(nextData);     // نعرض سؤال الاسم كرسالة منفصلة
+                renderIntakeStep(nextData); // نعرض سؤال الاسم كرسالة منفصلة
             } catch (e) {
                 hideTypingIndicator();
-                console.error('Error fetching next step after opening:', e);
+                console.error("Error fetching next step after opening:", e);
             }
             return; // ننهي هنا لأننا هنكمّل بعرض الخطوة التالية
         }
@@ -324,8 +324,10 @@
         choice.classList.add("selected");
 
         isProcessing = true;
-        const idx = parseInt(choice.getAttribute('data-idx'), 10);
-        const choiceLabelOnly = (choice.querySelector('span')?.textContent || '').trim();
+        const idx = parseInt(choice.getAttribute("data-idx"), 10);
+        const choiceLabelOnly = (
+            choice.querySelector("span")?.textContent || ""
+        ).trim();
 
         // اللي يظهر للمستخدم في فقاعة الشات = نص الاختيار فقط (بدون A/B)
         addUserMessage(choiceLabelOnly);
@@ -422,11 +424,10 @@
             addSystemMessage(
                 currentLang === "ar"
                     ? "عذراً، حدث خطأ في معالجة الإجابة."
-                    : "Sorry, an error occurred processing your answer."
+                    : "Sorry, an error occurred processing your answer.",
             );
         }
     }
-
 
     async function generateReport() {
         showTypingIndicator();
@@ -441,7 +442,35 @@
             const report = await response.json();
             hideTypingIndicator();
 
-            addFinalReport(report);
+            // 1) اعرض الفقرة السردية (لو موجودة) كرسالة من المساعد
+            if (
+                report &&
+                typeof report.message === "string" &&
+                report.message.trim()
+            ) {
+                addSystemMessage(report.message.trim());
+            }
+
+            // 2) اختَر الأسماء البشرية إن كانت موجودة؛ وإلا ارجع للأكواد كـ fallback
+            const strengthsToShow =
+                Array.isArray(report.strengths_display) &&
+                report.strengths_display.length
+                    ? report.strengths_display
+                    : report.strengths;
+
+            const gapsToShow =
+                Array.isArray(report.gaps_display) && report.gaps_display.length
+                    ? report.gaps_display
+                    : report.gaps;
+
+            // 3) مرّر نسخة محسّنة إلى addFinalReport بدون تعديل الدالة الأصلية
+            const uiReport = {
+                ...report,
+                strengths: strengthsToShow,
+                gaps: gapsToShow,
+            };
+
+            addFinalReport(uiReport);
             updateProgress(2, true);
         } catch (error) {
             console.error("Error generating report:", error);
@@ -572,24 +601,28 @@
             </div>
             <div class="mcq-question">${escapeHtml(mcq.prompt)}</div>
             <div class="mcq-choices">
-${mcq.choices.map((choice, index) => `
+${mcq.choices
+    .map(
+        (choice, index) => `
   <div class="mcq-choice" data-idx="${index}">
     <div class="choice-letter">${String.fromCharCode(65 + index)}</div>
     <span>${escapeHtml(choice)}</span>
   </div>
-`).join('')}
+`,
+    )
+    .join("")}
 
             </div>
         `;
         // علّم عناصر النص بالاتجاه التلقائي واللغة الحالية
-        const qEl = container.querySelector('.mcq-question');
+        const qEl = container.querySelector(".mcq-question");
         if (qEl) {
-            qEl.setAttribute('dir', 'auto');
-            qEl.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+            qEl.setAttribute("dir", "auto");
+            qEl.setAttribute("lang", currentLang === "ar" ? "ar" : "en");
         }
-        container.querySelectorAll('.mcq-choice span').forEach((el) => {
-            el.setAttribute('dir', 'auto');
-            el.setAttribute('lang', currentLang === 'ar' ? 'ar' : 'en');
+        container.querySelectorAll(".mcq-choice span").forEach((el) => {
+            el.setAttribute("dir", "auto");
+            el.setAttribute("lang", currentLang === "ar" ? "ar" : "en");
         });
 
         chatMessages.appendChild(container);
