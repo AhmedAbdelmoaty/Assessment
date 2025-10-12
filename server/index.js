@@ -7,7 +7,6 @@ import fs from "fs";
 import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
-import { getTeachingSystemPrompt } from "./prompts/teach.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,10 +25,6 @@ const openai = new OpenAI({
     process.env.OPENAI_API_KEY_ENV_VAR ||
     "default_key",
 });
-// IDs لمساعد الشرح (Assistants + File Search). هنوفرهم من لوحة OpenAI بعد رفع الكتاب.
-// لو فاضيين، السيرفر هيشتغل بـ fallback بدون كتاب.
-const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
-const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
 
 // Intake order & opening
 const INTAKE_ORDER = [
@@ -146,16 +141,6 @@ function getSession(sessionId) {
         stemsCurrentAttempt: [],           // stems سؤالَي المحاولة الأولى لتغذية avoid_stems وقت الإعادة
         lastAttemptStems: {},              // { L1: ["stem1","stem2"], ... } تُملأ بعد إنهاء المحاولة الأولى
       },
-      teaching: {
-        mode: "idle",           // "idle" | "active"
-        lang: "ar",             // هنضبطها من session.lang عند البدء
-        topics_queue: [],       // gaps_display من التقرير
-        current_topic_index: 0,
-        transcript: [],         // هنحفظ آخر 6–8 رسائل (مستخدم/معلّم)
-        assistant: {
-          threadId: null        // Threads API لما نبدأ الشرح
-        }
-      },
       finished: false,
       report: null,
     });
@@ -253,27 +238,6 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   const newCorrectIndex = arr.findIndex(o => o.idx === correctIndex);
   return { newChoices, newCorrectIndex };
 }
-// نحفظ آخر 6–8 رسائل فقط (ذاكرة قريبة للشات)
-function pushTranscript(session, item) {
-  session.teaching = session.teaching || {};
-  session.teaching.transcript = session.teaching.transcript || [];
-  session.teaching.transcript.push({
-    from: item.from,                           // "user" | "tutor"
-    text: String(item.text || "").slice(0, 4000)
-  });
-  // احتفظ بآخر 8 فقط
-  if (session.teaching.transcript.length > 8) {
-    session.teaching.transcript = session.teaching.transcript.slice(-8);
-  }
-}
-
-// نحول الـtranscript لرسائل نمط chat.completions (لـ fallback فقط)
-function transcriptToMessages(transcript = []) {
-  return transcript.map(t => {
-    const role = t.from === "user" ? "user" : "assistant";
-    return { role, content: t.text };
-  });
-}
 
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
@@ -312,7 +276,7 @@ app.post("/api/assess/next", async (req, res) => {
     });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [{ role: "system", content: systemPrompt }],
       response_format: { type: "json_object" },
       temperature: 0.2,
@@ -555,7 +519,7 @@ app.post("/api/report", async (req, res) => {
       });
 
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages: [{ role: "system", content: systemPrompt }],
         temperature: 0.2,
         top_p: 1,
@@ -614,188 +578,8 @@ app.post("/api/report", async (req, res) => {
     });
   }
 });
-app.post("/api/teach/start", async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    const session = getSession(sessionId);
 
-    // لازم التقرير يكون اتولد علشان نجيب gaps_display
-    const gaps = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
-    if (!gaps.length) {
-      return res.status(400).json({
-        error: true,
-        message: (session.lang === "ar")
-          ? "لا توجد مواضيع لبدء الشرح."
-          : "No topics to teach right now."
-      });
-    }
 
-    // جهّز وضع الشرح
-    session.teaching.mode = "active";
-    session.teaching.lang = session.lang || "ar";
-    session.teaching.topics_queue = gaps.slice(); // نسخة من موضوعات الضعف
-    session.teaching.current_topic_index = 0;
-    session.teaching.transcript = [];
-
-    // لو عندنا Assistant + Vector Store (الكتاب جاهز)
-    if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // 1) أنشئ Thread للمحادثة
-      const thread = await openai.beta.threads.create();
-      session.teaching.assistant.threadId = thread.id;
-
-      // 2) ابعت رسالة افتتاحية للمساعد فيها اللغة + قائمة gaps + أول موضوع
-      const firstTopic = session.teaching.topics_queue[0];
-      await openai.beta.threads.messages.create(thread.id, {
-        role: "user",
-        content: (session.teaching.lang === "ar")
-          ? `اللغة: عربية. قائمة المواضيع: ${gaps.join(" | ")}. ابدأ بالموضوع الأول: "${firstTopic}". اتّبع دورك التعليمي بدقة.`
-          : `Language: English. Topics: ${gaps.join(" | ")}. Start with the first topic: "${firstTopic}". Follow your teaching role.`
-      });
-
-      // 3) شغّل Run مربوط بالمساعد (المساعد مرتبط بالكتاب مسبقًا من لوحة OpenAI)
-      const run = await openai.beta.threads.runs.create(thread.id, {
-        assistant_id: TEACH_ASSISTANT_ID,
-        // نضيف الرول القوي أيضًا كتعليمات إضافية (احتياطيًا)
-        instructions: getTeachingSystemPrompt({ lang: session.teaching.lang })
-      });
-
-      // 4) انتظر لحدّ ما الـRun يكمّل (polling بسيط)
-      let runStatus;
-      do {
-        await new Promise(r => setTimeout(r, 800));
-        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      } while (runStatus.status === "queued" || runStatus.status === "in_progress");
-
-      // 5) لو اكتمل، جيب أحدث رسالة من المساعد
-      if (runStatus.status === "completed") {
-        const msgs = await openai.beta.threads.messages.list(thread.id, { order: "desc", limit: 1 });
-        const assistantMsg = msgs.data.find(m => m.role === "assistant");
-        const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
-        pushTranscript(session, { from: "tutor", text });
-        return res.json({ message: text });
-      }
-
-      // فشل/تجاوز — نبعث رسالة بسيطة
-      return res.json({
-        message: (session.lang === "ar")
-          ? "هنبدأ شرح أول موضوع بشكل مبسّط. جاهز؟"
-          : "Let’s begin with a simple explanation of the first topic. Ready?"
-      });
-    }
-
-    // ===== Fallback: بدون Assistant (مافيش كتاب)، نستخدم chat.completions
-    const sysPrompt = getTeachingSystemPrompt({ lang: session.teaching.lang });
-    const firstTopic = session.teaching.topics_queue[0];
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: sysPrompt },
-        { role: "user", content: (session.teaching.lang === "ar")
-            ? `ابدأ بشرح "${firstTopic}" بأسلوب ودود ومبسّط.`
-            : `Start explaining "${firstTopic}" in a friendly, simple way.` }
-      ],
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 400
-    });
-
-    const text = (completion?.choices?.[0]?.message?.content || "").trim();
-    pushTranscript(session, { from: "tutor", text });
-    return res.json({ message: text });
-
-  } catch (err) {
-    console.error("/api/teach/start error:", err);
-    return res.status(500).json({ error: true, message: "Teaching start failed." });
-  }
-});
-app.post("/api/teach/message", async (req, res) => {
-  try {
-    const { sessionId, userMessage } = req.body;
-    const session = getSession(sessionId);
-    const T = session.teaching || {};
-
-    if (T.mode !== "active") {
-      return res.status(400).json({
-        error: true,
-        message: (session.lang === "ar") ? "ابدأ الشرح أولًا." : "Start teaching first."
-      });
-    }
-
-    const lang = T.lang || session.lang || "ar";
-    const sysPrompt = getTeachingSystemPrompt({ lang });
-    const currentTopic = T.topics_queue[T.current_topic_index] || T.topics_queue[0] || "";
-
-    // خزّن رسالة المستخدم في transcript
-    pushTranscript(session, { from: "user", text: userMessage });
-
-    // ==== Assistants (لو IDs موجودة وفي Thread قائم)
-    if (TEACH_ASSISTANT_ID && T.assistant?.threadId) {
-      const tid = T.assistant.threadId;
-
-      // 1) أضف رسالة المستخدم للـThread
-      await openai.beta.threads.messages.create(tid, { role: "user", content: userMessage });
-
-      // 2) شغّل Run جديد
-      const run = await openai.beta.threads.runs.create(tid, {
-        assistant_id: TEACH_ASSISTANT_ID,
-        instructions: [
-          sysPrompt,
-          (lang === "ar"
-            ? `الموضوع الحالي: "${currentTopic}". تذكير: لا تسأل سؤال تحقق إلا إذا طلب المستخدم ذلك.`
-            : `Current topic: "${currentTopic}". Reminder: do NOT ask a check question unless the user explicitly asked.`)
-        ].join("\n\n")
-      });
-
-      // 3) انتظر انتهاء الـRun
-      let runStatus;
-      do {
-        await new Promise(r => setTimeout(r, 800));
-        runStatus = await openai.beta.threads.runs.retrieve(tid, run.id);
-      } while (runStatus.status === "queued" || runStatus.status === "in_progress");
-
-      if (runStatus.status !== "completed") {
-        return res.json({
-          message: (lang === "ar")
-            ? "تمام، هابسطها ونكمل."
-            : "Alright—let me simplify that and continue."
-        });
-      }
-
-      // 4) احصل على أحدث رد
-      const msgs = await openai.beta.threads.messages.list(tid, { order: "desc", limit: 1 });
-      const assistantMsg = msgs.data.find(m => m.role === "assistant");
-      const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
-
-      pushTranscript(session, { from: "tutor", text });
-      return res.json({ message: text });
-    }
-
-    // ==== Fallback: chat.completions (بدون كتاب)
-    const fewShots = transcriptToMessages(T.transcript);
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: sysPrompt },
-        ...fewShots, // آخر 6–8 رسائل كذاكرة قريبة
-        { role: "user", content: (lang === "ar")
-            ? `نحن الآن في موضوع: "${currentTopic}". هذه رسالتي: ${userMessage}`
-            : `We are now on topic: "${currentTopic}". My message: ${userMessage}` }
-      ],
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 400
-    });
-
-    const text = (completion?.choices?.[0]?.message?.content || "").trim();
-    pushTranscript(session, { from: "tutor", text });
-    return res.json({ message: text });
-
-  } catch (err) {
-    console.error("/api/teach/message error:", err);
-    return res.status(500).json({ error: true, message: "Teaching message failed." });
-  }
-});
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", sessions: sessions.size });

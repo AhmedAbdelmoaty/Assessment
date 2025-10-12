@@ -259,8 +259,6 @@ body {
     border-radius: var(--radius);
     font-size: 15px;
     line-height: 1.6;
-    white-space: pre-line;  /* يحوّل \n إلى سطر جديد، و \n\n إلى فاصل فقرة */
-
 }
 
 /* Let input/messages follow the text language naturally */
@@ -822,22 +820,3 @@ html.lang-ar body {
     white-space: normal;        /* فك أي التفاف غير مرغوب */
     word-break: break-word;     /* كسر الكلمات الطويلة إن لزم */
 }
-.report-tools {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.tool-btn {
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--foreground);
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background .2s ease;
-}
-
-.tool-btn:hover { background: var(--muted); }
-.tool-btn:disabled { opacity: .6; cursor: not-allowed; }
