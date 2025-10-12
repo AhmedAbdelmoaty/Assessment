@@ -11,10 +11,20 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- Language Toggle -->
-    <div class="lang-toggle">
-        <button class="lang-btn active" data-lang="en">English</button>
-        <button class="lang-btn" data-lang="ar">عربي</button>
+    <!-- Global Header: same spacing/class as original chat header -->
+    <div class="chat-header" id="globalHeader">
+      <!-- Logo (replaces robot + titles) -->
+      <img
+        src="/assets/imp-logo.jpeg"
+        alt="IMP - Institute of Management Professionals"
+        class="brand-logo"
+      />
+
+      <!-- Language toggle moved inside the header (keep original shape) -->
+      <div class="lang-toggle header-lang">
+        <button type="button" class="lang-btn active" data-lang="en">English</button>
+        <button type="button" class="lang-btn" data-lang="ar">العربية</button>
+      </div>
     </div>
 
     <!-- Landing Section -->

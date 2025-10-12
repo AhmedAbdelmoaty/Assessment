@@ -2,7 +2,7 @@
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-arabic: 'Noto Sans Arabic', system-ui, -apple-system, sans-serif;
     --radius: 12px;
-    
+
     /* Light theme */
     --background: hsl(210, 20%, 98%);
     --foreground: hsl(215, 25%, 15%);
@@ -10,8 +10,14 @@
     --card-foreground: hsl(215, 25%, 15%);
     --popover: hsl(0, 0%, 100%);
     --popover-foreground: hsl(215, 25%, 15%);
-    --primary: hsl(173, 80%, 40%);
-    --primary-foreground: hsl(0, 0%, 100%);
+
+    /* IMP brand */
+    --primary: #A52025;                 /* maroon */
+    --primary-foreground: #ffffff;
+    --ring: #A52025;                    /* same as primary */
+    --primary-10: rgba(165, 32, 37, 0.10); /* helpful transparencies */
+    --primary-15: rgba(165, 32, 37, 0.15);
+
     --secondary: hsl(38, 92%, 50%);
     --secondary-foreground: hsl(0, 0%, 100%);
     --muted: hsl(210, 20%, 96%);
@@ -22,7 +28,6 @@
     --destructive-foreground: hsl(0, 0%, 100%);
     --border: hsl(214, 20%, 90%);
     --input: hsl(214, 20%, 90%);
-    --ring: hsl(173, 80%, 40%);
 }
 
 * {
@@ -64,6 +69,118 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
+/* مجموعة أزرار اللغة داخل الهيدر: صف بسيط بدون كارت خارجي */
+.chat-header .lang-toggle,
+.chat-header .header-lang {
+  margin-left: auto;         /* تروح يمين الهيدر */
+  position: static;
+  top: auto; right: auto; left: auto;
+  display: flex;
+  gap: 10px;                 /* مسافة بين الزرين */
+  background: transparent;   /* مفيش كارت خارجي */
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+
+/* زر اللغة: أطول شوية وأقل عرضًا */
+.chat-header .lang-toggle .lang-btn,
+.chat-header .header-lang .lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;                /* ↑ زودنا الطولي (12) ↓ قللنا الأفقي (18) */
+  min-height: 40px;                  /* يضمن الطول */
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--foreground);
+  font-weight: 600;
+  font-size: 15px;                   /* ↑ درجة بسيطة للتوازن مع الطول */
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* الزر النشط كما هو */
+.chat-header .lang-toggle .lang-btn.active,
+.chat-header .header-lang .lang-btn.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+  box-shadow: 0 3px 10px rgba(165, 32, 37, 0.25);
+}
+
+/* الهوفر بدون بوردر نبيتي */
+.chat-header .lang-toggle .lang-btn:hover,
+.chat-header .header-lang .lang-btn:hover {
+  filter: brightness(0.97);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  border-color: var(--border);
+}
+.chat-header .lang-toggle .lang-btn.active:hover,
+.chat-header .header-lang .lang-btn.active:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+  border-color: var(--primary);
+}
+
+/* تركيز لوحة المفاتيح */
+.chat-header .lang-toggle .lang-btn:focus-visible,
+.chat-header .header-lang .lang-btn:focus-visible {
+  outline: 3px solid var(--primary-15);
+  outline-offset: 2px;
+  border-color: var(--primary);
+}
+
+
+/* هوفر: يغمق سنة ويرتفع 1px — بدون تغيير لون/ظهور بوردر نبيتي */
+.chat-header .lang-toggle .lang-btn:hover,
+.chat-header .header-lang .lang-btn:hover {
+  filter: brightness(0.97);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  border-color: var(--border); /* يفضل ثابت */
+}
+
+/* الزر النشط = نبيتي كامل */
+.chat-header .lang-toggle .lang-btn.active,
+.chat-header .header-lang .lang-btn.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+  box-shadow: 0 3px 10px rgba(165, 32, 37, 0.25);
+}
+
+/* هوفر للزر النشط: غمّق بسيط بدون إبراز بوردر */
+.chat-header .lang-toggle .lang-btn.active:hover,
+.chat-header .header-lang .lang-btn.active:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+  border-color: var(--primary);
+}
+
+/* تركيز لوحة المفاتيح — بدون إطار نبيتي إضافي */
+.chat-header .lang-toggle .lang-btn:focus-visible,
+.chat-header .header-lang .lang-btn:focus-visible {
+  outline: 3px solid var(--primary-15);
+  outline-offset: 2px;
+  border-color: var(--primary);
+}
+
+/* موبايل: نقلل العرض شوية لتجنب التزاحم */
+@media (max-width: 480px) {
+  .chat-header .lang-toggle .lang-btn,
+  .chat-header .header-lang .lang-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+}
+
+
 [dir="rtl"] .lang-toggle {
     right: auto;
     left: 24px;
@@ -104,12 +221,12 @@ body {
     width: 120px;
     height: 120px;
     margin: 0 auto 32px;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
+    background: var(--primary); /* لون صافي بدل التدرج */
     border-radius: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 8px 24px rgba(13, 148, 136, 0.2);
+    box-shadow: 0 8px 24px rgba(165, 32, 37, 0.20); /* ظل ماروني */
 }
 
 .logo-placeholder i {
@@ -140,20 +257,20 @@ body {
     align-items: center;
     gap: 12px;
     padding: 16px 40px;
-    background: var(--secondary);
-    color: var(--secondary-foreground);
+    background: var(--primary);                 /* كان secondary */
+    color: var(--primary-foreground);
     border: none;
     border-radius: var(--radius);
     font-size: 18px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 4px 12px var(--primary-15);   /* ظل ماروني */
 }
 
 .cta-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 6px 20px var(--primary-15);
 }
 
 /* Chat Section */
@@ -182,10 +299,32 @@ body {
     gap: 16px;
 }
 
+/* Logo size: أكبر على الديسكتوب، متوازن على الموبايل */
+.brand-logo {
+  height: 48px;     /* كان صغير – الآن أوضح على اللاب/الديسكتوب */
+  width: auto;
+  display: block;
+}
+
+/* شاشات متوسطة */
+@media (max-width: 1024px) {
+  .brand-logo {
+    height: 42px;
+  }
+}
+
+/* موبايل */
+@media (max-width: 480px) {
+  .brand-logo {
+    height: 36px;
+  }
+}
+
+
 .chat-header-icon {
     width: 48px;
     height: 48px;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
+    background: var(--primary); /* لون صافي بدل التدرج */
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -244,7 +383,7 @@ body {
 }
 
 .message-bubble.system .message-avatar {
-    background: linear-gradient(135deg, var(--primary), var(--accent));
+    background: var(--primary); /* لون صافي بدل التدرج */
     color: white;
 }
 
@@ -330,7 +469,7 @@ body {
 
 .dropdown-search:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px hsla(var(--ring) / 0.1);
+    box-shadow: 0 0 0 3px var(--primary-10);  /* بدل hsla(var(--ring) / 0.1) */
 }
 
 .dropdown-list {
@@ -398,7 +537,7 @@ body {
 
 .chat-input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px hsla(var(--ring) / 0.1);
+    box-shadow: 0 0 0 3px var(--primary-10);  /* بدل hsla(var(--ring) / 0.1) */
 }
 
 .send-button {
@@ -418,7 +557,7 @@ body {
 
 .send-button:hover {
     transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);
+    box-shadow: 0 4px 12px var(--primary-15);  /* ظل ماروني */
 }
 
 .send-button:disabled {
@@ -530,7 +669,7 @@ body {
 }
 
 .level-badge.advanced {
-    background: hsla(173, 80%, 40%, 0.1);
+    background: var(--primary-10);   /* بدل صيغة hsla(var(--primary) / 0.1) */
     color: var(--primary);
 }
 
@@ -622,7 +761,7 @@ body {
 
 .mcq-level {
     padding: 6px 16px;
-    background: hsla(var(--primary) / 0.1);
+    background: var(--primary-10);  /* بدل hsla(var(--primary) / 0.1) */
     color: var(--primary);
     border-radius: 50px;
     font-size: 13px;
@@ -748,15 +887,15 @@ body {
     .hero-title {
         font-size: 28px;
     }
-    
+
     .hero-subtitle {
         font-size: 16px;
     }
-    
+
     .message-content {
         max-width: 85%;
     }
-    
+
     /* Grid layout for choices on mobile */
     .choice-chips {
         display: grid;
@@ -776,15 +915,15 @@ body {
         min-height: 44px;            /* مساحة لمس مريحة */
     }
 
-    
+
     .progress-steps {
         gap: 8px;
     }
-    
+
     .step-label {
         font-size: 10px;
     }
-    
+
     .step-circle {
         width: 32px;
         height: 32px;
@@ -808,10 +947,12 @@ body {
 [dir="rtl"] .input-wrapper {
     flex-direction: row-reverse;
 }
+
 /* Language helpers: keep LTR; only switch fonts for Arabic */
 html.lang-ar body {
     font-family: var(--font-arabic);
 }
+
 /* Arabic/English in MCQ text: correct alignment & bidi */
 .mcq-question,
 .mcq-choice span {
@@ -821,3 +962,26 @@ html.lang-ar body {
     white-space: normal;        /* فك أي التفاف غير مرغوب */
     word-break: break-word;     /* كسر الكلمات الطويلة إن لزم */
 }
+/* ===== Language buttons icon (clean) ===== */
+/* قاعدة عامة: أيقونة قبل نص الزر داخل الهيدر فقط */
+.chat-header :is(.lang-toggle, .header-lang) .lang-btn::before {
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  font-style: normal;
+  content: "";                 /* الافتراضي فاضي، هنعينه حسب اللغة تحت */
+  font-size: 14px;
+  line-height: 1;
+  display: inline-block;
+  margin-inline-end: 6px;      /* مسافة صغيرة بين الأيقونة والنص */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* تعيين الأيقونة حسب اللغة (نفس النتيجة اللي عندك الآن) */
+.chat-header :is(.lang-toggle, .header-lang) .lang-btn[data-lang="en"]::before { 
+  content: "\f1ab";  /* language */
+}
+.chat-header :is(.lang-toggle, .header-lang) .lang-btn[data-lang="ar"]::before { 
+  content: "\f0ac";  /* globe */
+}
+
