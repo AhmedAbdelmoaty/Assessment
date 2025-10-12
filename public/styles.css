@@ -2,7 +2,7 @@
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-arabic: 'Noto Sans Arabic', system-ui, -apple-system, sans-serif;
     --radius: 12px;
-    
+
     /* Light theme */
     --background: hsl(210, 20%, 98%);
     --foreground: hsl(215, 25%, 15%);
@@ -10,8 +10,13 @@
     --card-foreground: hsl(215, 25%, 15%);
     --popover: hsl(0, 0%, 100%);
     --popover-foreground: hsl(215, 25%, 15%);
-    --primary: hsl(173, 80%, 40%);
-    --primary-foreground: hsl(0, 0%, 100%);
+
+    /* IMP primary color (maroon) */
+    --primary: #A52025;
+    --primary-foreground: #ffffff;
+    --ring: #A52025;
+
+    /* Neutrals & others (unchanged) */
     --secondary: hsl(38, 92%, 50%);
     --secondary-foreground: hsl(0, 0%, 100%);
     --muted: hsl(210, 20%, 96%);
@@ -22,7 +27,10 @@
     --destructive-foreground: hsl(0, 0%, 100%);
     --border: hsl(214, 20%, 90%);
     --input: hsl(214, 20%, 90%);
-    --ring: hsl(173, 80%, 40%);
+
+    /* Helpful transparencies for shadows/focus */
+    --primary-10: rgba(165, 32, 37, 0.10);
+    --primary-15: rgba(165, 32, 37, 0.15);
 }
 
 * {
@@ -50,19 +58,63 @@ body {
     padding: 0 24px;
 }
 
-/* Language Toggle */
-.lang-toggle {
-    position: fixed;
-    top: 24px;
-    right: 24px;
-    z-index: 1000;
+/* Language Toggle (inside topbar) */
+.topbar .lang-toggle {
+    position: static;          /* يلغي position:fixed القديم */
+    top: auto; right: auto;    /* يلغي الإحداثيات */
+    left: auto;
+    background: transparent;   /* بدون كرت أبيض */
+    padding: 0;
+    box-shadow: none;
     display: flex;
     gap: 8px;
-    background: var(--card);
-    padding: 6px;
-    border-radius: 50px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
+
+.lang-toggle button {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--foreground);
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 999px;         /* كبسولة */
+    cursor: pointer;
+    transition: background .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.lang-toggle button:hover {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-10);
+}
+
+.lang-toggle button.active {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border-color: var(--primary);
+}
+
+/* Top bar */
+.topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    z-index: 1000;
+}
+
+.topbar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+}
+
+.brand-logo {
+    height: 36px;
+    width: auto;
+    display: block;
+}
+
 
 [dir="rtl"] .lang-toggle {
     right: auto;
@@ -92,7 +144,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 80px 0;
+    padding-top: 120px;
 }
 
 .landing-content {
@@ -104,12 +156,12 @@ body {
     width: 120px;
     height: 120px;
     margin: 0 auto 32px;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
+    background: var(--primary);
     border-radius: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 8px 24px rgba(13, 148, 136, 0.2);
+    box-shadow: 0 8px 24px rgba(165, 32, 37, 0.20);
 }
 
 .logo-placeholder i {
@@ -140,27 +192,27 @@ body {
     align-items: center;
     gap: 12px;
     padding: 16px 40px;
-    background: var(--secondary);
-    color: var(--secondary-foreground);
+    background: var(--primary);                 /* كان secondary */
+    color: var(--primary-foreground);           /* أبيض */
     border: none;
     border-radius: var(--radius);
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+    transition: transform .2s ease, box-shadow .2s ease;
+    box-shadow: 0 4px 12px var(--primary-15);   /* ظل نبيتي خفيف */
 }
-
 .cta-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 6px 20px var(--primary-15);
 }
+
 
 /* Chat Section */
 .chat-section {
     display: none;
     min-height: 100vh;
-    padding-top: 80px;
+    padding-top: 120px;
     padding-bottom: 120px;
 }
 
@@ -330,7 +382,7 @@ body {
 
 .dropdown-search:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px hsla(var(--ring) / 0.1);
+    box-shadow: 0 0 0 3px var(--primary-10);
 }
 
 .dropdown-list {
@@ -398,7 +450,8 @@ body {
 
 .chat-input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px hsla(var(--ring) / 0.1);
+    box-shadow: 0 0 0 3px var(--primary-10);
+
 }
 
 .send-button {
@@ -742,6 +795,32 @@ body {
         opacity: 1;
     }
 }
+/* --- IMP Brand interactive states (maroon) --- */
+
+/* Hover على الشيبس والاختيارات */
+.choice-chip:hover,
+.mcq-choice:hover {
+    border-color: var(--primary);
+    background: var(--muted); /* لمسة خفيفة */
+}
+
+/* Selected = خلفية نبيتي + نص أبيض */
+.choice-chip.selected,
+.mcq-choice.selected {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+/* فوكس واضح لكل العناصر التفاعلية */
+.choice-chip:focus-visible,
+.mcq-choice:focus-visible,
+.lang-toggle button:focus-visible,
+.cta-button:focus-visible,
+.send-button:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -821,3 +900,5 @@ html.lang-ar body {
     white-space: normal;        /* فك أي التفاف غير مرغوب */
     word-break: break-word;     /* كسر الكلمات الطويلة إن لزم */
 }
+/* Hide the old chat header: we use the topbar instead */
+.chat-header { display: none; }
