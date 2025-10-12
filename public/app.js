@@ -9,6 +9,7 @@
     let currentMCQ = null;
     let isProcessing = false;
     let awaitingCustomInput = false;
+    let teachingActive = false;  // وضع الشرح شغال/لأ
 
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
@@ -177,6 +178,8 @@
 
         if (currentStep === "intake") {
             await handleIntakeAnswer(message);
+        } else if (currentStep === "teaching" || teachingActive) {
+            await sendTeachingMessage(message);
         }
 
         isProcessing = false;
@@ -449,6 +452,7 @@
                 report.message.trim()
             ) {
                 addSystemMessage(report.message.trim());
+                addStartTeachingCTA();
             }
 
             // 2) اختَر الأسماء البشرية إن كانت موجودة؛ وإلا ارجع للأكواد كـ fallback
@@ -470,7 +474,6 @@
                 gaps: gapsToShow,
             };
 
-            addFinalReport(uiReport);
             updateProgress(2, true);
         } catch (error) {
             console.error("Error generating report:", error);
@@ -481,6 +484,27 @@
                     : "Sorry, an error occurred generating your report.",
             );
         }
+    }
+    async function sendTeachingMessage(text) {
+      showTypingIndicator();
+      try {
+        const resp = await fetch("/api/teach/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, userMessage: text })
+        });
+        const data = await resp.json();
+        hideTypingIndicator();
+
+        if (data && data.message) {
+          addSystemMessage(data.message);
+        } else {
+          addSystemMessage(currentLang === "ar" ? "تمام، نكمل." : "Alright, let’s continue.");
+        }
+      } catch (e) {
+        hideTypingIndicator();
+        addSystemMessage(currentLang === "ar" ? "حصلت مشكلة في الشرح." : "There was a problem during teaching.");
+      }
     }
 
     // UI helper functions
@@ -702,6 +726,52 @@ ${mcq.choices
 
         chatMessages.appendChild(container);
         scrollToBottom();
+    }
+    function addStartTeachingCTA() {
+      // هنضيف الزر تحت آخر فقاعة من النظام (اللي فيها التقرير)
+      const bubbles = Array.from(document.querySelectorAll(".message-bubble.system"));
+      const last = bubbles[bubbles.length - 1];
+      if (!last) return;
+
+      const tools = document.createElement("div");
+      tools.className = "report-tools";
+
+      const startBtn = document.createElement("button");
+      startBtn.className = "tool-btn";
+      startBtn.textContent = (currentLang === "ar" ? "ابدأ الشرح" : "Start explanation");
+
+      startBtn.addEventListener("click", async () => {
+        startBtn.disabled = true;
+        showTypingIndicator();
+        try {
+          const resp = await fetch("/api/teach/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId })
+          });
+          const data = await resp.json();
+          hideTypingIndicator();
+          startBtn.disabled = false;
+
+          // فعل وضع الشرح
+          teachingActive = true;
+          currentStep = "teaching";
+
+          // ردّ المدرّس الافتتاحي
+          if (data && data.message) {
+            addSystemMessage(data.message);
+          } else {
+            addSystemMessage(currentLang === "ar" ? "بدأنا الشرح." : "Teaching started.");
+          }
+        } catch (e) {
+          hideTypingIndicator();
+          startBtn.disabled = false;
+          addSystemMessage(currentLang === "ar" ? "تعذّر بدء الشرح." : "Failed to start teaching.");
+        }
+      });
+
+      tools.appendChild(startBtn);
+      last.appendChild(tools);
     }
 
     function showTypingIndicator() {
