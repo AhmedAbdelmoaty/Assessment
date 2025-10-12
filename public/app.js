@@ -470,7 +470,6 @@
                 gaps: gapsToShow,
             };
 
-            addFinalReport(uiReport);
             updateProgress(2, true);
         } catch (error) {
             console.error("Error generating report:", error);
