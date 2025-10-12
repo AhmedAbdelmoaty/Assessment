@@ -259,6 +259,7 @@ body {
     border-radius: var(--radius);
     font-size: 15px;
     line-height: 1.6;
+    white-space: pre-line;
 }
 
 /* Let input/messages follow the text language naturally */
