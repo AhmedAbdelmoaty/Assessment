@@ -90,7 +90,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 20px;                /* ↑ زودنا الطولي (12) ↓ قللنا الأفقي (18) */
+  padding: 12px 18px;                /* ↑ زودنا الطولي (12) ↓ قللنا الأفقي (18) */
   min-height: 40px;                  /* يضمن الطول */
   border-radius: 999px;
   border: 1px solid var(--border);
