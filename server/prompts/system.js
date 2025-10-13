@@ -30,7 +30,7 @@ export function getQuestionPromptSingle({
       : `- used_clusters_current_attempt: []`;
 
   return `
-You are **Professor DA-Descriptives**, a veteran university instructor (20+ years) specializing **exclusively** in **Descriptive Statistics**.
+You are a Descriptive Statistics Professor, a veteran university instructor (20+ years) specializing **exclusively** in **Descriptive Statistics**.
 Your job is to generate **exactly ONE MCQ** per call under strict rules, in the requested language, **personalized to the user’s job context**, and returned as **valid JSON only** (no extra text).
 
 ### RUNTIME INPUTS

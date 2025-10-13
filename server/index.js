@@ -7,6 +7,7 @@ import fs from "fs";
 import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
+import { getTeachingSystemPrompt } from "./prompts/teach.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +27,83 @@ const openai = new OpenAI({
     "default_key",
 });
 
+// IDs لمساعد الشرح (Assistants + File Search)
+const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
+const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
+
+/* =========================
+   Helpers: logging + guards
+   ========================= */
+
+function logTeach(tag, payload) {
+  try { console.log(`[teach:${tag}]`, payload); } catch {}
+}
+
+function ensureTeachingState(sess) {
+  if (!sess.teaching) {
+    sess.teaching = {
+      mode: "idle",
+      lang: "ar",
+      topics_queue: [],
+      current_topic_index: 0,
+      transcript: [],
+      assistant: { threadId: null }
+    };
+  }
+  return sess.teaching;
+}
+
+function pushTranscript(session, item) {
+  session.teaching = session.teaching || {};
+  session.teaching.transcript = session.teaching.transcript || [];
+  session.teaching.transcript.push({
+    from: item.from, // "user" | "tutor"
+    text: String(item.text || "").slice(0, 4000)
+  });
+  if (session.teaching.transcript.length > 8) {
+    session.teaching.transcript = session.teaching.transcript.slice(-8);
+  }
+}
+
+function transcriptToMessages(transcript = []) {
+  return transcript.map(t => {
+    const role = t.from === "user" ? "user" : "assistant";
+    return { role, content: t.text };
+  });
+}
+
+// حراس قوية قبل أي retrieve
+function assertIds(threadId, runId) {
+  if (!threadId || !runId) {
+    throw new Error(`Missing IDs — threadId=${threadId}, runId=${runId}`);
+  }
+  if (!String(threadId).startsWith("thread_")) {
+    throw new Error(`Bad threadId: ${threadId}`);
+  }
+  if (!String(runId).startsWith("run_")) {
+    throw new Error(`Bad runId: ${runId}`);
+  }
+}
+
+async function safeRetrieveRun(threadId, runId) {
+  assertIds(threadId, runId);
+  logTeach("poll", { threadId, runId });
+  // ✅ توقيع v6: أول باراميتر runId، والثاني كائن فيه thread_id
+  return openai.beta.threads.runs.retrieve(runId, { thread_id: threadId });
+}
+
+
+async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 } = {}) {
+  let last = null;
+  for (let i = 0; i < maxTries; i++) {
+    last = await safeRetrieveRun(threadId, runId);
+    const st = last?.status || "unknown";
+    if (!["queued", "in_progress"].includes(st)) return last;
+    await new Promise(r => setTimeout(r, sleepMs));
+  }
+  throw new Error("Run polling timeout");
+}
+
 // Intake order & opening
 const INTAKE_ORDER = [
   "name_full",
@@ -44,7 +122,7 @@ const INTAKE_OPENING = {
   en: "Hi 👋 Before we start, I’ll need a few quick details so I can tailor the questions to your experience and goals. We’ll go step by step."
 };
 
-// ⚠️ كتالوج الـintake (كما أرسلته)
+// ⚠️ كتالوج الـintake
 const intakeCatalogPath = join(__dirname, "intake_catalog.cache.json");
 let INTAKE_CATALOG;
 try {
@@ -134,12 +212,19 @@ function getSession(sessionId) {
         currentLevel: "L1",
         attempts: 0, // 0 first attempt, 1 retry
         evidence: [], // { level, cluster, correct, qid }
-        // 🔄 منطق السؤال الواحد:
-        questionIndexInAttempt: 1,         // 1 ثم 2 داخل نفس المحاولة
-        usedClustersCurrentAttempt: [],    // لتجنب تكرار الكلاستر في سؤالَي المحاولة
-        currentQuestion: null,             // آخر سؤال أُرسل للفرونت
-        stemsCurrentAttempt: [],           // stems سؤالَي المحاولة الأولى لتغذية avoid_stems وقت الإعادة
-        lastAttemptStems: {},              // { L1: ["stem1","stem2"], ... } تُملأ بعد إنهاء المحاولة الأولى
+        questionIndexInAttempt: 1,
+        usedClustersCurrentAttempt: [],
+        currentQuestion: null,
+        stemsCurrentAttempt: [],
+        lastAttemptStems: {},
+      },
+      teaching: {
+        mode: "idle",
+        lang: "ar",
+        topics_queue: [],
+        current_topic_index: 0,
+        transcript: [],
+        assistant: { threadId: null }
       },
       finished: false,
       report: null,
@@ -148,7 +233,7 @@ function getSession(sessionId) {
   return sessions.get(sessionId);
 }
 
-// Validation (unchanged)
+// Validation
 function validateIntakeInput(stepKey, value) {
   if (stepKey === "name_full") {
     const words = value.trim().split(/\s+/);
@@ -229,7 +314,6 @@ app.post("/api/intake/next", async (req, res) => {
 // ===== Utilities =====
 function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   const arr = choices.map((text, idx) => ({ text, idx }));
-  // Fisher–Yates
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -250,7 +334,6 @@ app.post("/api/assess/next", async (req, res) => {
 
     const A = session.assessment;
 
-    // إعداد ملف التعريف بأسماء حقول صحيحة
     const profile = {
       job_nature: session.intake.job_nature || "",
       experience_years_band: session.intake.experience_years_band || "",
@@ -264,7 +347,6 @@ app.post("/api/assess/next", async (req, res) => {
     const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
     const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems[A.currentLevel] || []) : [];
 
-    // برومبت السؤال الواحد
     const systemPrompt = getQuestionPromptSingle({
       lang: session.lang,
       level: A.currentLevel,
@@ -286,16 +368,13 @@ app.post("/api/assess/next", async (req, res) => {
 
     const q = JSON.parse(response.choices[0].message.content);
 
-    // تحقق بسيط من الـschema
     if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
       console.error("Invalid question schema from model:", q);
       return res.status(500).json({ error: "Invalid question format from model" });
     }
 
-    // خلط الخيارات + تحديث correct_index
     const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
 
-    // حفظ السؤال الحالي في الجلسة
     const current = {
       level: q.level || A.currentLevel,
       cluster: q.cluster,
@@ -307,20 +386,17 @@ app.post("/api/assess/next", async (req, res) => {
     };
     A.currentQuestion = current;
 
-    // سجل الـstem داخل المحاولة الأولى فقط (لاستخدامه كـ avoid_stems لاحقًا عند الإعادة)
     if (attempt_type === "first") {
       A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
       A.stemsCurrentAttempt.push(current.prompt);
     }
 
-    // في السؤال الأول فقط، امنع تكرار الكلاستر في نفس المحاولة بإضافته للقائمة
     if (question_index === 1 && current.cluster) {
       if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
         A.usedClustersCurrentAttempt.push(current.cluster);
       }
     }
 
-    // أرسل للواجهة (لا نكشف الإجابة)
     const mcqPayload = {
       kind: "question",
       level: current.level,
@@ -340,7 +416,7 @@ app.post("/api/assess/next", async (req, res) => {
   }
 });
 
-// -------- Assessment: submit answer (index vs index) --------
+// -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
     const { sessionId, userChoiceIndex } = req.body;
@@ -353,14 +429,12 @@ app.post("/api/assess/answer", async (req, res) => {
 
     const q = A.currentQuestion;
 
-    // مقارنة رقمية دقيقة
     const isCorrect =
       Number.isInteger(userChoiceIndex) &&
       userChoiceIndex >= 0 &&
       userChoiceIndex < (q.choices?.length || 0) &&
       userChoiceIndex === q.correct_index;
 
-    // سجل الدليل
     A.evidence.push({
       level: q.level,
       cluster: q.cluster,
@@ -370,35 +444,27 @@ app.post("/api/assess/answer", async (req, res) => {
 
     let nextAction = "continue";
 
-    // تقدم داخل المحاولة
     if (A.questionIndexInAttempt === 1) {
-      // لسه سؤال واحد فقط — هنطلب السؤال رقم 2
       A.questionIndexInAttempt = 2;
       nextAction = "continue";
     } else {
-      // خلّصنا السؤالين — قرّر ترقّي/إعادة/توقف
       const lastTwo = A.evidence.filter(e => e.level === A.currentLevel).slice(-2);
       const correctCount = lastTwo.filter(e => e.correct).length;
       const wrongCount = 2 - correctCount;
 
       if (wrongCount === 2) {
         if (A.attempts === 0) {
-          // إعادة مرة واحدة في نفس المستوى
           A.attempts = 1;
-          // خزّن stems المحاولة الأولى للاستخدام كـ avoid_stems
           A.lastAttemptStems[A.currentLevel] = Array.isArray(A.stemsCurrentAttempt) ? [...A.stemsCurrentAttempt] : [];
-          // صفّر سياق المحاولة الجديدة
           A.stemsCurrentAttempt = [];
           A.usedClustersCurrentAttempt = [];
           A.questionIndexInAttempt = 1;
           nextAction = "retry_same_level";
         } else {
-          // فشل الإعادة — أوقف وانتقل للتقرير
           session.currentStep = "report";
           nextAction = "stop";
         }
       } else {
-        // 1 صح/1 غلط أو 2 صح ⇒ ترقّي
         if (A.currentLevel === "L1") A.currentLevel = "L2";
         else if (A.currentLevel === "L2") A.currentLevel = "L3";
         else {
@@ -407,7 +473,6 @@ app.post("/api/assess/answer", async (req, res) => {
         }
 
         if (session.currentStep !== "report") {
-          // صفّر كل مؤشرات المحاولة للمستوى الجديد
           A.attempts = 0;
           A.stemsCurrentAttempt = [];
           A.usedClustersCurrentAttempt = [];
@@ -417,10 +482,8 @@ app.post("/api/assess/answer", async (req, res) => {
       }
     }
 
-    // امسح السؤال الحالي بعد التقييم
     A.currentQuestion = null;
 
-    // لا نرسل “صح/غلط” نصيًا؛ فقط نُعلم الواجهة بالخطوة التالية
     return res.json({
       correct: isCorrect,
       nextAction,
@@ -433,22 +496,19 @@ app.post("/api/assess/answer", async (req, res) => {
   }
 });
 
-// -------- Final report (LLM-generated narrative + safe local fallback) --------
+// -------- Final report --------
 app.post("/api/report", async (req, res) => {
   try {
     const { sessionId } = req.body;
     const session = getSession(sessionId);
     const lang = session.lang || "en";
 
-    // نبني التقرير مهما كانت الحالة، اعتمادًا على evidence المتاحة
     const A = session.assessment || { evidence: [], currentLevel: "L1" };
     const evidence = Array.isArray(A.evidence) ? A.evidence : [];
 
-    // strengths & gaps من الدليل
     const strengths = Array.from(new Set(evidence.filter(e => e.correct).map(e => e.cluster)));
     const gaps = Array.from(new Set(evidence.filter(e => !e.correct).map(e => e.cluster)));
 
-    // أضف مواضيع المستويات الأعلى كفرص نمو إن لم تُزر بعد
     const levelOrder = ["L1", "L2", "L3"];
     const highestReached = A.currentLevel || "L1";
     const idx = levelOrder.indexOf(highestReached);
@@ -458,11 +518,9 @@ app.post("/api/report", async (req, res) => {
       }
     }
 
-    // أسماء بشرية
     const strengths_display = strengths.map(c => humanizeCluster(c, lang));
     const gaps_display = gaps.map(c => humanizeCluster(c, lang));
 
-    // عدّادات اختيارية
     const total_questions = evidence.length;
     const total_correct = evidence.filter(e => e.correct).length;
     const summary_counts = {
@@ -471,7 +529,6 @@ app.post("/api/report", async (req, res) => {
       total_wrong: Math.max(0, total_questions - total_correct),
     };
 
-    // بروفايل للّغة
     const profile = {
       job_nature: session.intake?.job_nature || "",
       experience_years_band: session.intake?.experience_years_band || "",
@@ -480,7 +537,6 @@ app.post("/api/report", async (req, res) => {
       learning_reason: session.intake?.learning_reason || "",
     };
 
-    // نص افتراضي محلي (fallback) لو فشل الLLM
     const localFallback = (() => {
       const intro = lang === "ar"
         ? "نتائج تقييمك جاهزة. سنعرض موجزًا مختصرًا."
@@ -501,7 +557,6 @@ app.post("/api/report", async (req, res) => {
       return `${intro}\n${strengthsLine}\n${gapsLine}\n${cta}`;
     })();
 
-    // حاول نداء LLM، ولو فشل نرجع fallback بدون 500
     let narrative = "";
     try {
       const systemPrompt = getFinalReportPrompt({
@@ -531,14 +586,12 @@ app.post("/api/report", async (req, res) => {
         console.warn("[/api/report] Empty LLM narrative, using local fallback.");
       }
     } catch (llmErr) {
-      // سجّل كل التفاصيل الممكنة للمساعدة في التشخيص
       console.error("[/api/report] LLM error:", {
         message: llmErr?.message,
         status: llmErr?.status || llmErr?.response?.status,
         data: llmErr?.response?.data,
         stack: llmErr?.stack,
       });
-      // لا نرمي 500 — نكمل بالFallback المحلي
     }
 
     const report = {
@@ -555,14 +608,12 @@ app.post("/api/report", async (req, res) => {
       })(),
     };
 
-    // حدّث حالة الجلسة
     session.report = report;
     session.finished = true;
     session.currentStep = "report";
 
     return res.json(report);
   } catch (err) {
-    // في حالة خطأ غير متوقع تمامًا (قبل بناء الFallback)
     console.error("Report generation fatal error:", err);
     return res.status(200).json({
       kind: "final_report",
@@ -579,6 +630,199 @@ app.post("/api/report", async (req, res) => {
   }
 });
 
+/* =========================
+   Teaching: start (hardened)
+   ========================= */
+app.post("/api/teach/start", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = getSession(sessionId);
+    const teaching = ensureTeachingState(session);
+    teaching.lang = session.lang || teaching.lang || "ar";
+
+    const gaps = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
+    if (!gaps.length) {
+      console.warn("[teach/start] No gaps to teach for session:", sessionId);
+      return res.status(400).json({
+        error: true,
+        message: (session.lang === "ar") ? "لا توجد مواضيع لبدء الشرح." : "No topics to teach right now."
+      });
+    }
+
+    teaching.mode = "active";
+    teaching.topics_queue = gaps.slice();
+    teaching.current_topic_index = 0;
+    teaching.transcript = [];
+
+    const firstTopic = teaching.topics_queue[0] || "";
+    logTeach("start", { sessionId, lang: teaching.lang, firstTopic });
+
+    if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
+      // 1) إنشاء Thread مرة واحدة
+      if (!teaching.assistant?.threadId) {
+        const createdThread = await openai.beta.threads.create();
+        const threadId = createdThread?.id;
+        if (!threadId) throw new Error("Failed to create thread");
+        teaching.assistant.threadId = threadId;
+        logTeach("thread.created", { threadId });
+      }
+
+      const threadId = teaching.assistant.threadId;
+
+      // 2) رسالة افتتاحية
+      const openingMsg = (teaching.lang === "ar")
+        ? `اللغة: عربية. قائمة المواضيع: ${gaps.join(" | ")}. ابدأ بالموضوع الأول: "${firstTopic}". اتّبع دورك التعليمي بدقة.`
+        : `Language: English. Topics: ${gaps.join(" | ")}. Start with the first topic: "${firstTopic}". Follow your teaching role.`;
+      await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
+
+      // 3) Run جديد
+      const run = await openai.beta.threads.runs.create(threadId, {
+        assistant_id: TEACH_ASSISTANT_ID,
+        instructions: getTeachingSystemPrompt({ lang: teaching.lang })
+      });
+      const runId = run?.id;
+      if (!runId) throw new Error("Failed to create run");
+      logTeach("run.created", { threadId, runId });
+
+      // 4) Poll موحّد بحراس
+      const finalRun = await pollRunUntilDone(threadId, runId, { maxTries: 40, sleepMs: 900 });
+
+      // 5) جلب أول رد
+      if (finalRun.status === "completed") {
+        const msgs = await openai.beta.threads.messages.list(threadId, { order: "desc", limit: 5 });
+        const assistantMsg = msgs.data.find(m => m.role === "assistant");
+        const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
+        if (text) {
+          pushTranscript(session, { from: "tutor", text });
+          return res.json({ message: text });
+        }
+      }
+
+      const fb = (session.lang === "ar")
+        ? "هنبدأ شرح أول موضوع بشكل مبسّط. جاهز؟"
+        : "Let’s begin with a simple explanation of the first topic. Ready?";
+      pushTranscript(session, { from: "tutor", text: fb });
+      return res.json({ message: fb });
+    }
+
+    // ============= Fallback بدون Assistant =============
+    const sys = getTeachingSystemPrompt({ lang: teaching.lang });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: (teaching.lang === "ar")
+            ? `ابدأ بشرح "${firstTopic}" بأسلوب ودود ومبسّط.`
+            : `Start explaining "${firstTopic}" in a friendly, simple way.` }
+      ],
+      temperature: 0.2,
+      top_p: 1,
+      max_completion_tokens: 400
+    });
+    const text = (completion?.choices?.[0]?.message?.content || "").trim();
+    pushTranscript(session, { from: "tutor", text });
+    return res.json({ message: text });
+
+  } catch (err) {
+    console.error("/api/teach/start error:", err?.message || err, err?.stack);
+    return res.status(500).json({ error: true, message: "Teaching start failed." });
+  }
+});
+
+/* =================================
+   Teaching: user sends a chat message
+   ================================= */
+app.post("/api/teach/message", async (req, res) => {
+  try {
+    // نقبل text أو userMessage لضمان التوافق
+    const { sessionId, text, userMessage } = req.body || {};
+    const userText = (text ?? userMessage ?? "").toString().trim();
+    const session = getSession(sessionId);
+    const teaching = ensureTeachingState(session);
+
+    if (!userText) {
+      return res.status(400).json({ error: true, message: "Empty message." });
+    }
+    if (teaching.mode !== "active") {
+      logTeach("message.inactive", { sessionId });
+      return res.status(400).json({
+        error: true,
+        message: (session.lang === "ar") ? "الشرح غير مفعّل حالياً." : "Teaching is not active right now."
+      });
+    }
+
+    const lang = teaching.lang || session.lang || "ar";
+    const topics = Array.isArray(teaching.topics_queue) ? teaching.topics_queue : [];
+    const currentTopic = topics[teaching.current_topic_index || 0] || "";
+
+    try { pushTranscript(session, { from: "user", text: userText }); } catch {}
+
+    if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
+      if (!teaching.assistant?.threadId) {
+        const createdThread = await openai.beta.threads.create();
+        const threadId = createdThread?.id;
+        if (!threadId) throw new Error("Failed to create Thread (no id)");
+        teaching.assistant.threadId = threadId;
+        logTeach("thread.created@message", { threadId });
+      }
+
+      const threadId = teaching.assistant.threadId;
+
+      await openai.beta.threads.messages.create(threadId, { role: "user", content: userText });
+
+      const run = await openai.beta.threads.runs.create(threadId, {
+        assistant_id: TEACH_ASSISTANT_ID,
+        instructions: getTeachingSystemPrompt({ lang })
+      });
+      const runId = run?.id;
+      if (!runId) throw new Error("Failed to create Run (no id)");
+      logTeach("run.created@message", { threadId, runId });
+
+      const finalRun = await pollRunUntilDone(threadId, runId, { maxTries: 40, sleepMs: 900 });
+
+      if (finalRun.status === "completed") {
+        const msgs = await openai.beta.threads.messages.list(threadId, { order: "desc", limit: 6 });
+        const assistantMsg = msgs.data.find(m => m.role === "assistant");
+        const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
+        if (reply) {
+          try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+          return res.json({ message: reply });
+        }
+      }
+
+      const fb = (lang === "ar")
+        ? "تمام، خلّيني أوضحها بشكل أبسط خطوة بخطوة…"
+        : "Okay, let me break it down more simply, step by step…";
+      try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
+      return res.json({ message: fb });
+    }
+
+    // ============= Fallback بدون Assistant =============
+    const sys = getTeachingSystemPrompt({ lang });
+    const userTurn = (lang === "ar")
+      ? (currentTopic ? `الموضوع الحالي: "${currentTopic}". رسالة المستخدم: ${userText}` : `رسالة المستخدم: ${userText}`)
+      : (currentTopic ? `Current topic: "${currentTopic}". User says: ${userText}` : `User says: ${userText}`);
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: userTurn }
+      ],
+      temperature: 0.2,
+      top_p: 1,
+      max_completion_tokens: 450
+    });
+
+    const reply = (completion?.choices?.[0]?.message?.content || "").trim();
+    try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+    return res.json({ message: reply });
+
+  } catch (err) {
+    console.error("/api/teach/message error:", err?.message || err, err?.stack);
+    return res.status(500).json({ error: true, message: "Teaching message failed." });
+  }
+});
 
 // Health check
 app.get("/api/health", (req, res) => {

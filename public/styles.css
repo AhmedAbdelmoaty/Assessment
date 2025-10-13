@@ -984,4 +984,39 @@ html.lang-ar body {
 .chat-header :is(.lang-toggle, .header-lang) .lang-btn[data-lang="ar"]::before { 
   content: "\f0ac";  /* globe */
 }
+/* لون براند نبيتي خفيف - تقدر تغيّره لو حابب */
+:root {
+  --brand-maroon: #8B1E3F;
+}
+
+/* الحاوية داخل فقاعة التقرير */
+.teaching-cta {
+  margin-top: 12px;
+}
+
+/* زر واسع بعرض الفقاعة */
+.teach-cta-btn {
+  display: block;
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--brand-maroon);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(139, 30, 63, 0.25);
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+
+.teach-cta-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(139, 30, 63, 0.33);
+}
+
+.teach-cta-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
 
