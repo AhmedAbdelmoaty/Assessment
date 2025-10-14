@@ -56,6 +56,43 @@ function ensureTeachingState(sess) {
   }
   return sess.teaching;
 }
+// يبني قائمة مواضيع الشرح مرتبة حسب ظهور الأسئلة، مع تمييز strength/gap
+function buildTeachingQueue(session) {
+  const lang = session.lang || "ar";
+  const ev = Array.isArray(session?.assessment?.evidence) ? session.assessment.evidence : [];
+  const queue = [];
+  for (const e of ev) {
+    if (!e || !e.cluster) continue;
+    const item = {
+      cluster: e.cluster,
+      display: humanizeCluster(e.cluster, lang),
+      kind: e.correct ? "strength" : "gap",
+    };
+    // إزالة التكرارات المتجاورة لنفس الكلاستر (لو تكررت بسبب إعادة محاولة)
+    const last = queue[queue.length - 1];
+    if (!last || last.cluster !== item.cluster || last.kind !== item.kind) {
+      queue.push(item);
+    }
+  }
+  // لو القائمة فاضية لأي سبب، نfallback إلى gaps_display من التقرير
+  if (!queue.length) {
+    const gapsDisp = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
+    for (const gd of gapsDisp) {
+      queue.push({ cluster: "__unknown__", display: gd, kind: "gap" });
+    }
+  }
+  return queue;
+}
+
+// يبني سياق المستخدم لاستخدامه داخل الأمثلة (لا يُطبع حرفيًا)
+function buildProfileContext(session) {
+  return {
+    sector: session?.intake?.sector || "",
+    job_nature: session?.intake?.job_nature || "",
+    job_title_exact: session?.intake?.job_title_exact || "",
+    experience_years_band: session?.intake?.experience_years_band || "",
+  };
+}
 
 function pushTranscript(session, item) {
   session.teaching = session.teaching || {};
@@ -644,40 +681,45 @@ app.post("/api/teach/start", async (req, res) => {
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
 
-    const gaps = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
-    if (!gaps.length) {
-      console.warn("[teach/start] No gaps to teach for session:", sessionId);
+    // نبني قائمة مواضيع مرتبة من الدليل الفعلي للأسئلة
+    const queue = buildTeachingQueue(session);
+    if (!queue.length) {
+      console.warn("[teach/start] No topics from evidence/report for session:", sessionId);
       return res.status(400).json({
         error: true,
-        message: (session.lang === "ar") ? "لا توجد مواضيع لبدء الشرح." : "No topics to teach right now."
+        message: (session.lang === "ar") ? "لا توجد مواضيع مناسبة للشرح الآن." : "No suitable topics to teach right now."
       });
     }
 
     teaching.mode = "active";
-    teaching.topics_queue = gaps.slice();
+    teaching.topics_queue = queue;
     teaching.current_topic_index = 0;
     teaching.transcript = [];
+    teaching.profileContext = buildProfileContext(session);
 
-    const firstTopic = teaching.topics_queue[0] || "";
-    logTeach("start", { sessionId, lang: teaching.lang, firstTopic });
+    const first = teaching.topics_queue[0] || { display: "", kind: "gap" };
 
-    if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // 1) إنشاء Thread مرة واحدة
-      if (!teaching.assistant?.threadId) {
-        const createdThread = await openai.beta.threads.create();
-        const threadId = createdThread?.id;
-        if (!threadId) throw new Error("Failed to create thread");
-        teaching.assistant.threadId = threadId;
-        logTeach("thread.created", { threadId });
-      }
 
-      const threadId = teaching.assistant.threadId;
+      logTeach("start", { sessionId, lang: teaching.lang, first });
 
-      // 2) رسالة افتتاحية
-      const openingMsg = (teaching.lang === "ar")
-        ? `اللغة: عربية. قائمة المواضيع: ${gaps.join(" | ")}. ابدأ بالموضوع الأول: "${firstTopic}". اتّبع دورك التعليمي بدقة.`
-        : `Language: English. Topics: ${gaps.join(" | ")}. Start with the first topic: "${firstTopic}". Follow your teaching role.`;
-      await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
+      if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
+        // 1) إنشاء Thread مرة واحدة (كما هو)
+        if (!teaching.assistant?.threadId) {
+          const createdThread = await openai.beta.threads.create();
+          const threadId = createdThread?.id;
+          if (!threadId) throw new Error("Failed to create thread");
+          teaching.assistant.threadId = threadId;
+          logTeach("thread.created", { threadId });
+        }
+        const threadId = teaching.assistant.threadId;
+
+        // 2) رسالة افتتاحية مُهيكلة مع السياق الكامل
+        const topicsLine = teaching.topics_queue.map((t,i)=>`${i+1}) ${t.display} [${t.kind}]`).join(" | ");
+        const openingMsg = (teaching.lang === "ar")
+          ? `اللغة: عربية.\nprofile_context=${JSON.stringify(teaching.profileContext)}\nالمواضيع بالترتيب: ${topicsLine}\nابدأ الآن بالموضوع الأول: "${first.display}" ونوعه: ${first.kind}.\nتذكير: اتبع دائمًا: ما هو؟ لماذا مهم في البزنس؟ مثال صغير من نفس المجال.`
+          : `Language: English.\nprofile_context=${JSON.stringify(teaching.profileContext)}\nTopics (ordered): ${topicsLine}\nStart now with the first topic: "${first.display}" of kind: ${first.kind}.\nReminder: always follow What it is → Why it matters (business) → Tiny example in the same domain.`;
+        await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
+
 
       // 3) Run جديد
       const run = await openai.beta.threads.runs.create(threadId, {
@@ -716,8 +758,9 @@ app.post("/api/teach/start", async (req, res) => {
       messages: [
         { role: "system", content: sys },
         { role: "user", content: (teaching.lang === "ar")
-            ? `ابدأ بشرح "${firstTopic}" بأسلوب ودود ومبسّط.`
-            : `Start explaining "${firstTopic}" in a friendly, simple way.` }
+          ? `profile_context=${JSON.stringify(teaching.profileContext)}\nالموضوع الأول: "${first.display}"، النوع: ${first.kind}.\nابدأ الآن وفق القاعدة: ما هو؟ لماذا مهم في البزنس؟ مثال صغير من نفس المجال.`
+          : `profile_context=${JSON.stringify(teaching.profileContext)}\nFirst topic: "${first.display}", kind: ${first.kind}.\nStart now following: What it is → Why it matters (business) → Tiny example in the same domain.` }
+
       ],
       temperature: 0.2,
       top_p: 1,
@@ -756,11 +799,15 @@ app.post("/api/teach/message", async (req, res) => {
     }
 
     const lang = teaching.lang || session.lang || "ar";
+
+    // ✅ تعريف موحّد يُستَخدم في كل الفروع (بدون تكرار)
     const topics = Array.isArray(teaching.topics_queue) ? teaching.topics_queue : [];
-    const currentTopic = topics[teaching.current_topic_index || 0] || "";
+    const current = topics[teaching.current_topic_index || 0] || { display: "", kind: "gap" };
+    const currentTopic = current.display || "";
 
     try { pushTranscript(session, { from: "user", text: userText }); } catch {}
 
+    // ===== Assistant branch (with Vector Store) =====
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
@@ -772,12 +819,23 @@ app.post("/api/teach/message", async (req, res) => {
 
       const threadId = teaching.assistant.threadId;
 
-      await openai.beta.threads.messages.create(threadId, { role: "user", content: userText });
+      const userPayload = (lang === "ar")
+        ? `profile_context=${JSON.stringify(teaching.profileContext || {})}
+الموضوع الحالي: "${current.display}"، النوع: ${current.kind}
+رسالة المتعلم: ${userText}
+تذكير: ما هو؟ لماذا مهم في البزنس؟ مثال صغير من نفس المجال.`
+        : `profile_context=${JSON.stringify(teaching.profileContext || {})}
+current_topic: "${current.display}", kind: ${current.kind}
+learner_msg: ${userText}
+Reminder: What it is → Why it matters (business) → Tiny domain example.`;
+
+      await openai.beta.threads.messages.create(threadId, { role: "user", content: userPayload });
 
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
         instructions: getTeachingSystemPrompt({ lang })
       });
+
       const runId = run?.id;
       if (!runId) throw new Error("Failed to create Run (no id)");
       logTeach("run.created@message", { threadId, runId });
@@ -801,11 +859,18 @@ app.post("/api/teach/message", async (req, res) => {
       return res.json({ message: fb });
     }
 
-    // ============= Fallback بدون Assistant =============
+    // ===== Fallback بدون Assistant =====
     const sys = getTeachingSystemPrompt({ lang });
+
     const userTurn = (lang === "ar")
-      ? (currentTopic ? `الموضوع الحالي: "${currentTopic}". رسالة المستخدم: ${userText}` : `رسالة المستخدم: ${userText}`)
-      : (currentTopic ? `Current topic: "${currentTopic}". User says: ${userText}` : `User says: ${userText}`);
+      ? `profile_context=${JSON.stringify(teaching.profileContext || {})}
+الموضوع الحالي: "${current.display}"، النوع: ${current.kind}
+رسالة المتعلم: ${userText}
+اتبع: ما هو؟ لماذا مهم في البزنس؟ مثال صغير من نفس المجال.`
+      : `profile_context=${JSON.stringify(teaching.profileContext || {})}
+current_topic: "${current.display}", kind: ${current.kind}
+learner_msg: ${userText}
+Follow: What it is → Why it matters (business) → Tiny domain example.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -815,7 +880,7 @@ app.post("/api/teach/message", async (req, res) => {
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 450
+      max_completion_tokens: 650
     });
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
@@ -827,6 +892,7 @@ app.post("/api/teach/message", async (req, res) => {
     return res.status(500).json({ error: true, message: "Teaching message failed." });
   }
 });
+
 
 // Health check
 app.get("/api/health", (req, res) => {
