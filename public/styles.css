@@ -1019,4 +1019,31 @@ html.lang-ar body {
   opacity: .6;
   cursor: not-allowed;
 }
+/* === Tutor message heading styles (markdown-lite) === */
+.message-content .msg-h2 {
+  font-size: 1.08rem;   /* أكبر سنة بسيطة */
+  font-weight: 700;
+  margin: 6px 0 2px;
+  line-height: 1.35;
+}
+
+.message-content .msg-h3 {
+  font-size: 1.03rem;   /* أقل من h2 */
+  font-weight: 700;
+  margin: 6px 0 2px;
+  line-height: 1.35;
+  opacity: 0.95;
+}
+
+/* Ensure bold is clearly visible in bubbles */
+.message-content strong {
+  font-weight: 700;
+}
+/* RTL-aware headings inside tutor messages */
+.message-content .msg-h2,
+.message-content .msg-h3 {
+  direction: auto;          /* يعتمد على أول حرف */
+  unicode-bidi: plaintext;  /* يضبط خلط AR/EN داخل السطر */
+  text-align: start;        /* يمين في RTL، يسار في LTR */
+}
 

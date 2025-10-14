@@ -35,8 +35,12 @@ const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
    Helpers: logging + guards
    ========================= */
 
+// اجعل اللوجات تظهر فقط لو DEBUG_TEACH=1 (أو "true")
 function logTeach(tag, payload) {
-  try { console.log(`[teach:${tag}]`, payload); } catch {}
+  const dbg = (process.env.DEBUG_TEACH || "").toString().toLowerCase();
+  if (dbg === "1" || dbg === "true" || dbg === "yes") {
+    try { console.log(`[teach:${tag}]`, payload); } catch {}
+  }
 }
 
 function ensureTeachingState(sess) {
@@ -65,6 +69,7 @@ function pushTranscript(session, item) {
   }
 }
 
+// محتفظين بيها كما هي (حتى لو مش مستخدمة حاليًا) لضمان عدم كسر أي تكامل لاحق
 function transcriptToMessages(transcript = []) {
   return transcript.map(t => {
     const role = t.from === "user" ? "user" : "assistant";
@@ -91,7 +96,6 @@ async function safeRetrieveRun(threadId, runId) {
   // ✅ توقيع v6: أول باراميتر runId، والثاني كائن فيه thread_id
   return openai.beta.threads.runs.retrieve(runId, { thread_id: threadId });
 }
-
 
 async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 } = {}) {
   let last = null;

@@ -515,6 +515,24 @@
     }
 
     // UI helper functions
+    // === Markdown-lite formatter for tutor messages (safe) ===
+    // Supports only: ### heading, ## heading, and **bold**. Everything else stays escaped/plain.
+    function formatTutorMessage(text) {
+        // 1) escape all HTML coming from the model (safety first)
+        const safe = escapeHtml(text || "");
+
+        // 2) headings first (match per-line)
+        //    - handle ### before ## to avoid double-processing
+        let html = safe
+           .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
+           .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
+
+        // 3) bold (**...**) — non-greedy, within the same text
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+        return html;
+    }
+
     function addUserMessage(text) {
         const bubble = document.createElement("div");
         bubble.className = "message-bubble user";
@@ -540,7 +558,7 @@
             <div class="message-avatar">
                 <i class="fas fa-robot"></i>
             </div>
-            <div class="message-content">${escapeHtml(text)}</div>
+            <div class="message-content">${formatTutorMessage(text)}</div>
         `;
         chatMessages.appendChild(bubble);
         scrollToBottom();
