@@ -51,7 +51,8 @@ function ensureTeachingState(sess) {
       topics_queue: [],
       current_topic_index: 0,
       transcript: [],
-      assistant: { threadId: null }
+      assistant: { threadId: null },
+      profileContext: {}
     };
   }
   return sess.teaching;
@@ -201,6 +202,46 @@ const LEVELS = {
   L2: { clusters: ["quantiles_iqr_boxplots", "standard_deviation_variability", "grouped_summaries"] },
   L3: { clusters: ["z_scores_standardization", "correlation_vs_covariance", "skewness_kurtosis_diagnostics"] },
 };
+// ===== Build full teaching queue from evidence + fill missing topics =====
+function buildTeachingQueueFromEvidence(session, lang = "ar") {
+  const A = session.assessment || { evidence: [], currentLevel: "L1" };
+  const ev = Array.isArray(A.evidence) ? A.evidence : [];
+
+  // 1) أولاً: من الـ evidence بالترتيب الحقيقي للأسئلة
+  const queue = [];
+  const seen = new Set();
+  for (let i = 0; i < ev.length; i++) {
+    const e = ev[i];
+    if (!e || !e.cluster) continue;
+    const display = humanizeCluster(e.cluster, lang);
+    const kind = e.correct ? "strength" : "gap";
+
+    // تجنّب تكرار نفس الكلاستر ورا بعض مباشرةً
+    const prev = queue[queue.length - 1];
+    if (prev && prev.display === display) continue;
+
+    queue.push({ display, kind });
+    seen.add(e.cluster);
+  }
+
+  // 2) بعد كده: أي موضوعات ما ظهرتش في الأسئلة تتضاف كـ gap (بالترتيب المنطقي للمستويات)
+  const catalogOrder = [
+    ...((LEVELS.L1?.clusters) || []),
+    ...((LEVELS.L2?.clusters) || []),
+    ...((LEVELS.L3?.clusters) || []),
+  ];
+  for (const clusterKey of catalogOrder) {
+    if (!seen.has(clusterKey)) {
+      const display = humanizeCluster(clusterKey, lang);
+      // برضه تجنّب تكرار الاسم لو آخر عنصر نفس الـ display (لو حصل توافق أسماء)
+      const prev = queue[queue.length - 1];
+      if (prev && prev.display === display) continue;
+      queue.push({ display, kind: "gap" });
+    }
+  }
+
+  return queue;
+}
 
 // Init/get session
 function getSession(sessionId) {
@@ -635,7 +676,7 @@ app.post("/api/report", async (req, res) => {
 });
 
 /* =========================
-   Teaching: start (hardened)
+   Teaching: start (data-only)
    ========================= */
 app.post("/api/teach/start", async (req, res) => {
   try {
@@ -644,25 +685,51 @@ app.post("/api/teach/start", async (req, res) => {
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
 
-    const gaps = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
-    if (!gaps.length) {
-      console.warn("[teach/start] No gaps to teach for session:", sessionId);
+    // اجلب الموضوعات من التقرير (نقاط قوة وضعف بصيغة العرض البشرية)
+    const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
+    const strengthsDisplay = Array.isArray(session?.report?.strengths_display) ? session.report.strengths_display : [];
+
+    if (!gapsDisplay.length && !strengthsDisplay.length) {
       return res.status(400).json({
         error: true,
-        message: (session.lang === "ar") ? "لا توجد مواضيع لبدء الشرح." : "No topics to teach right now."
+        message: (session.lang === "ar") ? "لا توجد مواضيع للشرح حاليًا." : "No topics to teach right now."
       });
     }
 
-    teaching.mode = "active";
-    teaching.topics_queue = gaps.slice();
-    teaching.current_topic_index = 0;
-    teaching.transcript = [];
+    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة (قوة ثم فجوة)
+    if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
+      const toObjects = (arr, kind) => (arr || []).map(d => ({ display: d, kind }));
+      teaching.topics_queue = [
+        ...toObjects(strengthsDisplay, "strength"),
+        ...toObjects(gapsDisplay, "gap"),
+      ];
+    }
 
-    const firstTopic = teaching.topics_queue[0] || "";
-    logTeach("start", { sessionId, lang: teaching.lang, firstTopic });
+    teaching.mode = "active";
+    teaching.current_topic_index = 0;
+    teaching.transcript = teaching.transcript || [];
+
+    // اجمع سياق المستخدم من الـintake فقط (بيانات خام—لا تعليمات)
+    teaching.profileContext = {
+      job_nature: session.intake?.job_nature || "",
+      experience_years_band: session.intake?.experience_years_band || "",
+      job_title_exact: session.intake?.job_title_exact || "",
+      sector: session.intake?.sector || "",
+      learning_reason: session.intake?.learning_reason || "",
+    };
+
+    const first = teaching.topics_queue[0] || null;
+    if (!first) {
+      return res.status(400).json({
+        error: true,
+        message: (session.lang === "ar") ? "لا توجد مواضيع للشرح." : "No topics to teach."
+      });
+    }
+
+    logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // 1) إنشاء Thread مرة واحدة
+      // إنشاء Thread مرة واحدة
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
         const threadId = createdThread?.id;
@@ -670,16 +737,25 @@ app.post("/api/teach/start", async (req, res) => {
         teaching.assistant.threadId = threadId;
         logTeach("thread.created", { threadId });
       }
-
       const threadId = teaching.assistant.threadId;
 
-      // 2) رسالة افتتاحية
+      // رسالة افتتاحية "بيانات فقط"
+      const topicsLine = teaching.topics_queue.map((t, i) => `${i + 1}) ${t.display} [${t.kind}]`).join(" | ");
       const openingMsg = (teaching.lang === "ar")
-        ? `اللغة: عربية. قائمة المواضيع: ${gaps.join(" | ")}. ابدأ بالموضوع الأول: "${firstTopic}". اتّبع دورك التعليمي بدقة.`
-        : `Language: English. Topics: ${gaps.join(" | ")}. Start with the first topic: "${firstTopic}". Follow your teaching role.`;
+        ? [
+            `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
+            `الموضوعات بالترتيب: ${topicsLine}`,
+            `ابدأ بالموضوع الأول: "${first.display}" (النوع: ${first.kind}).`
+          ].join("\n")
+        : [
+            `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
+            `Topics (ordered): ${topicsLine}`,
+            `Start with: "${first.display}" (kind: ${first.kind}).`
+          ].join("\n");
+
       await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
 
-      // 3) Run جديد
+      // تشغيل الـAssistant وفق نظام teach.js فقط
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
         instructions: getTeachingSystemPrompt({ lang: teaching.lang })
@@ -688,10 +764,8 @@ app.post("/api/teach/start", async (req, res) => {
       if (!runId) throw new Error("Failed to create run");
       logTeach("run.created", { threadId, runId });
 
-      // 4) Poll موحّد بحراس
       const finalRun = await pollRunUntilDone(threadId, runId, { maxTries: 40, sleepMs: 900 });
 
-      // 5) جلب أول رد
       if (finalRun.status === "completed") {
         const msgs = await openai.beta.threads.messages.list(threadId, { order: "desc", limit: 5 });
         const assistantMsg = msgs.data.find(m => m.role === "assistant");
@@ -703,25 +777,33 @@ app.post("/api/teach/start", async (req, res) => {
       }
 
       const fb = (session.lang === "ar")
-        ? "هنبدأ شرح أول موضوع بشكل مبسّط. جاهز؟"
-        : "Let’s begin with a simple explanation of the first topic. Ready?";
+        ? "هنبدأ شرح أول موضوع بشكل بسيط خطوة بخطوة."
+        : "Let’s start with the first topic, step by step.";
       pushTranscript(session, { from: "tutor", text: fb });
       return res.json({ message: fb });
     }
 
     // ============= Fallback بدون Assistant =============
     const sys = getTeachingSystemPrompt({ lang: teaching.lang });
+    const userSeed = (teaching.lang === "ar")
+      ? [
+          `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
+          `ابدأ بالموضوع: "${first.display}" (النوع: ${first.kind}).`
+        ].join("\n")
+      : [
+          `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
+          `Start with topic: "${first.display}" (kind: ${first.kind}).`
+        ].join("\n");
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: sys },
-        { role: "user", content: (teaching.lang === "ar")
-            ? `ابدأ بشرح "${firstTopic}" بأسلوب ودود ومبسّط.`
-            : `Start explaining "${firstTopic}" in a friendly, simple way.` }
+        { role: "user", content: userSeed }
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 400
+      max_completion_tokens: 600
     });
     const text = (completion?.choices?.[0]?.message?.content || "").trim();
     pushTranscript(session, { from: "tutor", text });
@@ -733,12 +815,12 @@ app.post("/api/teach/start", async (req, res) => {
   }
 });
 
+
 /* =================================
-   Teaching: user sends a chat message
+   Teaching: user sends a chat message (data-only)
    ================================= */
 app.post("/api/teach/message", async (req, res) => {
   try {
-    // نقبل text أو userMessage لضمان التوافق
     const { sessionId, text, userMessage } = req.body || {};
     const userText = (text ?? userMessage ?? "").toString().trim();
     const session = getSession(sessionId);
@@ -756,8 +838,9 @@ app.post("/api/teach/message", async (req, res) => {
     }
 
     const lang = teaching.lang || session.lang || "ar";
-    const topics = Array.isArray(teaching.topics_queue) ? teaching.topics_queue : [];
-    const currentTopic = topics[teaching.current_topic_index || 0] || "";
+    const topicsQueue = Array.isArray(teaching.topics_queue) ? teaching.topics_queue : [];
+    const current = topicsQueue[teaching.current_topic_index || 0] || { display: "", kind: "gap" };
+    const currentTopic = current.display || "";
 
     try { pushTranscript(session, { from: "user", text: userText }); } catch {}
 
@@ -772,7 +855,20 @@ app.post("/api/teach/message", async (req, res) => {
 
       const threadId = teaching.assistant.threadId;
 
-      await openai.beta.threads.messages.create(threadId, { role: "user", content: userText });
+      // Payload "بيانات فقط": بدون أي تذكيرات أسلوبية
+      const userPayload = (lang === "ar")
+        ? [
+            `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
+            `الموضوع الحالي: "${current.display}" (النوع: ${current.kind}).`,
+            `رسالة المتعلم: ${userText}`
+          ].join("\n")
+        : [
+            `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
+            `Current topic: "${current.display}" (kind: ${current.kind}).`,
+            `Learner message: ${userText}`
+          ].join("\n");
+
+      await openai.beta.threads.messages.create(threadId, { role: "user", content: userPayload });
 
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
@@ -795,8 +891,8 @@ app.post("/api/teach/message", async (req, res) => {
       }
 
       const fb = (lang === "ar")
-        ? "تمام، خلّيني أوضحها بشكل أبسط خطوة بخطوة…"
-        : "Okay, let me break it down more simply, step by step…";
+        ? "تمام، خلّيني أوضّحها خطوة خطوة."
+        : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
       return res.json({ message: fb });
     }
@@ -804,8 +900,16 @@ app.post("/api/teach/message", async (req, res) => {
     // ============= Fallback بدون Assistant =============
     const sys = getTeachingSystemPrompt({ lang });
     const userTurn = (lang === "ar")
-      ? (currentTopic ? `الموضوع الحالي: "${currentTopic}". رسالة المستخدم: ${userText}` : `رسالة المستخدم: ${userText}`)
-      : (currentTopic ? `Current topic: "${currentTopic}". User says: ${userText}` : `User says: ${userText}`);
+      ? [
+          `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
+          `الموضوع الحالي: "${current.display}" (النوع: ${current.kind}).`,
+          `رسالة المتعلم: ${userText}`
+        ].join("\n")
+      : [
+          `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
+          `Current topic: "${current.display}" (kind: ${current.kind}).`,
+          `Learner message: ${userText}`
+        ].join("\n");
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -815,7 +919,7 @@ app.post("/api/teach/message", async (req, res) => {
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 450
+      max_completion_tokens: 700 // أطول قليلًا لتفادي الاختصار المخلّ
     });
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
