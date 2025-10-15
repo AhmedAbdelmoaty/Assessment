@@ -515,24 +515,51 @@
     }
 
     // UI helper functions
+    // --- Normalize tutor text: collapse blank lines & enforce '---' as single divider ---
+    function normalizeTutorText(raw) {
+        let t = (raw ?? "").toString();
+
+        // 1) Normalize line endings
+        t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+        // 2) Standardize any dash-only divider lines to exactly '---'
+        //    (lines made only of dashes/spaces -> '---')
+        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, '---');
+
+        // 3) Ensure '---' is the ONLY separator: no extra blank lines before/after
+        //    Any amount of newlines/spaces around '---' => exactly '\n---\n'
+        t = t.replace(/\n*\s*---\s*\n*/g, '\n---\n');
+
+        // 4) Collapse 3+ consecutive newlines anywhere to just 2 (i.e., one blank line)
+        t = t.replace(/\n{3,}/g, '\n\n');
+
+        // 5) Trim edges (and also remove extra leading/trailing blank lines)
+        t = t.trim();
+
+        return t;
+    }
+
     // === Markdown-lite formatter for tutor messages (safe) ===
     // Supports only: ### heading, ## heading, and **bold**. Everything else stays escaped/plain.
     function formatTutorMessage(text) {
+        // 0) normalize paragraph spacing & '---' divider BEFORE escaping
+        const normalized = normalizeTutorText(text || "");
+
         // 1) escape all HTML coming from the model (safety first)
-        const safe = escapeHtml(text || "");
+        const safe = escapeHtml(normalized);
 
         // 2) headings first (match per-line)
-        //    - handle ### before ## to avoid double-processing
+        //    - handle #### before ### to avoid double-processing (kept as in original)
         let html = safe
+           .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
            .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
            .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
 
-        // 3) bold (**...**) — non-greedy, within the same text
+        // 3) bold (**...**) — non-greedy
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
         return html;
     }
-
     function addUserMessage(text) {
         const bubble = document.createElement("div");
         bubble.className = "message-bubble user";

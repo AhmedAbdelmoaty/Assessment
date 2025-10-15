@@ -796,14 +796,14 @@ app.post("/api/teach/start", async (req, res) => {
         ].join("\n");
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5",
       messages: [
         { role: "system", content: sys },
         { role: "user", content: userSeed }
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 600
+      max_completion_tokens: 2200
     });
     const text = (completion?.choices?.[0]?.message?.content || "").trim();
     pushTranscript(session, { from: "tutor", text });
@@ -912,14 +912,14 @@ app.post("/api/teach/message", async (req, res) => {
         ].join("\n");
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5",
       messages: [
         { role: "system", content: sys },
         { role: "user", content: userTurn }
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 700 // أطول قليلًا لتفادي الاختصار المخلّ
+      max_completion_tokens: 2000 // أطول قليلًا لتفادي الاختصار المخلّ
     });
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();

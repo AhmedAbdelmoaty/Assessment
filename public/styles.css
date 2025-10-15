@@ -1046,4 +1046,30 @@ html.lang-ar body {
   unicode-bidi: plaintext;  /* يضبط خلط AR/EN داخل السطر */
   text-align: start;        /* يمين في RTL، يسار في LTR */
 }
+/* ========== Tutor rich-text helpers ========== */
+/* عنوان صغير (نفس روح msg-h3) */
+.rt-h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 6px 0 4px;
+  color: var(--foreground);
+}
+
+/* فاصل بسيط للسطر الذي يحتوي على --- فقط */
+.rt-hr {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 0;
+}
+
+/* سطر نقطي خفيف بدون <ul> */
+.rt-li {
+  margin: 2px 0;
+  padding-inline-start: 12px;
+  position: relative;
+}
+
+/* تحسين طفيف لشكل المائل والعريض داخل رسائل المعلّم */
+.message-bubble.system .message-content em { font-style: italic; }
+.message-bubble.system .message-content strong { font-weight: 700; }
 
