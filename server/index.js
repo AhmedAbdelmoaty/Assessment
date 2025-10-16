@@ -696,14 +696,41 @@ app.post("/api/teach/start", async (req, res) => {
       });
     }
 
-    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة (قوة ثم فجوة)
+    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة "منهجية" بنفس المواضيع الواردة في التقرير فقط
     if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
-      const toObjects = (arr, kind) => (arr || []).map(d => ({ display: d, kind }));
-      teaching.topics_queue = [
-        ...toObjects(strengthsDisplay, "strength"),
-        ...toObjects(gapsDisplay, "gap"),
+      const langForDisplay = teaching.lang || session.lang || "ar";
+
+      // 1) ابني ترتيب المنهج كأسماء "بشرية" بنفس لغة الجلسة
+      const canonicalKeys = [
+        ...((LEVELS.L1?.clusters) || []),
+        ...((LEVELS.L2?.clusters) || []),
+        ...((LEVELS.L3?.clusters) || []),
       ];
+      const canonicalDisplays = canonicalKeys.map(k => humanizeCluster(k, langForDisplay));
+
+      // 2) جهّز lookup سريع من القوائم القادمة من التقرير (من غير تعديل)
+      const S = Array.isArray(strengthsDisplay) ? strengthsDisplay : [];
+      const G = Array.isArray(gapsDisplay) ? gapsDisplay : [];
+      const setS = new Set(S);
+      const setG = new Set(G);
+
+      // 3) مرّ على المنهج بالترتيب: لو الموضوع موجود في strengths → ادفعه كـ strength،
+      //    وإلا لو موجود في gaps → ادفعه كـ gap. لا تضف أي موضوع غير موجود في التقرير.
+      const ordered = [];
+      for (const disp of canonicalDisplays) {
+        if (setS.has(disp)) {
+          ordered.push({ display: disp, kind: "strength" });
+          continue;
+        }
+        if (setG.has(disp)) {
+          ordered.push({ display: disp, kind: "gap" });
+          continue;
+        }
+      }
+
+      teaching.topics_queue = ordered;
     }
+
 
     teaching.mode = "active";
     teaching.current_topic_index = 0;
