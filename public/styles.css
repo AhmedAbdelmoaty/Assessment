@@ -1072,4 +1072,58 @@ html.lang-ar body {
 /* تحسين طفيف لشكل المائل والعريض داخل رسائل المعلّم */
 .message-bubble.system .message-content em { font-style: italic; }
 .message-bubble.system .message-content strong { font-weight: 700; }
+/* خطوط تدعم العربية (اختياري لكنه يحسّن الشكل) */
+@font-face {
+  font-family: "Cairo";
+  src: local("Cairo");
+  font-display: swap;
+}
+html[lang="ar"] body,
+.msg.ar .msg-content { font-family: "Cairo", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", Arial, sans-serif; }
+
+/* القاعدة العامة للرسائل */
+.msg { 
+  /* استخدم الخصائص المنطقية بدل left/right */
+  padding-block: 12px;
+  padding-inline: 14px;
+  margin-block: 8px;
+  border-radius: 16px;
+  white-space: pre-wrap;          /* يحافظ على فواصل الأسطر */
+  line-height: 1.7;
+}
+
+/* رسائل عربية: اتجاه ومحاذاة صحيحة */
+.msg.ar {
+  direction: rtl;                 /* الاتجاه من اليمين لليسار */
+  unicode-bidi: plaintext;        /* يخلّي المتصفح يتعامل كويس مع نص مختلط (EN/أرقام) */
+  text-align: start;              /* start = يمين في RTL */
+}
+
+/* عناوين داخل الرسالة (لو وُجدت)، وفقرات */
+.msg.ar h1, .msg.ar h2, .msg.ar h3,
+.msg.ar h4, .msg.ar h5, .msg.ar h6,
+.msg.ar p, .msg.ar li {
+  direction: rtl;
+  text-align: start;
+  margin-block: 0.4em 0.6em;      /* مسافات رأسية لطيفة */
+}
+
+/* رسائل إنجليزية تبقى عادية */
+.msg.en {
+  direction: ltr;
+  unicode-bidi: plaintext;
+  text-align: start;              /* start = يسار في LTR */
+}
+
+/* لو عندك فقاعات بظلال/خلفيات */
+.msg.tutor { background: #fafafa; }
+.msg.user  { background: #eaf3ff; }
+
+/* لو الأفاتار بيميل يمين/شمال، استخدم خصائص منطقية بدل left/right */
+.msg .avatar {
+  margin-inline-end: 8px;         /* يكون يمين في RTL ويسار في LTR تلقائيًا */
+}
+
+/* تجنُّب فراغات عمودية مبالغ فيها بين الفقرات التي يولدها الموديل */
+.msg .msg-content { white-space: pre-line; } /* سطر فاضي واحد يتحول لفاصل واحد */
 
