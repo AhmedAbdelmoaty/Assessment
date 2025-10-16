@@ -696,41 +696,14 @@ app.post("/api/teach/start", async (req, res) => {
       });
     }
 
-    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة مرتبة "مناهجيًا" فقط
+    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة (قوة ثم فجوة)
     if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
-      const L = (session.lang === "ar" ? "ar" : "en");
-
-      // 1) الموضوعات المكلّف بها (المعروضة) = قوة ∪ فجوة
-      const assignedSet = new Set([
-        ...(strengthsDisplay || []),
-        ...(gapsDisplay || []),
-      ]);
-
-      // 2) ترتيب منهجي بالعرض البشري حسب اللغة
-      const canonicalKeys = [
-        ...((LEVELS.L1?.clusters) || []),
-        ...((LEVELS.L2?.clusters) || []),
-        ...((LEVELS.L3?.clusters) || []),
+      const toObjects = (arr, kind) => (arr || []).map(d => ({ display: d, kind }));
+      teaching.topics_queue = [
+        ...toObjects(strengthsDisplay, "strength"),
+        ...toObjects(gapsDisplay, "gap"),
       ];
-      const canonicalDisplayOrder = canonicalKeys.map(k => humanizeCluster(k, L));
-
-      // 3) خذ فقط الموضوعات المكلّف بها وارتّبها وفق الترتيب المنهجي
-      const orderedAssigned = canonicalDisplayOrder.filter(name => assignedSet.has(name));
-
-      // 4) ابنِ الطابور مع الحفاظ على نوع كل موضوع (قوة/فجوة) كما هو
-      const toKind = (name) => (strengthsDisplay.includes(name) ? "strength" : "gap");
-      teaching.topics_queue = orderedAssigned.map(name => ({ display: name, kind: toKind(name) }));
-
-      // 5) احتياط: لو لأي سبب لم تتكوّن قائمة (نادرًا)، ارجع للسلوك السابق
-      if (!teaching.topics_queue.length) {
-        const toObjects = (arr, kind) => (arr || []).map(d => ({ display: d, kind }));
-        teaching.topics_queue = [
-          ...toObjects(strengthsDisplay, "strength"),
-          ...toObjects(gapsDisplay, "gap"),
-        ];
-      }
     }
-
 
     teaching.mode = "active";
     teaching.current_topic_index = 0;
@@ -767,37 +740,26 @@ app.post("/api/teach/start", async (req, res) => {
       const threadId = teaching.assistant.threadId;
 
       // رسالة افتتاحية "بيانات فقط"
-      // لا نُظهر kind في السطر المرئي، ونمرّره كميتاداتا صامتة
-      const topicsLine = teaching.topics_queue.map((t, i) => `${i + 1}) ${t.display}`).join(" | ");
-      const metaLine = `__META__::${JSON.stringify({ current_topic: first.display, current_kind: first.kind })}`;
-
+      const topicsLine = teaching.topics_queue.map((t, i) => `${i + 1}) ${t.display} [${t.kind}]`).join(" | ");
       const openingMsg = (teaching.lang === "ar")
         ? [
             `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
-            `الموضوعات (ترتيب داخلي): ${topicsLine}`,
-            metaLine
+            `الموضوعات بالترتيب: ${topicsLine}`,
+            `ابدأ بالموضوع الأول: "${first.display}" (النوع: ${first.kind}).`
           ].join("\n")
         : [
             `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
-            `Topics (internal order): ${topicsLine}`,
-            metaLine
+            `Topics (ordered): ${topicsLine}`,
+            `Start with: "${first.display}" (kind: ${first.kind}).`
           ].join("\n");
 
       await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
 
-      const baseInstr = getTeachingSystemPrompt({ lang: teaching.lang });
-      const instr = `${baseInstr}
-
-      [INTERNAL FLAGS — DO NOT ECHO]
-      current_topic_is_strength=${first.kind === "strength"}
-      current_topic_display="${first.display}"
-      `;
-
+      // تشغيل الـAssistant وفق نظام teach.js فقط
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
-        instructions: instr
+        instructions: getTeachingSystemPrompt({ lang: teaching.lang })
       });
-
       const runId = run?.id;
       if (!runId) throw new Error("Failed to create run");
       logTeach("run.created", { threadId, runId });
@@ -822,24 +784,16 @@ app.post("/api/teach/start", async (req, res) => {
     }
 
     // ============= Fallback بدون Assistant =============
-    const sys = `${getTeachingSystemPrompt({ lang: teaching.lang })}
-
-    [INTERNAL FLAGS — DO NOT ECHO]
-    current_topic_is_strength=${first.kind === "strength"}
-    current_topic_display="${first.display}"
-    `;
-
-    const metaLine = `__META__::${JSON.stringify({ current_topic: first.display, current_kind: first.kind })}`;
+    const sys = getTeachingSystemPrompt({ lang: teaching.lang });
     const userSeed = (teaching.lang === "ar")
       ? [
           `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
-          metaLine
+          `ابدأ بالموضوع: "${first.display}" (النوع: ${first.kind}).`
         ].join("\n")
       : [
           `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
-          metaLine
+          `Start with topic: "${first.display}" (kind: ${first.kind}).`
         ].join("\n");
-
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5",
@@ -901,35 +855,25 @@ app.post("/api/teach/message", async (req, res) => {
 
       const threadId = teaching.assistant.threadId;
 
-      const metaLine = `__META__::${JSON.stringify({ current_topic: current.display, current_kind: current.kind })}`;
+      // Payload "بيانات فقط": بدون أي تذكيرات أسلوبية
       const userPayload = (lang === "ar")
         ? [
             `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
-            metaLine,
+            `الموضوع الحالي: "${current.display}" (النوع: ${current.kind}).`,
             `رسالة المتعلم: ${userText}`
           ].join("\n")
         : [
             `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
-            metaLine,
+            `Current topic: "${current.display}" (kind: ${current.kind}).`,
             `Learner message: ${userText}`
           ].join("\n");
 
-
       await openai.beta.threads.messages.create(threadId, { role: "user", content: userPayload });
-
-      const baseInstr = getTeachingSystemPrompt({ lang });
-      const instr = `${baseInstr}
-
-      [INTERNAL FLAGS — DO NOT ECHO]
-      current_topic_is_strength=${current.kind === "strength"}
-      current_topic_display="${current.display}"
-      `;
 
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
-        instructions: instr
+        instructions: getTeachingSystemPrompt({ lang })
       });
-
       const runId = run?.id;
       if (!runId) throw new Error("Failed to create Run (no id)");
       logTeach("run.created@message", { threadId, runId });
@@ -954,26 +898,18 @@ app.post("/api/teach/message", async (req, res) => {
     }
 
     // ============= Fallback بدون Assistant =============
-    const sys = `${getTeachingSystemPrompt({ lang })}
-
-    [INTERNAL FLAGS — DO NOT ECHO]
-    current_topic_is_strength=${current.kind === "strength"}
-    current_topic_display="${current.display}"
-    `;
-
-    const metaLine = `__META__::${JSON.stringify({ current_topic: current.display, current_kind: current.kind })}`;
+    const sys = getTeachingSystemPrompt({ lang });
     const userTurn = (lang === "ar")
       ? [
           `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
-          metaLine,
+          `الموضوع الحالي: "${current.display}" (النوع: ${current.kind}).`,
           `رسالة المتعلم: ${userText}`
         ].join("\n")
       : [
           `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
-          metaLine,
+          `Current topic: "${current.display}" (kind: ${current.kind}).`,
           `Learner message: ${userText}`
         ].join("\n");
-
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5",

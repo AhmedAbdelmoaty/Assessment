@@ -10,11 +10,6 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
-    // يكشف هل النص يحتوي على أحرف عربية
-    function hasArabic(text = "") {
-      return /[\u0600-\u06FF]/.test(text);
-    }
-
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -566,47 +561,35 @@
         return html;
     }
     function addUserMessage(text) {
-      const bubble = document.createElement("div");
-      bubble.className = "message-bubble user";
-      const isAr = (currentLang === "ar") || hasArabic(text);
-      const dirAttr = isAr ? "rtl" : "ltr";
-      const langAttr = isAr ? "ar" : "en";
-
-      bubble.innerHTML = `
-        <div class="message-content" dir="${dirAttr}" lang="${langAttr}">${escapeHtml(text)}</div>
-        <div class="message-avatar"><i class="fas fa-user"></i></div>
-      `;
-      chatMessages.appendChild(bubble);
-      scrollToBottom();
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble user";
+        bubble.innerHTML = `
+            <div class="message-content">${escapeHtml(text)}</div>
+            <div class="message-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+        `;
+        chatMessages.appendChild(bubble);
+        scrollToBottom();
     }
-
 
     function addSystemMessage(text) {
-      if (!text) {
-        console.error("[CLIENT] Attempted to render blank bot message");
-        return;
-      }
+        if (!text) {
+            console.error("[CLIENT] Attempted to render blank bot message");
+            return;
+        }
 
-      // اتجاه/لغة خاصّين بمحتوى الرسالة نفسها
-      // لو اللغة الحالية عربية أو النص فعلاً فيه حروف عربية => RTL
-      const isAr = (currentLang === "ar") || hasArabic(text);
-      const dirAttr = isAr ? "rtl" : "ltr";
-      const langAttr = isAr ? "ar" : "en";
-
-      const bubble = document.createElement("div");
-      bubble.className = "message-bubble system";
-      bubble.innerHTML = `
-        <div class="message-avatar">
-          <i class="fas fa-robot"></i>
-        </div>
-        <div class="message-content" dir="${dirAttr}" lang="${langAttr}">
-          ${formatTutorMessage(text)}
-        </div>
-      `;
-      chatMessages.appendChild(bubble);
-      scrollToBottom();
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble system";
+        bubble.innerHTML = `
+            <div class="message-avatar">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="message-content">${formatTutorMessage(text)}</div>
+        `;
+        chatMessages.appendChild(bubble);
+        scrollToBottom();
     }
-
 
     function addChoiceChips(choices) {
         const container = document.createElement("div");
