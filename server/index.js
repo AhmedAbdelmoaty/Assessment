@@ -198,10 +198,26 @@ try {
 
 // Levels (للتقرير فقط)
 const LEVELS = {
-  L1: { clusters: ["central_tendency_basics", "basic_spread_distribution_shape"] },
-  L2: { clusters: ["quantiles_iqr_boxplots", "standard_deviation_variability", "grouped_summaries"] },
-  L3: { clusters: ["z_scores_standardization", "correlation_vs_covariance", "skewness_kurtosis_diagnostics"] },
+  L1: {
+    clusters: [
+      "central_tendency_foundations",      // Central Tendency (Mean/Median/Mode)
+      "dispersion_boxplot_foundations",    // Dispersion & Box Plot (Range/Variance/SD)
+    ],
+  },
+  L2: {
+    clusters: [
+      "distribution_shape_normality",      // Distribution Shape & Normality
+      "data_quality_outliers_iqr",         // Data Quality & Outliers (IQR, LB/UB)
+    ],
+  },
+  L3: {
+    clusters: [
+      "correlation_bivariate_patterns",    // Correlation & Bivariate Patterns
+      "non_normal_skew_kurtosis_z",        // Non-Normal Data (Skewness/Kurtosis/Z-Scores)
+    ],
+  },
 };
+
 // ===== Build full teaching queue from evidence + fill missing topics =====
 function buildTeachingQueueFromEvidence(session, lang = "ar") {
   const A = session.assessment || { evidence: [], currentLevel: "L1" };
