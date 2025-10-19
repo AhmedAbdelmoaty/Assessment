@@ -1,6 +1,15 @@
 import nodemailer from 'nodemailer';
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:5000';
+// Construct BASE_URL - use Replit domain if available, otherwise use env or localhost
+const REPL_SLUG = process.env.REPL_SLUG;
+const REPLIT_DEV_DOMAIN = process.env.REPLIT_DEV_DOMAIN;
+const REPLIT_DOMAINS = process.env.REPLIT_DOMAINS;
+const BASE_URL = process.env.BASE_URL || 
+                 (REPLIT_DOMAINS ? `https://${REPLIT_DOMAINS.split(',')[0]}` : null) ||
+                 (REPL_SLUG && REPLIT_DEV_DOMAIN ? `https://${REPL_SLUG}.${REPLIT_DEV_DOMAIN}` : null) ||
+                 (REPL_SLUG ? `https://${REPL_SLUG}.replit.dev` : null) ||
+                 'http://localhost:5000';
+
 const MAIL_FROM = process.env.MAIL_FROM || '"Learning Advisor" <no-reply@example.com>';
 
 // Check if SMTP is configured

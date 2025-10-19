@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Verification - Learning Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .auth-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .auth-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+        }
+        
+        .auth-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        
+        .auth-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        
+        .auth-subtitle {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .form-button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+        
+        .form-button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        .form-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .success-message {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .status-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div id="loadingState" class="loading">
+                <i class="fas fa-circle-notch fa-spin" style="font-size: 48px; color: #667eea;"></i>
+                <p style="margin-top: 16px; color: #666;">Verifying your email...</p>
+            </div>
+            
+            <div id="passwordForm" style="display: none;">
+                <div class="auth-header">
+                    <div class="status-icon">
+                        <i class="fas fa-check-circle" style="color: #4caf50;"></i>
+                    </div>
+                    <h1 class="auth-title">Email Verified!</h1>
+                    <p class="auth-subtitle">Create a password to complete your registration</p>
+                </div>
+                
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+                
+                <form id="setPasswordForm">
+                    <input type="hidden" id="userId">
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="password">Password</label>
+                        <input 
+                            type="password" 
+                            id="password" 
+                            class="form-input" 
+                            placeholder="At least 8 characters"
+                            required
+                            minlength="8"
+                            data-testid="input-password"
+                        >
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="confirmPassword">Confirm Password</label>
+                        <input 
+                            type="password" 
+                            id="confirmPassword" 
+                            class="form-input" 
+                            placeholder="Re-enter your password"
+                            required
+                            minlength="8"
+                            data-testid="input-confirm-password"
+                        >
+                    </div>
+                    
+                    <button type="submit" class="form-button" id="submitButton" data-testid="button-submit">
+                        Complete Registration
+                    </button>
+                </form>
+            </div>
+            
+            <div id="errorState" style="display: none; text-align: center;">
+                <div class="status-icon">
+                    <i class="fas fa-times-circle" style="color: #f44336;"></i>
+                </div>
+                <h2 style="margin-bottom: 8px;">Verification Failed</h2>
+                <p id="errorText" style="color: #666; margin-bottom: 20px;"></p>
+                <a href="/register.html" class="form-button" style="display: inline-block; text-decoration: none;">Try Again</a>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const type = urlParams.get('type') || 'verify';
+        
+        const loadingState = document.getElementById('loadingState');
+        const passwordForm = document.getElementById('passwordForm');
+        const errorState = document.getElementById('errorState');
+        const errorText = document.getElementById('errorText');
+        const errorMessage = document.getElementById('errorMessage');
+        const submitButton = document.getElementById('submitButton');
+        
+        // Verify token on page load
+        async function verifyToken() {
+            if (!token) {
+                showError('Invalid verification link. No token provided.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/auth/verify?token=${token}&type=${type}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('userId').value = data.userId;
+                    loadingState.style.display = 'none';
+                    passwordForm.style.display = 'block';
+                } else {
+                    showError(data.message || 'Verification failed. The link may have expired.');
+                }
+            } catch (error) {
+                showError('Network error. Please try again.');
+            }
+        }
+        
+        function showError(message) {
+            loadingState.style.display = 'none';
+            errorState.style.display = 'block';
+            errorText.textContent = message;
+        }
+        
+        // Handle password form submission
+        document.getElementById('setPasswordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const userId = document.getElementById('userId').value;
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            // Hide previous errors
+            errorMessage.style.display = 'none';
+            
+            // Validate passwords match
+            if (password !== confirmPassword) {
+                errorMessage.textContent = 'Passwords do not match.';
+                errorMessage.style.display = 'block';
+                return;
+            }
+            
+            // Disable button
+            submitButton.disabled = true;
+            submitButton.textContent = 'Creating account...';
+            
+            try {
+                const response = await fetch('/api/auth/set-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ userId, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Redirect to dashboard
+                    window.location.href = '/dashboard.html';
+                } else {
+                    errorMessage.textContent = data.error || 'Failed to set password. Please try again.';
+                    errorMessage.style.display = 'block';
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Complete Registration';
+                }
+            } catch (error) {
+                errorMessage.textContent = 'Network error. Please try again.';
+                errorMessage.style.display = 'block';
+                submitButton.disabled = false;
+                submitButton.textContent = 'Complete Registration';
+            }
+        });
+        
+        // Run verification on page load
+        verifyToken();
+    </script>
+</body>
+</html>
