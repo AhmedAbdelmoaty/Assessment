@@ -3,15 +3,21 @@ import nodemailer from 'nodemailer';
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5000';
 const MAIL_FROM = process.env.MAIL_FROM || '"Learning Advisor" <no-reply@example.com>';
 
-// Create transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.mailtrap.io',
-  port: parseInt(process.env.SMTP_PORT || '2525'),
-  auth: {
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || ''
-  }
-});
+// Check if SMTP is configured
+const SMTP_CONFIGURED = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+
+// Create transporter only if SMTP is configured
+let transporter = null;
+if (SMTP_CONFIGURED) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.mailtrap.io',
+    port: parseInt(process.env.SMTP_PORT || '2525'),
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+}
 
 /**
  * Send verification email (magic link)
@@ -40,6 +46,12 @@ export async function sendVerificationEmail(email, token, lang = 'en') {
       <p style="color: #999; font-size: 12px;">If you didn't create an account, please ignore this email.</p>
     </div>
   `;
+  
+  if (!SMTP_CONFIGURED) {
+    console.log('SMTP not configured - Email would be sent to:', email);
+    console.log('Verification link:', verifyLink);
+    return;
+  }
   
   await transporter.sendMail({
     from: MAIL_FROM,
@@ -76,6 +88,12 @@ export async function sendResetEmail(email, token, lang = 'en') {
       <p style="color: #999; font-size: 12px;">If you didn't request a password reset, please ignore this email.</p>
     </div>
   `;
+  
+  if (!SMTP_CONFIGURED) {
+    console.log('SMTP not configured - Password reset email would be sent to:', email);
+    console.log('Reset link:', resetLink);
+    return;
+  }
   
   await transporter.sendMail({
     from: MAIL_FROM,

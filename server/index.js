@@ -1,4 +1,6 @@
 import express from "express";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { randomUUID } from "crypto";
@@ -8,6 +10,9 @@ import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
+import authRoutes from "./routes/auth.js";
+import userRoutes from "./routes/user.js";
+import { authRateLimiter } from "./middleware/security.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,6 +20,28 @@ const __dirname = dirname(__filename);
 const app = express();
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
+
+// PostgreSQL session store
+const PgSession = connectPg(session);
+app.use(session({
+  store: new PgSession({
+    conString: process.env.DATABASE_URL,
+    tableName: 'session',
+    createTableIfMissing: false // Table already created via migration
+  }),
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+  }
+}));
+
+// Mount authentication and user routes
+app.use('/api/auth', authRateLimiter, authRoutes);
+app.use('/api', userRoutes);
 
 // In-memory session store for legacy compatibility (will migrate to database)
 const sessions = new Map();

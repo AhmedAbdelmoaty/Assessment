@@ -1,36 +1,38 @@
 import express from 'express';
-import { z } from 'zod';
 import * as authService from '../services/authService.js';
 import * as emailService from '../services/emailService.js';
+import { validators } from '../../shared/schema.js';
 
 const router = express.Router();
 
-// Validation schemas
-const startAuthSchema = z.object({
-  email: z.string().email(),
-  profileJson: z.record(z.any()),
-  lang: z.enum(['en', 'ar']).default('en'),
-});
+// Simple validation helpers
+function validateStartAuth(body) {
+  const errors = [];
+  if (!body.email || !validators.isValidEmail(body.email)) {
+    errors.push('Valid email is required');
+  }
+  if (!body.profileJson || typeof body.profileJson !== 'object') {
+    errors.push('Profile data is required');
+  }
+  if (body.lang && !['en', 'ar'].includes(body.lang)) {
+    errors.push('Language must be en or ar');
+  }
+  return errors;
+}
 
-const setPasswordSchema = z.object({
-  userId: z.string().uuid(),
-  password: z.string().min(8),
-});
+function validatePassword(password) {
+  if (!password || !validators.isValidPassword(password)) {
+    return 'Password must be at least 8 characters';
+  }
+  return null;
+}
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string(),
-});
-
-const requestResetSchema = z.object({
-  email: z.string().email(),
-  lang: z.enum(['en', 'ar']).default('en'),
-});
-
-const resetPasswordSchema = z.object({
-  token: z.string(),
-  password: z.string().min(8),
-});
+function validateUserId(userId) {
+  if (!userId || typeof userId !== 'string' || userId.length === 0) {
+    return 'Valid user ID is required';
+  }
+  return null;
+}
 
 /**
  * POST /api/auth/start
@@ -38,12 +40,17 @@ const resetPasswordSchema = z.object({
  */
 router.post('/start', async (req, res) => {
   try {
-    const { email, profileJson, lang } = startAuthSchema.parse(req.body);
+    const errors = validateStartAuth(req.body);
+    if (errors.length > 0) {
+      return res.status(400).json({ error: 'Validation error', details: errors });
+    }
+
+    const { email, profileJson, lang = 'en' } = req.body;
     
     // Check if user already exists
     const existingUser = await authService.findUserByEmail(email);
     if (existingUser) {
-      if (existingUser.emailVerifiedAt) {
+      if (existingUser.email_verified_at) {
         return res.status(400).json({ 
           error: 'Email already registered',
           message: lang === 'ar' ? 'البريد الإلكتروني مسجل بالفعل' : 'This email is already registered'
@@ -76,9 +83,6 @@ router.post('/start', async (req, res) => {
     
   } catch (error) {
     console.error('Start auth error:', error);
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation error', details: error.errors });
-    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -106,12 +110,12 @@ router.get('/verify', async (req, res) => {
     
     if (type === 'verify') {
       // Mark email as verified
-      await authService.markEmailVerified(emailToken.userId);
+      await authService.markEmailVerified(emailToken.user_id);
       
       // Return user ID for password setting
       return res.json({
         success: true,
-        userId: emailToken.userId,
+        userId: emailToken.user_id,
         action: 'set_password',
         message: 'Email verified! Please set your password.'
       });
@@ -119,7 +123,7 @@ router.get('/verify', async (req, res) => {
       // Password reset - return user ID for password setting
       return res.json({
         success: true,
-        userId: emailToken.userId,
+        userId: emailToken.user_id,
         action: 'reset_password',
         message: 'Please set your new password.'
       });
@@ -137,7 +141,17 @@ router.get('/verify', async (req, res) => {
  */
 router.post('/set-password', async (req, res) => {
   try {
-    const { userId, password } = setPasswordSchema.parse(req.body);
+    const { userId, password } = req.body;
+    
+    const userIdError = validateUserId(userId);
+    if (userIdError) {
+      return res.status(400).json({ error: userIdError });
+    }
+    
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
+    }
     
     // Verify user exists and is verified
     const user = await authService.findUserById(userId);
@@ -145,7 +159,7 @@ router.post('/set-password', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    if (!user.emailVerifiedAt) {
+    if (!user.email_verified_at) {
       return res.status(403).json({ error: 'Email not verified' });
     }
     
@@ -164,9 +178,6 @@ router.post('/set-password', async (req, res) => {
     
   } catch (error) {
     console.error('Set password error:', error);
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation error', details: error.errors });
-    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -177,18 +188,26 @@ router.post('/set-password', async (req, res) => {
  */
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = loginSchema.parse(req.body);
+    const { email, password } = req.body;
+    
+    if (!email || !validators.isValidEmail(email)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+    
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
     
     const user = await authService.findUserByEmail(email);
     
-    if (!user || !user.passHash) {
+    if (!user || !user.pass_hash) {
       return res.status(401).json({ 
         error: 'Invalid credentials',
         message: 'Email or password is incorrect'
       });
     }
     
-    const isValid = await authService.verifyPassword(password, user.passHash);
+    const isValid = await authService.verifyPassword(password, user.pass_hash);
     
     if (!isValid) {
       return res.status(401).json({ 
@@ -197,7 +216,7 @@ router.post('/login', async (req, res) => {
       });
     }
     
-    if (!user.emailVerifiedAt) {
+    if (!user.email_verified_at) {
       return res.status(403).json({ 
         error: 'Email not verified',
         message: 'Please verify your email before logging in'
@@ -221,9 +240,6 @@ router.post('/login', async (req, res) => {
     
   } catch (error) {
     console.error('Login error:', error);
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation error', details: error.errors });
-    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -249,12 +265,16 @@ router.post('/logout', (req, res) => {
  */
 router.post('/request-reset', async (req, res) => {
   try {
-    const { email, lang } = requestResetSchema.parse(req.body);
+    const { email, lang = 'en' } = req.body;
+    
+    if (!email || !validators.isValidEmail(email)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
     
     const user = await authService.findUserByEmail(email);
     
     // Always return success for security (don't leak user existence)
-    if (user && user.emailVerifiedAt) {
+    if (user && user.email_verified_at) {
       const token = await authService.createEmailToken(user.id, 'reset');
       await emailService.sendResetEmail(email, token, lang);
     }
@@ -282,7 +302,16 @@ router.post('/request-reset', async (req, res) => {
  */
 router.post('/reset', async (req, res) => {
   try {
-    const { token, password } = resetPasswordSchema.parse(req.body);
+    const { token, password } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+    
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
+    }
     
     const emailToken = await authService.verifyAndConsumeToken(token, 'reset');
     
@@ -294,7 +323,7 @@ router.post('/reset', async (req, res) => {
     }
     
     // Set new password
-    await authService.setUserPassword(emailToken.userId, password);
+    await authService.setUserPassword(emailToken.user_id, password);
     
     res.json({
       success: true,
@@ -303,9 +332,6 @@ router.post('/reset', async (req, res) => {
     
   } catch (error) {
     console.error('Reset password error:', error);
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation error', details: error.errors });
-    }
     res.status(500).json({ error: 'Server error' });
   }
 });

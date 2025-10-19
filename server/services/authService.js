@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { db } from '../db.js';
-import { users, emailTokens, attempts } from '../../shared/schema.js';
-import { eq, and, gt, isNull } from 'drizzle-orm';
+import { neon } from '@neondatabase/serverless';
+
+const sql = neon(process.env.DATABASE_URL);
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -39,30 +39,35 @@ export function hashToken(token) {
  * Create a new user account (unverified)
  */
 export async function createUser(email, profileJson) {
-  const [user] = await db.insert(users).values({
-    email,
-    username: profileJson.name_full || null,
-    profileJson,
-    emailVerifiedAt: null,
-  }).returning();
+  const username = profileJson?.name_full || null;
   
-  return user;
+  const result = await sql`
+    INSERT INTO users (email, username, profile_json, email_verified_at)
+    VALUES (${email}, ${username}, ${JSON.stringify(profileJson)}, NULL)
+    RETURNING *
+  `;
+  
+  return result[0] || null;
 }
 
 /**
  * Find user by email
  */
 export async function findUserByEmail(email) {
-  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-  return user || null;
+  const result = await sql`
+    SELECT * FROM users WHERE email = ${email} LIMIT 1
+  `;
+  return result[0] || null;
 }
 
 /**
  * Find user by ID
  */
 export async function findUserById(userId) {
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  return user || null;
+  const result = await sql`
+    SELECT * FROM users WHERE id = ${userId} LIMIT 1
+  `;
+  return result[0] || null;
 }
 
 /**
@@ -73,12 +78,10 @@ export async function createEmailToken(userId, type) {
   const tokenHash = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000);
   
-  await db.insert(emailTokens).values({
-    userId,
-    tokenHash,
-    type,
-    expiresAt,
-  });
+  await sql`
+    INSERT INTO email_tokens (user_id, token_hash, type, expires_at)
+    VALUES (${userId}, ${tokenHash}, ${type}, ${expiresAt})
+  `;
   
   return rawToken;
 }
@@ -90,26 +93,27 @@ export async function verifyAndConsumeToken(rawToken, type) {
   const tokenHash = hashToken(rawToken);
   const now = new Date();
   
-  const [token] = await db.select()
-    .from(emailTokens)
-    .where(
-      and(
-        eq(emailTokens.tokenHash, tokenHash),
-        eq(emailTokens.type, type),
-        gt(emailTokens.expiresAt, now),
-        isNull(emailTokens.usedAt)
-      )
-    )
-    .limit(1);
+  const result = await sql`
+    SELECT * FROM email_tokens
+    WHERE token_hash = ${tokenHash}
+      AND type = ${type}
+      AND expires_at > ${now}
+      AND used_at IS NULL
+    LIMIT 1
+  `;
   
-  if (!token) {
+  if (result.length === 0) {
     return null;
   }
   
+  const token = result[0];
+  
   // Mark token as used
-  await db.update(emailTokens)
-    .set({ usedAt: now })
-    .where(eq(emailTokens.id, token.id));
+  await sql`
+    UPDATE email_tokens
+    SET used_at = ${now}
+    WHERE id = ${token.id}
+  `;
   
   return token;
 }
@@ -118,9 +122,11 @@ export async function verifyAndConsumeToken(rawToken, type) {
  * Mark user email as verified
  */
 export async function markEmailVerified(userId) {
-  await db.update(users)
-    .set({ emailVerifiedAt: new Date() })
-    .where(eq(users.id, userId));
+  await sql`
+    UPDATE users
+    SET email_verified_at = ${new Date()}
+    WHERE id = ${userId}
+  `;
 }
 
 /**
@@ -128,21 +134,24 @@ export async function markEmailVerified(userId) {
  */
 export async function setUserPassword(userId, password) {
   const passHash = await hashPassword(password);
-  await db.update(users)
-    .set({ passHash })
-    .where(eq(users.id, userId));
+  await sql`
+    UPDATE users
+    SET pass_hash = ${passHash}
+    WHERE id = ${userId}
+  `;
 }
 
 /**
  * Update user profile
  */
 export async function updateUserProfile(userId, profileJson) {
-  await db.update(users)
-    .set({ 
-      profileJson,
-      username: profileJson.name_full || null 
-    })
-    .where(eq(users.id, userId));
+  const username = profileJson?.name_full || null;
+  await sql`
+    UPDATE users
+    SET profile_json = ${JSON.stringify(profileJson)},
+        username = ${username}
+    WHERE id = ${userId}
+  `;
 }
 
 /**
@@ -150,65 +159,95 @@ export async function updateUserProfile(userId, profileJson) {
  */
 export async function getOrCreateAttempt(userId, difficultyTier = 'normal') {
   // Check for existing incomplete attempt
-  const [existingAttempt] = await db.select()
-    .from(attempts)
-    .where(
-      and(
-        eq(attempts.userId, userId),
-        isNull(attempts.finishedAt)
-      )
-    )
-    .limit(1);
+  const existing = await sql`
+    SELECT * FROM attempts
+    WHERE user_id = ${userId}
+      AND finished_at IS NULL
+    LIMIT 1
+  `;
   
-  if (existingAttempt) {
-    return existingAttempt;
+  if (existing.length > 0) {
+    return existing[0];
   }
   
   // Create new attempt
-  const [newAttempt] = await db.insert(attempts).values({
-    userId,
-    difficultyTier,
+  const assessmentState = {
     currentLevel: 'L1',
-    currentStep: 'intake',
-    intakeStepIndex: 0,
-    assessmentState: {
-      currentLevel: 'L1',
-      attempts: 0,
-      evidence: [],
-      askedClusters: { L1: [], L2: [], L3: [] },
-      currentQuestionCount: 0
-    }
-  }).returning();
+    attempts: 0,
+    evidence: [],
+    askedClusters: { L1: [], L2: [], L3: [] },
+    currentQuestionCount: 0
+  };
   
-  return newAttempt;
+  const result = await sql`
+    INSERT INTO attempts (
+      user_id, 
+      difficulty_tier, 
+      current_level, 
+      current_step, 
+      intake_step_index,
+      assessment_state
+    )
+    VALUES (
+      ${userId}, 
+      ${difficultyTier}, 
+      'L1', 
+      'intake', 
+      0,
+      ${JSON.stringify(assessmentState)}
+    )
+    RETURNING *
+  `;
+  
+  return result[0];
 }
 
 /**
  * Update attempt progress
  */
 export async function updateAttempt(attemptId, updates) {
-  await db.update(attempts)
-    .set(updates)
-    .where(eq(attempts.id, attemptId));
+  const setClauses = [];
+  const values = [];
+  
+  Object.keys(updates).forEach(key => {
+    const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+    setClauses.push(`${snakeKey} = $${setClauses.length + 1}`);
+    
+    // JSON stringify for JSONB columns
+    if (snakeKey === 'assessment_state' || snakeKey === 'report_data') {
+      values.push(JSON.stringify(updates[key]));
+    } else {
+      values.push(updates[key]);
+    }
+  });
+  
+  if (setClauses.length === 0) return;
+  
+  const query = `UPDATE attempts SET ${setClauses.join(', ')} WHERE id = $${setClauses.length + 1}`;
+  values.push(attemptId);
+  
+  await sql(query, values);
 }
 
 /**
  * Get user's attempts
  */
 export async function getUserAttempts(userId) {
-  return await db.select()
-    .from(attempts)
-    .where(eq(attempts.userId, userId))
-    .orderBy(attempts.startedAt);
+  return await sql`
+    SELECT * FROM attempts
+    WHERE user_id = ${userId}
+    ORDER BY started_at DESC
+  `;
 }
 
 /**
  * Get attempt by ID
  */
 export async function getAttemptById(attemptId) {
-  const [attempt] = await db.select()
-    .from(attempts)
-    .where(eq(attempts.id, attemptId))
-    .limit(1);
-  return attempt || null;
+  const result = await sql`
+    SELECT * FROM attempts
+    WHERE id = ${attemptId}
+    LIMIT 1
+  `;
+  return result[0] || null;
 }

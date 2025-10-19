@@ -1,9 +1,6 @@
 import express from 'express';
-import { z } from 'zod';
 import * as authService from '../services/authService.js';
-import { db } from '../db.js';
-import { attempts, attemptItems, teachingNotes } from '../../shared/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import * as userService from '../services/userService.js';
 import { requireAuth, requireVerified } from '../middleware/security.js';
 
 const router = express.Router();
@@ -31,20 +28,20 @@ router.get('/state', requireAuth, async (req, res) => {
         id: user.id,
         email: user.email,
         username: user.username,
-        emailVerified: !!user.emailVerifiedAt
+        emailVerified: !!user.email_verified_at
       },
-      currentStep: attempt.currentStep,
+      currentStep: attempt.current_step,
       attemptId: attempt.id,
-      intake: user.profileJson || {},
-      intakeStepIndex: attempt.intakeStepIndex || 0,
-      assessmentState: attempt.assessmentState || {
+      intake: user.profile_json || {},
+      intakeStepIndex: attempt.intake_step_index || 0,
+      assessmentState: attempt.assessment_state || {
         currentLevel: 'L1',
         attempts: 0,
         evidence: [],
         askedClusters: { L1: [], L2: [], L3: [] },
         currentQuestionCount: 0
       },
-      reportData: attempt.reportData
+      reportData: attempt.report_data
     });
     
   } catch (error) {
@@ -70,9 +67,9 @@ router.get('/me', requireAuth, async (req, res) => {
       id: user.id,
       email: user.email,
       username: user.username,
-      profile: user.profileJson || {},
-      emailVerified: !!user.emailVerifiedAt,
-      createdAt: user.createdAt
+      profile: user.profile_json || {},
+      emailVerified: !!user.email_verified_at,
+      createdAt: user.created_at
     });
     
   } catch (error) {
@@ -118,15 +115,15 @@ router.get('/attempts', requireAuth, async (req, res) => {
     
     const formatted = userAttempts.map(attempt => ({
       id: attempt.id,
-      startedAt: attempt.startedAt,
-      finishedAt: attempt.finishedAt,
-      difficultyTier: attempt.difficultyTier,
-      totalQuestions: attempt.totalQuestions,
-      correctAnswers: attempt.correctAnswers,
-      scorePercent: attempt.scorePercent,
-      currentLevel: attempt.currentLevel,
-      currentStep: attempt.currentStep,
-      isComplete: !!attempt.finishedAt
+      startedAt: attempt.started_at,
+      finishedAt: attempt.finished_at,
+      difficultyTier: attempt.difficulty_tier,
+      totalQuestions: attempt.total_questions,
+      correctAnswers: attempt.correct_answers,
+      scorePercent: attempt.score_percent,
+      currentLevel: attempt.current_level,
+      currentStep: attempt.current_step,
+      isComplete: !!attempt.finished_at
     }));
     
     res.json({ attempts: formatted });
@@ -148,27 +145,24 @@ router.get('/attempts/:id', requireAuth, async (req, res) => {
     
     const attempt = await authService.getAttemptById(attemptId);
     
-    if (!attempt || attempt.userId !== userId) {
+    if (!attempt || attempt.user_id !== userId) {
       return res.status(404).json({ error: 'Attempt not found' });
     }
     
     // Get attempt items
-    const items = await db.select()
-      .from(attemptItems)
-      .where(eq(attemptItems.attemptId, attemptId))
-      .orderBy(attemptItems.createdAt);
+    const items = await userService.getAttemptItems(attemptId);
     
     res.json({
       attempt: {
         id: attempt.id,
-        startedAt: attempt.startedAt,
-        finishedAt: attempt.finishedAt,
-        difficultyTier: attempt.difficultyTier,
-        totalQuestions: attempt.totalQuestions,
-        correctAnswers: attempt.correctAnswers,
-        scorePercent: attempt.scorePercent,
-        currentLevel: attempt.currentLevel,
-        reportData: attempt.reportData
+        startedAt: attempt.started_at,
+        finishedAt: attempt.finished_at,
+        difficultyTier: attempt.difficulty_tier,
+        totalQuestions: attempt.total_questions,
+        correctAnswers: attempt.correct_answers,
+        scorePercent: attempt.score_percent,
+        currentLevel: attempt.current_level,
+        reportData: attempt.report_data
       },
       items
     });
@@ -214,11 +208,7 @@ router.post('/attempts/new', requireAuth, requireVerified, async (req, res) => {
 router.get('/teaching-notes', requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
-    
-    const notes = await db.select()
-      .from(teachingNotes)
-      .where(eq(teachingNotes.userId, userId))
-      .orderBy(desc(teachingNotes.createdAt));
+    const notes = await userService.getUserTeachingNotes(userId);
     
     res.json({ notes });
     
