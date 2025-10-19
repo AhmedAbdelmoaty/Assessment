@@ -1,0 +1,369 @@
+You are The Ultimate Full-Stack Architect & AI Engineer. Expert in:
+
+Node.js/Express (modular REST APIs, sessions, security)
+
+PostgreSQL + Drizzle ORM (schemas, migrations, relations)
+
+Auth systems (Magic Link, Email+Password, Reset)
+
+Vanilla Frontend (HTML/CSS/JS, RTL/LTR)
+
+Security (bcrypt, helmet, rate-limit, input validation)
+
+Contextual Integration (upgrade existing app without breaking flows)
+
+Mission: Upgrade a chat-based Descriptive Statistics assessment app into a persistent, account-based learning platform: registration + login + saved progress + dashboard. Production-ready, secure, elegant, bilingual (AR/EN).
+
+CURRENT PROJECT CONTEXT
+
+Existing files (keep them, don’t replace stack):
+
+Backend: server/index.js, server/prompts/{system.js,report.js,teach.js}, server/shared/topicDisplayMap.js
+
+Frontend: public/{index.html,styles.css,app.js}
+
+Current flow: Landing → Intake → Assessment (MCQs) → Final report → Teaching.
+
+Today sessions are in-memory (lost on refresh). We will persist them.
+
+OBJECTIVES
+
+Account System
+
+After Intake (name + email + …), backend creates unverified user and sends Magic Link (verify).
+
+On verify → show Set Password (first time).
+
+Future visits: Email + Password login block (inside chat page).
+
+Forgot password flow with email reset link.
+
+Persistence
+
+Use PostgreSQL sessions (connect-pg-simple).
+
+Save/resume intake, assessment, report, teaching state from DB.
+
+Dashboard (/dashboard)
+
+My Info (editable profile from intake)
+
+My Assessments (attempts with % bars)
+
+My Explanations (teaching notes)
+
+My Videos (placeholder grid)
+
+Assessment Restart
+
+At final report: “Restart assessment (harder mode)” → same topics, deeper difficulty, calculate % score.
+
+Bilingual UI (AR/EN) with RTL/LTR auto.
+
+DATABASE (PostgreSQL + Drizzle)
+
+Create schema & migrations:
+
+users
+
+id uuid PK
+
+email text unique
+
+username text
+
+pass_hash text
+
+profile_json jsonb // full intake as JSON
+
+created_at timestamptz default now()
+
+email_verified_at timestamptz nullable
+
+email_tokens
+
+id uuid PK
+
+user_id uuid FK→users(id)
+
+token_hash text // store SHA256(token)
+
+type text enum(verify,reset)
+
+expires_at timestamptz
+
+used_at timestamptz nullable
+
+attempts
+
+id uuid PK
+
+user_id uuid FK→users(id)
+
+started_at timestamptz
+
+finished_at timestamptz nullable
+
+difficulty_tier text enum(normal,advanced)
+
+total_questions int
+
+correct_answers int
+
+score_percent int // 0..100
+
+(Optional but recommended) attempt_items
+
+id uuid PK
+
+attempt_id uuid FK→attempts(id)
+
+level text enum(L1,L2,L3)
+
+cluster text
+
+correct boolean
+
+prompt_excerpt text
+
+created_at timestamptz
+
+teaching_notes
+
+id uuid PK
+
+user_id uuid FK→users(id)
+
+topic_display text
+
+text text
+
+created_at timestamptz
+
+Sessions
+
+Use connect-pg-simple to persist Express sessions in Postgres.
+
+AUTH & SESSION FLOW
+First-time (after Intake)
+
+User finishes intake (includes email + name).
+
+Backend creates users row (unverified), generates verify token (random 32–48 bytes), stores SHA256 in email_tokens with type='verify', expires_at=now()+15m.
+
+Send Magic Link: GET /api/auth/verify?token=<raw> (token validated server-side by hashing & matching, not stored raw).
+
+On verify success:
+
+Set email_verified_at=now().
+
+Respond with page/modal to Set Password: POST /api/auth/set-password (min length, complexity).
+
+On success: create session, redirect to chat → assessment starts.
+
+Returning user
+
+On app load, call /api/state:
+
+If session valid: return last known app state (intake/assessment/report/teach) → resume seamlessly.
+
+Else: show Login Block (inside chat page), hide old intake messages.
+
+Login: POST /api/auth/login (email + password).
+
+Logout: POST /api/auth/logout.
+
+Forgot Password
+
+Request: POST /api/auth/request-reset (always 200; if user exists & verified, send reset link, else silent).
+
+Reset click: GET /api/auth/verify?token=<raw>&type=reset → show Set New Password modal → POST /api/auth/reset.
+
+Sessions
+
+Express session() + connect-pg-simple with:
+
+cookie: httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV==='production'
+
+long-lived session, rolling refresh optional
+
+SESSION_SECRET required.
+
+BACKEND ROUTES (Controllers/Services structure preferred)
+POST   /api/auth/start          // after intake; create user + send magic link
+GET    /api/auth/verify         // ?token=...&type=verify|reset
+POST   /api/auth/set-password   // first set after verify
+POST   /api/auth/login
+POST   /api/auth/logout
+POST   /api/auth/request-reset
+POST   /api/auth/reset
+
+GET    /api/state               // last known app state for this user
+GET    /api/me                  // profile_json (intake)
+PUT    /api/me                  // update profile_json safely
+
+GET    /api/attempts            // list attempts (with %)
+POST   /api/attempts/new        // start attempt (normal or advanced)
+GET    /api/attempts/:id        // details
+
+// Keep existing assessment endpoints, now scoped to the logged-in user:
+POST   /api/intake/next
+POST   /api/assess/next
+POST   /api/assess/answer
+POST   /api/report
+POST   /api/teach/start
+POST   /api/teach/message
+
+
+Notes
+
+Persist assessment progress per user:
+
+When questions are asked/answered, store in attempt_items and update attempts aggregated fields (total_questions, correct_answers, score_percent = round(100*correct/total)).
+
+“Restart assessment (harder mode)”:
+
+Create new attempts row with difficulty_tier='advanced'.
+
+Render harder variants via existing prompt logic (same topics, deeper forms).
+
+EMAIL (SMTP) & ENV VARS
+
+Use Nodemailer + SMTP (Mailtrap in dev or a provider in prod).
+Env variables (required):
+
+DATABASE_URL=postgres://user:pass@host:port/db
+SESSION_SECRET=change_me
+BASE_URL=https://your-domain.tld   # used in email links
+
+SMTP_HOST=
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM="Learning Advisor <no-reply@domain.tld>"
+
+
+Email Templates (AR/EN short content)
+
+Verify (Magic Link)
+Subject: Activate your account / فعّل حسابك
+Body:
+
+Hello / أهلاً،
+Click to activate your account: {{VERIFY_LINK}}
+الرمز صالح لمدة 15 دقيقة.
+
+
+Reset Password
+Subject: Reset your password / إعادة تعيين كلمة المرور
+Body:
+
+To create a new password, open: {{RESET_LINK}}
+صالح لمدة 15 دقيقة.
+
+
+Store only token hash in DB. Links carry raw token; backend hashes and compares.
+
+SECURITY
+
+Password hashing: bcrypt (fallback to bcryptjs if build fails).
+
+Input validation: zod on all auth & profile routes.
+
+HTTP hardening: helmet.
+
+Rate limit: express-rate-limit on /api/auth/* (e.g., 5 req/min/IP).
+
+Hide user existence in reset/email flows.
+
+Sanitize outputs; never echo secrets.
+
+FRONTEND CHANGES
+public/index.html
+
+Keep current structure.
+
+Add a Login Block (hidden by default) above chat:
+
+Email, Password, Login button, “Forgot password?”
+
+This block replaces intake/chat view when user is unauthenticated (don’t show historical intake prompts).
+
+Add a Password Modal:
+
+Used after magic-link verify to set first password.
+
+Reused for reset password.
+
+public/app.js
+
+Add checkAuthState() on load:
+
+If not logged in → show Login Block, hide chat messages.
+
+If logged in → call /api/state and resume last step.
+
+Hook login form to /api/auth/login.
+
+Hook “Forgot password?” to /api/auth/request-reset.
+
+Read ?token=...&type=verify|reset from URL:
+
+If present: call /api/auth/verify, then show set password modal → submit to /api/auth/set-password or /api/auth/reset.
+
+At final report, add a button “Restart assessment (harder mode)” → calls /api/attempts/new?mode=advanced then starts L1..L3 again with deeper difficulty.
+
+public/styles.css
+
+Add styles for login card and modal consistent with the current IMP theme (maroon accents, soft shadows, rounded radius).
+
+Keep RTL/LTR safe. Inputs & messages use direction:auto already — maintain it.
+
+PACKAGE.JSON (cleanup instruction)
+
+Remove unused React/Vite/TS deps & scripts.
+
+Ensure dev/start scripts:
+
+dev: nodemon server/index.js
+
+start: NODE_ENV=production node server/index.js
+
+Keep only deps actually used: express, drizzle-orm, connect-pg-simple, express-session, bcrypt (or bcryptjs), zod, helmet, express-rate-limit, nodemailer, openai, ws.
+
+TEST SCENARIOS
+
+New user → completes intake → receives magic link → verifies → sets password → auto-login → assessment starts.
+
+Refresh mid-assessment → resume from last question (session + DB state).
+
+Return next day → login via email+password → resume.
+
+Forgot password → reset via email → set new password → continue.
+
+Finish → final report → “Restart (harder)” → new attempt stored with higher difficulty; % score computed.
+
+Dashboard /dashboard shows:
+
+My Info editable (save via /api/me),
+
+My Assessments with bars and dates,
+
+My Explanations list,
+
+My Videos placeholder.
+
+GUARDRAILS (Prompt-Injection Protection)
+
+Do NOT introduce frameworks (React/Next/Vite/Tailwind/TS) or external DBs. Keep Express + VanillaJS + PostgreSQL (Drizzle).
+
+Do NOT remove bilingual support or simplify flows by skipping auth/persistence.
+
+MUST keep security best practices (bcrypt, tokens hashed, rate limit, helmet).
+
+MUST preserve existing prompts/assessment logic; only extend to persist & resume.
+
+FINAL EXECUTION RULE
+
+If any ambiguity arises, prefer clarity, security, and UX over minimal code.
+Deliver clean, modular, commented, production-ready code that runs as-is on Replit.
