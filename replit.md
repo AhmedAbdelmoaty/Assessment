@@ -6,6 +6,34 @@ This is a bilingual (English/Arabic) learning assessment platform designed to ev
 
 The platform uses an adaptive assessment engine that dynamically adjusts question difficulty based on user performance, covering descriptive statistics topics from foundational concepts to professional-level skills.
 
+## Recent Changes (October 2025)
+
+**Authentication & Persistence Infrastructure Built (Not Yet Integrated)**
+
+Created complete authentication and database persistence system:
+- PostgreSQL database with 6 tables (users, email_tokens, attempts, attempt_items, teaching_notes, session)
+- Auth services (bcrypt password hashing, token generation, user CRUD)
+- Email service (nodemailer with magic link verification and password reset)
+- Security middleware (helmet, rate limiting, auth guards)
+- Auth routes (/start, /verify, /login, /logout, /request-reset, /reset)
+- User state routes (/state, /me, /attempts, /teaching-notes)
+
+**Critical Integration Blocker**
+
+TypeScript/JavaScript compatibility issue prevents integration:
+- Server runs as vanilla JavaScript (`node server/index.js`)
+- Auth infrastructure depends on TypeScript files (`shared/schema.ts`)
+- Importing TypeScript from JavaScript causes module resolution errors
+- Routes cannot be mounted until compatibility is resolved
+
+**Resolution Options**
+
+1. **Vanilla JavaScript Approach**: Convert shared/schema.ts and all services to plain .js files
+2. **TypeScript Runtime Approach**: Change workflow to use `tsx server/index.js` instead of `node`
+3. **Hybrid Approach**: Keep schema in TypeScript but use raw SQL in services to avoid imports
+
+Current server is stable and running with original features (intake, assessment, teaching). Auth features are ready but inactive.
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

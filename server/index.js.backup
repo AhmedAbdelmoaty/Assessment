@@ -16,7 +16,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
 
-// In-memory session store for legacy compatibility (will migrate to database)
+// In-memory session store
 const sessions = new Map();
 
 // OpenAI client
