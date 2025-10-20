@@ -761,12 +761,13 @@ app.post("/api/report", async (req, res) => {
         await db.insert(userAssessments).values({
           userId: req.session.userId,
           startedAt: new Date(),
-          completedAt: new Date(),
-          evidenceJson: evidence,
-          strengthsJson: strengths,
-          gapsJson: gaps,
-          reportJson: report,
-          scorePercent: total_questions > 0 ? Math.round((total_correct / total_questions) * 100) : 0
+          finishedAt: new Date(),
+          totalQuestions: total_questions,
+          correctAnswers: total_correct,
+          scorePercent: total_questions > 0 ? Math.round((total_correct / total_questions) * 100) : 0,
+          currentLevel: highestReached,
+          assessmentState: { evidence, strengths, gaps },
+          reportData: report
         });
         console.log(`[REPORT] Saved assessment results for user ${req.session.userId}`);
       } catch (err) {

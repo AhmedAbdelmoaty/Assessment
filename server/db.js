@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/neon-serverless';
-import { Pool } from '@neondatabase/serverless';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 import { 
   pgTable, 
   uuid, 
@@ -11,6 +12,9 @@ import {
   varchar
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+
+// Configure WebSocket for Neon
+neonConfig.webSocketConstructor = ws;
 
 // Database connection
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
