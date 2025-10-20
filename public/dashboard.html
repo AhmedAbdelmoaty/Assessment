@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Learning Assessment Platform</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body { margin: 0; font-family: var(--font-sans); }
+        .dashboard-header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+        .header-logo {
+            font-size: 24px;
+            color: var(--primary);
+            font-weight: 700;
+        }
+        .header-nav {
+            display: flex;
+            gap: 8px;
+            margin-right: auto;
+        }
+        .nav-btn {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: var(--foreground);
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        .nav-btn.active {
+            background: var(--primary);
+            color: var(--primary-foreground);
+        }
+        .nav-btn:hover:not(.active) {
+            background: var(--muted);
+        }
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .lang-toggle-dash {
+            display: flex;
+            gap: 6px;
+        }
+        .lang-btn-dash {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            background: var(--background);
+            color: var(--foreground);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .lang-btn-dash.active {
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border-color: var(--primary);
+        }
+        .logout-btn {
+            padding: 10px 20px;
+            background: var(--destructive);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+        .dash-section {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: var(--foreground);
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+        .info-item {
+            padding: 12px;
+            background: var(--muted);
+            border-radius: 8px;
+        }
+        .info-label {
+            font-size: 12px;
+            color: var(--muted-foreground);
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--foreground);
+        }
+        .edit-btn {
+            margin-top: 16px;
+            padding: 10px 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .assessment-item {
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .assessment-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--muted);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted-foreground);
+        }
+        .placeholder-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        .placeholder-card {
+            aspect-ratio: 16/9;
+            background: var(--muted);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted-foreground);
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-header">
+        <div class="header-logo">
+            <i class="fas fa-chart-line"></i>
+        </div>
+        <div class="header-nav">
+            <button class="nav-btn active" data-page="dashboard">
+                <span data-lang-content="en">Dashboard</span>
+                <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
+            </button>
+            <button class="nav-btn" data-page="chat" onclick="window.location.href='/'">
+                <span data-lang-content="en">Chat</span>
+                <span class="hidden" data-lang-content="ar">الدردشة</span>
+            </button>
+        </div>
+        <div class="header-actions">
+            <div class="lang-toggle-dash">
+                <button class="lang-btn-dash active" data-lang="en">EN</button>
+                <button class="lang-btn-dash" data-lang="ar">عربي</button>
+            </div>
+            <button class="logout-btn" id="logoutBtn">
+                <i class="fas fa-sign-out-alt"></i>
+                <span data-lang-content="en">Logout</span>
+                <span class="hidden" data-lang-content="ar">خروج</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="dashboard-container">
+        <!-- My Info -->
+        <div class="dash-section">
+            <h2 class="section-title">
+                <i class="fas fa-user"></i>
+                <span data-lang-content="en">My Info</span>
+                <span class="hidden" data-lang-content="ar">معلوماتي</span>
+            </h2>
+            <div class="info-grid" id="infoGrid">
+                <div class="info-item">
+                    <div class="info-label" data-lang-content="en">Name</div>
+                    <div class="info-label hidden" data-lang-content="ar">الاسم</div>
+                    <div class="info-value" id="infoName">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label" data-lang-content="en">Email</div>
+                    <div class="info-label hidden" data-lang-content="ar">البريد</div>
+                    <div class="info-value" id="infoEmail">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label" data-lang-content="en">Username</div>
+                    <div class="info-label hidden" data-lang-content="ar">اسم المستخدم</div>
+                    <div class="info-value" id="infoUsername">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label" data-lang-content="en">Phone</div>
+                    <div class="info-label hidden" data-lang-content="ar">الهاتف</div>
+                    <div class="info-value" id="infoPhone">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- My Assessments -->
+        <div class="dash-section">
+            <h2 class="section-title">
+                <i class="fas fa-clipboard-check"></i>
+                <span data-lang-content="en">My Assessments</span>
+                <span class="hidden" data-lang-content="ar">تقييماتي</span>
+            </h2>
+            <div id="assessmentsList"></div>
+        </div>
+
+        <!-- My Explanations -->
+        <div class="dash-section">
+            <h2 class="section-title">
+                <i class="fas fa-book"></i>
+                <span data-lang-content="en">My Explanations</span>
+                <span class="hidden" data-lang-content="ar">شروحاتي</span>
+            </h2>
+            <div id="explanationsList"></div>
+        </div>
+
+        <!-- My Videos -->
+        <div class="dash-section">
+            <h2 class="section-title">
+                <i class="fas fa-video"></i>
+                <span data-lang-content="en">My Videos</span>
+                <span class="hidden" data-lang-content="ar">فيديوهاتي</span>
+            </h2>
+            <div class="placeholder-grid">
+                <div class="placeholder-card">
+                    <span data-lang-content="en">Coming Soon</span>
+                    <span class="hidden" data-lang-content="ar">قريبا</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+
+        // Language toggle
+        document.querySelectorAll('.lang-btn-dash').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentLang = this.getAttribute('data-lang');
+                document.querySelectorAll('.lang-btn-dash').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                document.documentElement.setAttribute('lang', currentLang);
+                document.documentElement.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
+                
+                document.querySelectorAll('[data-lang-content]').forEach(el => {
+                    el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== currentLang);
+                });
+            });
+        });
+
+        // Load user data
+        async function loadProfile() {
+            try {
+                const response = await fetch('/api/me');
+                if (!response.ok) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const data = await response.json();
+                
+                document.getElementById('infoName').textContent = data.name || '-';
+                document.getElementById('infoEmail').textContent = data.email || '-';
+                document.getElementById('infoUsername').textContent = data.username || '-';
+                document.getElementById('infoPhone').textContent = data.phone || '-';
+            } catch (error) {
+                console.error('Failed to load profile:', error);
+            }
+        }
+
+        // Load assessments
+        async function loadAssessments() {
+            try {
+                const response = await fetch('/api/me/assessments');
+                const assessments = await response.json();
+                
+                const container = document.getElementById('assessmentsList');
+                if (assessments.length === 0) {
+                    container.innerHTML = `<div class="empty-state">
+                        <i class="fas fa-clipboard-list" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                        <p>${currentLang === 'ar' ? 'لا توجد تقييمات بعد' : 'No assessments yet'}</p>
+                    </div>`;
+                    return;
+                }
+                
+                container.innerHTML = assessments.map(a => `
+                    <div class="assessment-item">
+                        <div class="assessment-header">
+                            <span><strong>${new Date(a.startedAt).toLocaleDateString()}</strong></span>
+                            <span><strong>${a.scorePercent || 0}%</strong></span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${a.scorePercent || 0}%"></div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load assessments:', error);
+            }
+        }
+
+        // Load explanations
+        async function loadExplanations() {
+            try {
+                const response = await fetch('/api/me/explanations');
+                const explanations = await response.json();
+                
+                const container = document.getElementById('explanationsList');
+                if (explanations.length === 0) {
+                    container.innerHTML = `<div class="empty-state">
+                        <i class="fas fa-book-open" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                        <p>${currentLang === 'ar' ? 'لا توجد شروحات بعد' : 'No explanations yet'}</p>
+                    </div>`;
+                    return;
+                }
+                
+                container.innerHTML = explanations.slice(0, 5).map(e => `
+                    <div class="assessment-item">
+                        <strong>${e.topic || 'Learning Topic'}</strong>
+                        <p style="margin-top: 8px; color: var(--muted-foreground);">${e.content.slice(0, 100)}...</p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load explanations:', error);
+            }
+        }
+
+        // Logout
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.href = '/';
+            } catch (error) {
+                console.error('Logout failed:', error);
+            }
+        });
+
+        // Load all data
+        loadProfile();
+        loadAssessments();
+        loadExplanations();
+    </script>
+</body>
+</html>

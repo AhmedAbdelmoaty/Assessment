@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - Learning Assessment Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .auth-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .auth-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 48px;
+            max-width: 480px;
+            width: 100%;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        .auth-logo {
+            font-size: 48px;
+            color: var(--primary);
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .auth-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--foreground);
+            text-align: center;
+            margin-bottom: 8px;
+        }
+        .auth-subtitle {
+            color: var(--muted-foreground);
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--foreground);
+        }
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .form-input-error {
+            border-color: var(--destructive);
+        }
+        .form-error {
+            color: var(--destructive);
+            font-size: 14px;
+            margin-top: 6px;
+        }
+        .form-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: filter 0.2s;
+        }
+        .form-btn:hover {
+            filter: brightness(0.95);
+        }
+        .form-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .form-link {
+            text-align: center;
+            margin-top: 24px;
+            color: var(--muted-foreground);
+        }
+        .form-link a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .form-link a:hover {
+            text-decoration: underline;
+        }
+        .otp-section {
+            display: none;
+        }
+        .otp-section.active {
+            display: block;
+        }
+        .signup-section.hidden {
+            display: none;
+        }
+        .dev-notice {
+            background: #FFF3CD;
+            border: 1px solid #FFC107;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            color: #856404;
+        }
+        .success-notice {
+            background: #D4EDDA;
+            border: 1px solid #28A745;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <!-- Language Toggle -->
+    <div class="lang-toggle">
+        <button class="lang-btn active" data-lang="en">English</button>
+        <button class="lang-btn" data-lang="ar">عربي</button>
+    </div>
+
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <i class="fas fa-chart-line"></i>
+            </div>
+
+            <!-- Sign Up Form -->
+            <div class="signup-section">
+                <h1 class="auth-title" data-lang-content="en">Create Account</h1>
+                <h1 class="auth-title hidden" data-lang-content="ar">إنشاء حساب</h1>
+                <p class="auth-subtitle" data-lang-content="en">Join us to start your learning journey</p>
+                <p class="auth-subtitle hidden" data-lang-content="ar">انضم إلينا لبدء رحلة التعلم</p>
+
+                <div id="errorMessage" class="form-error" style="display:none;"></div>
+
+                <form id="signupForm">
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Full Name</label>
+                        <label class="form-label hidden" data-lang-content="ar">الاسم الكامل</label>
+                        <input type="text" id="name" class="form-input" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Username</label>
+                        <label class="form-label hidden" data-lang-content="ar">اسم المستخدم</label>
+                        <input type="text" id="username" class="form-input" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Email</label>
+                        <label class="form-label hidden" data-lang-content="ar">البريد الإلكتروني</label>
+                        <input type="email" id="email" class="form-input" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Phone (Optional)</label>
+                        <label class="form-label hidden" data-lang-content="ar">رقم الهاتف (اختياري)</label>
+                        <input type="tel" id="phone" class="form-input">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Password</label>
+                        <label class="form-label hidden" data-lang-content="ar">كلمة المرور</label>
+                        <input type="password" id="password" class="form-input" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Confirm Password</label>
+                        <label class="form-label hidden" data-lang-content="ar">تأكيد كلمة المرور</label>
+                        <input type="password" id="confirmPassword" class="form-input" required>
+                    </div>
+
+                    <button type="submit" class="form-btn" id="signupBtn">
+                        <span data-lang-content="en">Sign Up</span>
+                        <span class="hidden" data-lang-content="ar">إنشاء حساب</span>
+                    </button>
+                </form>
+
+                <div class="form-link">
+                    <span data-lang-content="en">Already have an account?</span>
+                    <span class="hidden" data-lang-content="ar">لديك حساب بالفعل؟</span>
+                    <a href="/login.html">
+                        <span data-lang-content="en">Login</span>
+                        <span class="hidden" data-lang-content="ar">تسجيل الدخول</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- OTP Verification -->
+            <div class="otp-section" id="otpSection">
+                <h1 class="auth-title" data-lang-content="en">Verify Email</h1>
+                <h1 class="auth-title hidden" data-lang-content="ar">تأكيد البريد الإلكتروني</h1>
+                <p class="auth-subtitle" data-lang-content="en">Enter the 6-digit code sent to your email</p>
+                <p class="auth-subtitle hidden" data-lang-content="ar">أدخل الرمز المكون من 6 أرقام المرسل إلى بريدك الإلكتروني</p>
+
+                <div id="devNotice" class="dev-notice" style="display:none;">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span data-lang-content="en">DEV MODE: Check server console for OTP code</span>
+                    <span class="hidden" data-lang-content="ar">وضع التطوير: تحقق من وحدة التحكم بالخادم للحصول على رمز OTP</span>
+                </div>
+
+                <div id="otpError" class="form-error" style="display:none;"></div>
+
+                <form id="otpForm">
+                    <div class="form-group">
+                        <label class="form-label" data-lang-content="en">Verification Code</label>
+                        <label class="form-label hidden" data-lang-content="ar">رمز التحقق</label>
+                        <input type="text" id="otpCode" class="form-input" maxlength="6" required>
+                    </div>
+
+                    <button type="submit" class="form-btn" id="verifyBtn">
+                        <span data-lang-content="en">Verify</span>
+                        <span class="hidden" data-lang-content="ar">تحقق</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentLang = 'en';
+        let userEmail = '';
+
+        // Language toggle
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentLang = this.getAttribute('data-lang');
+                document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                document.documentElement.setAttribute('lang', currentLang);
+                document.documentElement.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
+                
+                document.querySelectorAll('[data-lang-content]').forEach(el => {
+                    el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== currentLang);
+                });
+            });
+        });
+
+        // Signup form
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value;
+            const username = document.getElementById('username').value;
+            const email = document.getElementById('email').value;
+            const phone = document.getElementById('phone').value;
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, username, email, phone, password, confirmPassword })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    errorDiv.textContent = data.error || 'Signup failed';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                userEmail = email;
+                
+                // Show OTP section
+                document.querySelector('.signup-section').classList.add('hidden');
+                document.getElementById('otpSection').classList.add('active');
+                
+                if (data.devMode) {
+                    document.getElementById('devNotice').style.display = 'block';
+                }
+                
+            } catch (error) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        });
+
+        // OTP form
+        document.getElementById('otpForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const code = document.getElementById('otpCode').value;
+            const errorDiv = document.getElementById('otpError');
+            errorDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/auth/verify-otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: userEmail, code })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    errorDiv.textContent = data.error || 'Verification failed';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Show success and redirect
+                const successMsg = currentLang === 'ar' ? 
+                    'تم التحقق بنجاح! جاري التوجيه إلى صفحة تسجيل الدخول...' :
+                    'Verification successful! Redirecting to login...';
+                
+                document.getElementById('otpSection').innerHTML = `
+                    <div class="success-notice">
+                        <i class="fas fa-check-circle"></i> ${successMsg}
+                    </div>
+                `;
+                
+                setTimeout(() => {
+                    window.location.href = '/login.html';
+                }, 2000);
+                
+            } catch (error) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
