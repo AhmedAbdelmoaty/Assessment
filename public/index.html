@@ -9,47 +9,51 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
+    <script src="/js/header.js"></script>
 </head>
 <body>
-    <!-- Global Header: same spacing/class as original chat header -->
+    <!-- Global Header -->
     <div class="chat-header" id="globalHeader">
-      <!-- Logo (replaces robot + titles) -->
+      <!-- Logo -->
       <img
         src="/assets/imp-logo.jpeg"
         alt="IMP - Institute of Management Professionals"
         class="brand-logo"
       />
 
-      <!-- Auth Buttons (shown when logged out) -->
-      <div class="header-auth-buttons" id="authButtonsLoggedOut" style="margin-left: auto; display: flex; gap: 12px;">
-        <a href="/login.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;">
-          <span data-lang-content="en">Login</span>
-          <span class="hidden" data-lang-content="ar">دخول</span>
-        </a>
-        <a href="/signup.html" class="auth-link-btn" style="padding: 10px 20px; background: var(--primary); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
-          <span data-lang-content="en">Sign Up</span>
-          <span class="hidden" data-lang-content="ar">تسجيل</span>
-        </a>
-      </div>
+      <!-- Header Actions Container (aligned to far right) -->
+      <div class="header-actions">
+        <!-- Auth Buttons (shown when logged out) -->
+        <div class="header-auth-buttons" id="authButtonsLoggedOut" style="display: flex; gap: 12px;">
+          <a href="/login.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;">
+            <span data-lang-content="en">Login</span>
+            <span class="hidden" data-lang-content="ar">دخول</span>
+          </a>
+          <a href="/signup.html" class="auth-link-btn" style="padding: 10px 20px; background: var(--primary); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
+            <span data-lang-content="en">Sign Up</span>
+            <span class="hidden" data-lang-content="ar">تسجيل</span>
+          </a>
+        </div>
 
-      <!-- User Menu (shown when logged in) -->
-      <div class="header-user-menu" id="userMenuLoggedIn" style="margin-left: auto; display: none; gap: 12px;">
-        <a href="/dashboard.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;">
-          <i class="fas fa-th-large"></i>
-          <span data-lang-content="en">Dashboard</span>
-          <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
-        </a>
-        <button id="headerLogoutBtn" style="padding: 10px 20px; background: var(--destructive); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
-          <i class="fas fa-sign-out-alt"></i>
-          <span data-lang-content="en">Logout</span>
-          <span class="hidden" data-lang-content="ar">خروج</span>
-        </button>
-      </div>
+        <!-- User Menu (shown when logged in) -->
+        <div class="header-user-menu" id="userMenuLoggedIn" style="display: none; gap: 12px;">
+          <a href="/dashboard.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;">
+            <i class="fas fa-th-large"></i>
+            <span data-lang-content="en">Dashboard</span>
+            <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
+          </a>
+          <button id="headerLogoutBtn" class="btn-logout">
+            <i class="fas fa-sign-out-alt"></i>
+            <span data-lang-content="en">Logout</span>
+            <span class="hidden" data-lang-content="ar">خروج</span>
+          </button>
+        </div>
 
-      <!-- Language toggle moved inside the header (keep original shape) -->
-      <div class="lang-toggle header-lang">
-        <button type="button" class="lang-btn active" data-lang="en">English</button>
-        <button type="button" class="lang-btn" data-lang="ar">العربية</button>
+        <!-- Divider -->
+        <div class="header-divider"></div>
+
+        <!-- Single Language Toggle -->
+        <div id="lang-switch"></div>
       </div>
     </div>
 
@@ -91,6 +95,11 @@
     </section>
 
     <script>
+        // Initialize language switch
+        document.addEventListener('DOMContentLoaded', () => {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+        });
+
         // Check authentication state on page load
         async function checkAuthState() {
             try {

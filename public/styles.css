@@ -368,19 +368,88 @@ body {
     background: var(--muted);
 }
 
-/* Logout button in header */
-.logout-btn-header {
-    padding: 10px 20px;
-    background: var(--destructive);
-    color: white;
+/* Logout button in header - UPDATED to brand maroon */
+.logout-btn-header,
+.btn-logout {
+    padding: 10px 16px;
+    background: var(--primary);
+    color: var(--primary-foreground);
     border: none;
-    border-radius: 8px;
+    border-radius: 999px;
     cursor: pointer;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    box-shadow: 0 3px 10px rgba(165, 32, 37, 0.25);
+    transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.logout-btn-header:hover,
+.btn-logout:hover {
+    filter: brightness(0.95);
+    transform: translateY(-1px);
+}
+
+/* Header actions container (for Home page) */
+.header-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Header divider (between buttons and language) */
+.header-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--border);
+}
+
+/* Unified single language switch button */
+.lang-switch {
+    display: inline-flex;
+    align-items: center;
+}
+
+.lang-switch .lang-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--foreground);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Language button icon (using Font Awesome) */
+.lang-switch .lang-btn::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-style: normal;
+    content: attr(data-lang-icon);
+    font-size: 14px;
+    display: inline-block;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.lang-switch .lang-btn:hover {
+    filter: brightness(0.97);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.lang-switch .lang-btn:focus-visible {
+    outline: 3px solid var(--primary-15);
+    outline-offset: 2px;
+    border-color: var(--primary);
 }
 
 .chat-messages {

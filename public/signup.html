@@ -9,52 +9,60 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
+    <script src="/js/header.js"></script>
     <style>
         .auth-container {
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 24px;
+            padding: 16px;
+            max-height: calc(100vh - 60px);
+            overflow-y: auto;
         }
         .auth-card {
             background: var(--card);
             border-radius: var(--radius);
-            padding: 48px;
+            padding: 24px 28px;
             max-width: 480px;
             width: 100%;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            margin: auto;
         }
         .auth-logo {
-            font-size: 48px;
-            color: var(--primary);
-            text-align: center;
-            margin-bottom: 24px;
+            height: 56px;
+            width: auto;
+            display: block;
+            margin: 0 auto 12px;
         }
         .auth-title {
-            font-size: 28px;
+            font-size: 24px;
             font-weight: 700;
             color: var(--foreground);
             text-align: center;
-            margin-bottom: 8px;
+            margin-top: 4px;
+            margin-bottom: 6px;
         }
         .auth-subtitle {
             color: var(--muted-foreground);
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 16px;
+            font-size: 14px;
         }
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 12px;
         }
         .form-label {
             display: block;
             font-weight: 600;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             color: var(--foreground);
+            font-size: 14px;
         }
         .form-input {
             width: 100%;
-            padding: 12px 16px;
+            padding: 11px 14px;
+            min-height: 44px;
             border: 1px solid var(--border);
             border-radius: 8px;
             font-size: 15px;
@@ -74,7 +82,8 @@
         }
         .form-btn {
             width: 100%;
-            padding: 14px;
+            padding: 13px;
+            min-height: 48px;
             background: var(--primary);
             color: var(--primary-foreground);
             border: none;
@@ -93,8 +102,9 @@
         }
         .form-link {
             text-align: center;
-            margin-top: 24px;
+            margin-top: 16px;
             color: var(--muted-foreground);
+            font-size: 14px;
         }
         .form-link a {
             color: var(--primary);
@@ -117,33 +127,31 @@
             background: #FFF3CD;
             border: 1px solid #FFC107;
             border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 16px;
-            font-size: 14px;
+            padding: 10px;
+            margin-bottom: 12px;
+            font-size: 13px;
             color: #856404;
         }
         .success-notice {
             background: #D4EDDA;
             border: 1px solid #28A745;
             border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
+            padding: 12px;
+            margin-bottom: 12px;
+            font-size: 14px;
             color: #155724;
         }
     </style>
 </head>
 <body>
-    <!-- Language Toggle -->
+    <!-- Single Language Toggle -->
     <div class="lang-toggle">
-        <button class="lang-btn active" data-lang="en">English</button>
-        <button class="lang-btn" data-lang="ar">عربي</button>
+        <div id="lang-switch"></div>
     </div>
 
     <div class="auth-container">
         <div class="auth-card">
-            <div class="auth-logo">
-                <i class="fas fa-chart-line"></i>
-            </div>
+            <img src="/assets/imp-logo.jpeg" alt="IMP Logo" class="auth-logo">
 
             <!-- Sign Up Form -->
             <div class="signup-section">
@@ -239,23 +247,11 @@
     </div>
 
     <script>
-        let currentLang = 'en';
         let userEmail = '';
-
-        // Language toggle
-        document.querySelectorAll('.lang-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                currentLang = this.getAttribute('data-lang');
-                document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                
-                document.documentElement.setAttribute('lang', currentLang);
-                document.documentElement.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-                
-                document.querySelectorAll('[data-lang-content]').forEach(el => {
-                    el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== currentLang);
-                });
-            });
+        
+        // Initialize language switch
+        document.addEventListener('DOMContentLoaded', () => {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
         });
 
         // Signup form
@@ -327,6 +323,7 @@
                 }
                 
                 // Show success and redirect
+                const currentLang = HeaderUtils.getCurrentLang();
                 const successMsg = currentLang === 'ar' ? 
                     'تم التحقق بنجاح! جاري التوجيه إلى صفحة تسجيل الدخول...' :
                     'Verification successful! Redirecting to login...';

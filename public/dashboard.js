@@ -22,32 +22,13 @@
         }
 
         // User is authenticated, proceed with setup
-        setupLanguageToggle();
+        // Initialize language switch using shared header.js
+        if (window.HeaderUtils) {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+        }
+        
         setupLogout();
         loadDashboardData();
-    }
-
-    function setupLanguageToggle() {
-        document.querySelectorAll(".lang-btn").forEach((btn) => {
-            btn.addEventListener("click", function () {
-                currentLang = this.getAttribute("data-lang");
-                document
-                    .querySelectorAll(".lang-btn")
-                    .forEach((b) => b.classList.remove("active"));
-                this.classList.add("active");
-
-                document.documentElement.setAttribute("lang", currentLang);
-                document.documentElement.classList.toggle("lang-ar", currentLang === "ar");
-                document.documentElement.classList.toggle("lang-en", currentLang !== "ar");
-
-                document.querySelectorAll("[data-lang-content]").forEach((el) => {
-                    el.classList.toggle(
-                        "hidden",
-                        el.getAttribute("data-lang-content") !== currentLang,
-                    );
-                });
-            });
-        });
     }
 
     function setupLogout() {

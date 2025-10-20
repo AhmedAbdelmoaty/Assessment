@@ -37,7 +37,12 @@
         }
 
         // User is authenticated, proceed with setup
-        setupLanguageToggle();
+        // Initialize language switch using shared header.js
+        if (window.HeaderUtils) {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+            currentLang = HeaderUtils.getCurrentLang();
+        }
+        
         setupSendButton();
         setupInputHandlers();
         setupLogout();

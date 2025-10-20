@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
+    <script src="/js/header.js"></script>
     <style>
         .auth-container {
             min-height: 100vh;
@@ -20,19 +21,19 @@
         .auth-card {
             background: var(--card);
             border-radius: var(--radius);
-            padding: 48px;
+            padding: 32px 40px;
             max-width: 440px;
             width: 100%;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
         }
         .auth-logo {
-            font-size: 48px;
-            color: var(--primary);
-            text-align: center;
-            margin-bottom: 24px;
+            height: 60px;
+            width: auto;
+            display: block;
+            margin: 0 auto 16px;
         }
         .auth-title {
-            font-size: 28px;
+            font-size: 26px;
             font-weight: 700;
             color: var(--foreground);
             text-align: center;
@@ -41,10 +42,11 @@
         .auth-subtitle {
             color: var(--muted-foreground);
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 24px;
+            font-size: 15px;
         }
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
         .form-label {
             display: block;
@@ -112,17 +114,14 @@
     </style>
 </head>
 <body>
-    <!-- Language Toggle -->
+    <!-- Single Language Toggle -->
     <div class="lang-toggle">
-        <button class="lang-btn active" data-lang="en">English</button>
-        <button class="lang-btn" data-lang="ar">عربي</button>
+        <div id="lang-switch"></div>
     </div>
 
     <div class="auth-container">
         <div class="auth-card">
-            <div class="auth-logo">
-                <i class="fas fa-chart-line"></i>
-            </div>
+            <img src="/assets/imp-logo.jpeg" alt="IMP Logo" class="auth-logo">
 
             <h1 class="auth-title" data-lang-content="en">Welcome Back</h1>
             <h1 class="auth-title hidden" data-lang-content="ar">مرحباً بعودتك</h1>
@@ -163,32 +162,21 @@
     </div>
 
     <script>
-        let currentLang = 'en';
-
-        // Check for success message from signup
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('verified') === 'true') {
-            const successDiv = document.getElementById('successMessage');
-            successDiv.textContent = currentLang === 'ar' ? 
-                'تم التحقق من حسابك بنجاح! الرجاء تسجيل الدخول.' :
-                'Account verified successfully! Please login.';
-            successDiv.style.display = 'block';
-        }
-
-        // Language toggle
-        document.querySelectorAll('.lang-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                currentLang = this.getAttribute('data-lang');
-                document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                
-                document.documentElement.setAttribute('lang', currentLang);
-                document.documentElement.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-                
-                document.querySelectorAll('[data-lang-content]').forEach(el => {
-                    el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== currentLang);
-                });
-            });
+        // Initialize language switch and check for success message
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize language toggle
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+            
+            // Check for success message from signup
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('verified') === 'true') {
+                const successDiv = document.getElementById('successMessage');
+                const currentLang = HeaderUtils.getCurrentLang();
+                successDiv.textContent = currentLang === 'ar' ? 
+                    'تم التحقق من حسابك بنجاح! الرجاء تسجيل الدخول.' :
+                    'Account verified successfully! Please login.';
+                successDiv.style.display = 'block';
+            }
         });
 
         // Login form
