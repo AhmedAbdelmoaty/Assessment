@@ -4,10 +4,19 @@ import { dirname, join } from "path";
 import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import fs from "fs";
+import session from "express-session";
+import pgSession from "connect-pg-simple";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { z } from "zod";
 import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
+import { db } from "./db.js";
+import { users, userProgress, userAssessments } from "../shared/schema.js";
+import { eq, desc } from "drizzle-orm";
+import * as auth from "./auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,7 +25,36 @@ const app = express();
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
 
-// In-memory session store
+// === Security & Sessions ===
+app.set("trust proxy", 1);
+app.use(helmet({
+  contentSecurityPolicy: false, // Allow inline scripts for vanilla JS app
+}));
+
+const PgSession = pgSession(session);
+app.use(session({
+  store: new PgSession({ 
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: true,
+  }),
+  secret: process.env.SESSION_SECRET || "dev_secret_change_me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
+  }
+}));
+
+const otpLimiter = rateLimit({ 
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 requests per window
+  message: "Too many OTP requests, please try again later."
+});
+
+// In-memory session store (keeping for backward compatibility with existing assessment code)
 const sessions = new Map();
 
 // OpenAI client
@@ -109,10 +147,9 @@ async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 
   throw new Error("Run polling timeout");
 }
 
-// Intake order & opening
+// Intake order & opening (email moved to LAST position per auth requirements)
 const INTAKE_ORDER = [
   "name_full",
-  "email",
   "phone_number",
   "country",
   "age_band",
@@ -121,6 +158,7 @@ const INTAKE_ORDER = [
   "job_title_exact",
   "sector",
   "learning_reason",
+  "email", // LAST position - triggers OTP flow
 ];
 const INTAKE_OPENING = {
   ar: "أهلاً 👋 قبل ما نبدأ، هحتاج منك بعض التفاصيل البسيطة علشان نخصّص الاسئلة حسب خبرتك وهدفك. هنكملها خطوة بخطوة",
