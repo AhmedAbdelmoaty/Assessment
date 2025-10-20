@@ -228,11 +228,19 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Create session
-    req.session.userId = user.id;
-    req.session.email = user.email;
+    // Regenerate session to prevent session fixation
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('Session regeneration error:', err);
+        return res.status(500).json({ error: 'Login failed' });
+      }
 
-    res.json({ ok: true });
+      // Create session with user data
+      req.session.userId = user.id;
+      req.session.email = user.email;
+
+      res.json({ ok: true });
+    });
 
   } catch (error) {
     console.error('Login error:', error);

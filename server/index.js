@@ -366,6 +366,26 @@ app.post("/api/intake/next", async (req, res) => {
     const session = getSession(sessionId);
     session.lang = lang;
 
+    // Auto-populate name/email/phone for logged-in users
+    if (req.session.userId && session.intakeStepIndex === 0 && !session.authDataLoaded) {
+      try {
+        const { db, users } = await import('./db.js');
+        const { eq } = await import('drizzle-orm');
+        const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
+        
+        if (user) {
+          const profile = user.profileJson || {};
+          session.intake.name_full = profile.name || user.username;
+          session.intake.email = user.email;
+          session.intake.phone_number = profile.phone || '';
+          session.intakeStepIndex = 3; // Skip to country (index 3)
+          session.authDataLoaded = true;
+        }
+      } catch (err) {
+        console.error('Failed to load user data:', err);
+      }
+    }
+
     if (answer !== undefined && answer !== null) {
       const currentStepKey = INTAKE_ORDER[session.intakeStepIndex];
       const stepConfig = INTAKE_CATALOG[currentStepKey];
@@ -381,6 +401,21 @@ app.post("/api/intake/next", async (req, res) => {
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
+      
+      // Save intake data to database for logged-in users
+      if (req.session.userId) {
+        try {
+          const { db, users } = await import('./db.js');
+          const { eq } = await import('drizzle-orm');
+          await db.update(users).set({ 
+            profileJson: { ...session.intake, intakeCompleted: true, intakeCompletedAt: new Date().toISOString() }
+          }).where(eq(users.id, req.session.userId));
+          console.log(`[INTAKE] Saved intake data for user ${req.session.userId}`);
+        } catch (err) {
+          console.error('[INTAKE] Failed to save intake to database:', err);
+        }
+      }
+      
       return res.json({
         done: true,
         message:
@@ -718,6 +753,26 @@ app.post("/api/report", async (req, res) => {
     session.report = report;
     session.finished = true;
     session.currentStep = "report";
+
+    // Save assessment results to database for logged-in users
+    if (req.session.userId) {
+      try {
+        const { db, userAssessments } = await import('./db.js');
+        await db.insert(userAssessments).values({
+          userId: req.session.userId,
+          startedAt: new Date(),
+          completedAt: new Date(),
+          evidenceJson: evidence,
+          strengthsJson: strengths,
+          gapsJson: gaps,
+          reportJson: report,
+          scorePercent: total_questions > 0 ? Math.round((total_correct / total_questions) * 100) : 0
+        });
+        console.log(`[REPORT] Saved assessment results for user ${req.session.userId}`);
+      } catch (err) {
+        console.error('[REPORT] Failed to save assessment to database:', err);
+      }
+    }
 
     return res.json(report);
   } catch (err) {
