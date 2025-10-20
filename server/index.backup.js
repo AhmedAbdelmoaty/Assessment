@@ -8,59 +8,13 @@ import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
-import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import authRoutes from "./routes/auth.js";
-import profileRoutes from "./routes/profile.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: false, // Allow inline scripts for now
-  crossOriginEmbedderPolicy: false
-}));
-
-// Rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 requests per window
-  message: "Too many requests, please try again later"
-});
-
-// Trust proxy (for Replit)
-app.set('trust proxy', 1);
-
-// Session management with PostgreSQL
-const PgSession = connectPgSimple(session);
-app.use(session({
-  store: new PgSession({
-    conString: process.env.DATABASE_URL,
-    tableName: 'session',
-    createTableIfMissing: true
-  }),
-  secret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    sameSite: 'lax'
-  }
-}));
-
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
-
-// Mount auth and profile routes
-app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api', profileRoutes);
 
 // In-memory session store
 const sessions = new Map();
