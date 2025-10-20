@@ -1,0 +1,301 @@
+You are an Elite Full-Stack Engineer (Node.js + Express + Vanilla JS + PostgreSQL + Drizzle ORM).
+Your goal: Completely separate the Chat interface from the Home page, making Chat a stand-alone protected page that uses the same header as the Dashboard and opens directly when the user clicks “Chat” — without redirecting through the Home or showing a “Start Assessment” button.
+
+Implement this refactor precisely while preserving all current styling and design (colors, fonts, shadows, paddings, etc).
+
+🔒 STRICT RULES
+
+❌ Do NOT alter the visual design or CSS — keep public/styles.css intact.
+
+❌ Do NOT introduce frameworks (no React/Vue/Angular). Use Vanilla JS only.
+
+❌ Do NOT keep any chat logic inside index.html or app.js.
+
+❌ Do NOT use hash-based routing (index.html#chat).
+
+✅ Protected pages (dashboard.html and chat.html) must redirect unauthenticated users to /login.html.
+
+✅ Maintain the existing session-based authentication and GET /api/session/state behavior.
+
+🐞 CURRENT PROBLEM (Diagnosis)
+
+The file public/index.html currently combines Home + Chat into a single page.
+
+public/app.js contains both the home logic and the chat logic together.
+
+When the user clicks Chat from the dashboard, it actually loads the Home section, requiring them to click Start Assessment to reach Chat.
+
+The header shown inside Chat is the Home header — not the Dashboard header.
+
+The dashboard.html page is static (non-interactive) because no JS file is connected to handle API calls (profile info, assessments, explanations, etc).
+
+Root Cause
+
+Two distinct pages (Home + Chat) share the same HTML + JS file, creating state conflicts and incorrect navigation.
+
+✅ REQUIRED SOLUTION (Overview)
+
+Separate the pages entirely
+
+public/index.html → Home only
+
+Create public/chat.html → Chat only (protected)
+
+Keep public/dashboard.html (protected)
+
+Split JavaScript logic
+
+public/app.js → Home only
+
+public/chat.js → Chat logic (intake / assessment / teaching / resume)
+
+public/dashboard.js → Dashboard logic (profile / assessments / explanations / logout)
+
+Consistent Navigation + Header
+
+Dashboard and Chat pages share one identical header:
+
+Logo (left)
+
+Tabs: Dashboard | Chat
+
+Language switch (EN/AR)
+
+Logout (right)
+
+“Chat” tab links to /chat.html directly.
+
+“Dashboard” tab links to /dashboard.html.
+
+Remove the “Start Assessment” button completely.
+
+Replace it with two buttons in the hero section:
+
+Login → /login.html
+
+Sign Up → /signup.html
+
+Authentication and Page Guards
+
+Both /dashboard.html and /chat.html require authentication.
+
+Unauthenticated users are redirected to /login.html.
+
+Use GET /api/session/state to determine the current stage:
+
+{
+  "loggedIn": true,
+  "stage": "intake-pending" | "assessment-cta" | "assessment-in-progress" | "teaching" | "idle"
+}
+
+
+Chat page should display the correct state automatically:
+
+intake-pending → Start intake.
+
+assessment-cta → Show “Start Assessment” CTA.
+
+assessment-in-progress → Resume from last question.
+
+teaching → Continue showing chat messages.
+
+🧩 FILE-BY-FILE CHANGE PLAN
+1. public/index.html (Home)
+
+Remove all chat sections and markup.
+
+Delete the Start Assessment button.
+
+Add two buttons in the same hero section:
+
+<button class="btn-primary" onclick="window.location='/login.html'">Login</button>
+<button class="btn-secondary" onclick="window.location='/signup.html'">Sign Up</button>
+
+
+Keep the header logic to show “Login / Logout” depending on session state.
+
+Load only:
+
+<script src="/app.js" defer></script>
+
+2. Create public/chat.html
+
+Copy only the chat container from the current combined page (chat UI, messages, progress bar, input field).
+
+Use the Dashboard header layout:
+
+Logo
+
+Tabs: Dashboard | Chat (Chat active)
+
+Language toggle (EN/AR)
+
+Logout button
+
+Load only:
+
+<script src="/chat.js" defer></script>
+
+3. public/dashboard.html
+
+Keep the same structure (My Info, My Assessments, My Explanations, My Videos).
+
+Load a new JS file:
+
+<script src="/dashboard.js" defer></script>
+
+4. Create public/chat.js
+
+Move all chat-related logic from app.js here:
+
+Intake flow
+
+Assessment steps (/api/assess/start, /api/assess/next, /api/assess/answer)
+
+Teaching flow (/api/teach/start, /api/teach/message)
+
+Report display
+
+Resume logic via /api/session/state
+
+At DOMContentLoaded:
+
+Call /api/session/state
+
+If loggedIn=false → redirect /login.html
+
+Else display the appropriate state
+
+Highlight the Chat tab in header as active
+
+5. Create public/dashboard.js
+
+On load:
+
+Verify session (GET /api/session/state)
+
+Redirect /login.html if not logged in.
+
+Fetch and display:
+
+/api/me → My Info (Name, Email, Username, Phone)
+
+/api/userAssessments → My Assessments (list with progress bars)
+
+/api/teach/list → My Explanations (clickable list)
+
+Enable Edit Profile:
+
+Toggle editable form → PATCH /api/me
+
+Validate, handle errors, update UI.
+
+Implement Logout:
+
+POST /api/auth/logout → redirect /.
+
+6. public/app.js
+
+Remove all chat logic.
+
+Keep:
+
+Language switch functionality.
+
+Header login/logout toggle.
+
+Navigation to /login.html and /signup.html.
+
+7. Server Adjustments
+
+Ensure the middleware requireAuth protects:
+
+/dashboard.html
+
+/chat.html
+
+Keep /, /login.html, /signup.html public.
+
+Maintain /api/session/state returning:
+
+{ "loggedIn": boolean, "stage": "..." }
+
+🧪 ACCEPTANCE CRITERIA
+
+✅ From / (Home):
+
+Shows “Login / Sign Up” buttons (no Start Assessment).
+
+Header reflects auth state correctly.
+
+✅ After login:
+
+Redirects to /dashboard.html.
+
+Header shows: Dashboard | Chat | Language | Logout.
+
+✅ Clicking “Chat”:
+
+Opens /chat.html directly.
+
+Displays the Chat interface immediately (no home/CTA delay).
+
+Uses the same header as the dashboard.
+
+✅ chat.html reacts to /api/session/state:
+
+Intake → intake flow.
+
+Assessment → continue or CTA.
+
+Teaching → show messages.
+
+✅ dashboard.html is interactive:
+
+Profile editable via PATCH /api/me.
+
+Assessments listed with progress.
+
+Explanations listed and openable.
+
+Logout works.
+
+✅ Protected pages:
+
+Visiting /dashboard.html or /chat.html while logged out redirects to /login.html.
+
+✅ Design:
+
+Visuals (colors, spacing, shadows, fonts) remain identical.
+
+🧠 IMPLEMENTATION GUIDELINES
+
+You may add a small shared header.js (optional) for logout + language switch if needed.
+
+Keep all existing class names and IDs to avoid CSS breakage.
+
+Use existing APIs; don’t rename endpoints.
+
+Test navigation flow thoroughly:
+
+/ → /login.html → /dashboard.html → /chat.html → /logout.
+
+⛔ DO NOT
+
+Don’t leave any chat elements or logic inside index.html or app.js.
+
+Don’t import frameworks or build tools.
+
+Don’t rename CSS classes or touch color variables.
+
+Don’t rely on index.html#chat.
+
+✅ FINAL DELIVERY CHECKLIST
+
+When done, provide:
+
+✅ List of all modified and new files.
+
+✅ Summary of what was moved/added in each.
+
+✅ Confirmation that all acceptance criteria above are met.

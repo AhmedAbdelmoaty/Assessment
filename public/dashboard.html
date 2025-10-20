@@ -8,74 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
     <style>
-        body { margin: 0; font-family: var(--font-sans); }
-        .dashboard-header {
-            background: var(--card);
-            border-bottom: 1px solid var(--border);
-            padding: 16px 24px;
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-        .header-logo {
-            font-size: 24px;
-            color: var(--primary);
-            font-weight: 700;
-        }
-        .header-nav {
-            display: flex;
-            gap: 8px;
-            margin-right: auto;
-        }
-        .nav-btn {
-            padding: 10px 20px;
-            border: none;
-            background: transparent;
-            color: var(--foreground);
-            font-weight: 600;
-            cursor: pointer;
-            border-radius: 8px;
-            transition: background 0.2s;
-        }
-        .nav-btn.active {
-            background: var(--primary);
-            color: var(--primary-foreground);
-        }
-        .nav-btn:hover:not(.active) {
-            background: var(--muted);
-        }
-        .header-actions {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        .lang-toggle-dash {
-            display: flex;
-            gap: 6px;
-        }
-        .lang-btn-dash {
-            padding: 8px 16px;
-            border: 1px solid var(--border);
-            background: var(--background);
-            color: var(--foreground);
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .lang-btn-dash.active {
-            background: var(--primary);
-            color: var(--primary-foreground);
-            border-color: var(--primary);
-        }
-        .logout-btn {
-            padding: 10px 20px;
-            background: var(--destructive);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-        }
+        body { margin: 0; font-family: var(--font-sans); padding-top: 80px; }
         .dashboard-container {
             max-width: 1200px;
             margin: 0 auto;
@@ -169,31 +102,39 @@
     </style>
 </head>
 <body>
-    <div class="dashboard-header">
-        <div class="header-logo">
-            <i class="fas fa-chart-line"></i>
-        </div>
-        <div class="header-nav">
-            <button class="nav-btn active" data-page="dashboard">
+    <!-- Protected Page Header: Same as Chat -->
+    <div class="chat-header" id="dashboardHeader">
+        <!-- Logo -->
+        <img
+            src="/assets/imp-logo.jpeg"
+            alt="IMP - Institute of Management Professionals"
+            class="brand-logo"
+        />
+
+        <!-- Navigation Tabs -->
+        <div class="header-nav" style="display: flex; gap: 12px; margin-left: 24px;">
+            <a href="/dashboard.html" class="nav-tab active">
                 <span data-lang-content="en">Dashboard</span>
                 <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
-            </button>
-            <button class="nav-btn" data-page="chat" onclick="window.location.href='/'">
+            </a>
+            <a href="/chat.html" class="nav-tab">
                 <span data-lang-content="en">Chat</span>
                 <span class="hidden" data-lang-content="ar">الدردشة</span>
-            </button>
+            </a>
         </div>
-        <div class="header-actions">
-            <div class="lang-toggle-dash">
-                <button class="lang-btn-dash active" data-lang="en">EN</button>
-                <button class="lang-btn-dash" data-lang="ar">عربي</button>
-            </div>
-            <button class="logout-btn" id="logoutBtn">
-                <i class="fas fa-sign-out-alt"></i>
-                <span data-lang-content="en">Logout</span>
-                <span class="hidden" data-lang-content="ar">خروج</span>
-            </button>
+
+        <!-- Language Toggle -->
+        <div class="lang-toggle header-lang">
+            <button type="button" class="lang-btn active" data-lang="en">English</button>
+            <button type="button" class="lang-btn" data-lang="ar">العربية</button>
         </div>
+
+        <!-- Logout Button -->
+        <button id="logoutBtn" class="logout-btn-header">
+            <i class="fas fa-sign-out-alt"></i>
+            <span data-lang-content="en">Logout</span>
+            <span class="hidden" data-lang-content="ar">خروج</span>
+        </button>
     </div>
 
     <div class="dashboard-container">
@@ -264,115 +205,6 @@
         </div>
     </div>
 
-    <script>
-        let currentLang = 'en';
-
-        // Language toggle
-        document.querySelectorAll('.lang-btn-dash').forEach(btn => {
-            btn.addEventListener('click', function() {
-                currentLang = this.getAttribute('data-lang');
-                document.querySelectorAll('.lang-btn-dash').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                
-                document.documentElement.setAttribute('lang', currentLang);
-                document.documentElement.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-                
-                document.querySelectorAll('[data-lang-content]').forEach(el => {
-                    el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== currentLang);
-                });
-            });
-        });
-
-        // Load user data
-        async function loadProfile() {
-            try {
-                const response = await fetch('/api/me');
-                if (!response.ok) {
-                    window.location.href = '/login.html';
-                    return;
-                }
-                const data = await response.json();
-                
-                document.getElementById('infoName').textContent = data.name || '-';
-                document.getElementById('infoEmail').textContent = data.email || '-';
-                document.getElementById('infoUsername').textContent = data.username || '-';
-                document.getElementById('infoPhone').textContent = data.phone || '-';
-            } catch (error) {
-                console.error('Failed to load profile:', error);
-            }
-        }
-
-        // Load assessments
-        async function loadAssessments() {
-            try {
-                const response = await fetch('/api/me/assessments');
-                const assessments = await response.json();
-                
-                const container = document.getElementById('assessmentsList');
-                if (assessments.length === 0) {
-                    container.innerHTML = `<div class="empty-state">
-                        <i class="fas fa-clipboard-list" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                        <p>${currentLang === 'ar' ? 'لا توجد تقييمات بعد' : 'No assessments yet'}</p>
-                    </div>`;
-                    return;
-                }
-                
-                container.innerHTML = assessments.map(a => `
-                    <div class="assessment-item">
-                        <div class="assessment-header">
-                            <span><strong>${new Date(a.startedAt).toLocaleDateString()}</strong></span>
-                            <span><strong>${a.scorePercent || 0}%</strong></span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${a.scorePercent || 0}%"></div>
-                        </div>
-                    </div>
-                `).join('');
-            } catch (error) {
-                console.error('Failed to load assessments:', error);
-            }
-        }
-
-        // Load explanations
-        async function loadExplanations() {
-            try {
-                const response = await fetch('/api/me/explanations');
-                const explanations = await response.json();
-                
-                const container = document.getElementById('explanationsList');
-                if (explanations.length === 0) {
-                    container.innerHTML = `<div class="empty-state">
-                        <i class="fas fa-book-open" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                        <p>${currentLang === 'ar' ? 'لا توجد شروحات بعد' : 'No explanations yet'}</p>
-                    </div>`;
-                    return;
-                }
-                
-                container.innerHTML = explanations.slice(0, 5).map(e => `
-                    <div class="assessment-item">
-                        <strong>${e.topic || 'Learning Topic'}</strong>
-                        <p style="margin-top: 8px; color: var(--muted-foreground);">${e.content.slice(0, 100)}...</p>
-                    </div>
-                `).join('');
-            } catch (error) {
-                console.error('Failed to load explanations:', error);
-            }
-        }
-
-        // Logout
-        document.getElementById('logoutBtn').addEventListener('click', async () => {
-            try {
-                await fetch('/api/auth/logout', { method: 'POST' });
-                window.location.href = '/';
-            } catch (error) {
-                console.error('Logout failed:', error);
-            }
-        });
-
-        // Load all data
-        loadProfile();
-        loadAssessments();
-        loadExplanations();
-    </script>
+    <script src="dashboard.js"></script>
 </body>
 </html>

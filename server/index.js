@@ -56,6 +56,23 @@ app.use(session({
 }));
 
 app.use(express.json());
+
+// Protect /chat.html and /dashboard.html - redirect to login if not authenticated
+app.get('/chat.html', (req, res, next) => {
+  if (!req.session.userId) {
+    return res.redirect('/login.html');
+  }
+  next();
+});
+
+app.get('/dashboard.html', (req, res, next) => {
+  if (!req.session.userId) {
+    return res.redirect('/login.html');
+  }
+  next();
+});
+
+// Serve static files (after protected routes)
 app.use(express.static(join(__dirname, "../public")));
 
 // Mount auth and profile routes
