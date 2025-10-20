@@ -146,20 +146,243 @@
     updateAllLanguageContent(currentLang);
   }
 
+  /**
+   * Mobile Menu Logic
+   */
+  let mobileDrawerOpen = false;
+  let focusableElements = [];
+  let firstFocusable = null;
+  let lastFocusable = null;
+
+  /**
+   * Initialize mobile drawer (hamburger menu)
+   */
+  function initMobileDrawer() {
+    const hamburger = document.getElementById('btnHamburger');
+    const drawer = document.getElementById('mobileDrawer');
+    const backdrop = document.getElementById('drawerBackdrop');
+    
+    if (!hamburger || !drawer) return; // Not on a page with mobile menu
+
+    // Hamburger click - toggle drawer
+    hamburger.addEventListener('click', toggleDrawer);
+
+    // Backdrop click - close drawer
+    if (backdrop) {
+      backdrop.addEventListener('click', closeDrawer);
+    }
+
+    // ESC key - close drawer
+    document.addEventListener('keydown', handleEscKey);
+
+    // Close on any drawer link click
+    const drawerLinks = drawer.querySelectorAll('.drawer-link');
+    drawerLinks.forEach(link => {
+      link.addEventListener('click', () => {
+        // For logout button, don't close immediately (let handler execute)
+        if (!link.id || !link.id.includes('Logout')) {
+          closeDrawer();
+        }
+      });
+    });
+
+    // Setup drawer logout button
+    const drawerLogout = document.getElementById('drawerLogout');
+    if (drawerLogout) {
+      drawerLogout.addEventListener('click', handleLogout);
+    }
+
+    // Setup drawer language toggle
+    const drawerLangToggle = document.getElementById('drawerLangToggle');
+    if (drawerLangToggle) {
+      drawerLangToggle.addEventListener('click', () => {
+        toggleLanguage();
+        updateDrawerLanguageButton();
+      });
+    }
+
+    // Initialize drawer language button text
+    updateDrawerLanguageButton();
+  }
+
+  /**
+   * Toggle drawer open/closed
+   */
+  function toggleDrawer() {
+    if (mobileDrawerOpen) {
+      closeDrawer();
+    } else {
+      openDrawer();
+    }
+  }
+
+  /**
+   * Open mobile drawer
+   */
+  function openDrawer() {
+    const hamburger = document.getElementById('btnHamburger');
+    const drawer = document.getElementById('mobileDrawer');
+    
+    if (!drawer) return;
+
+    mobileDrawerOpen = true;
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    
+    if (hamburger) {
+      hamburger.setAttribute('aria-expanded', 'true');
+    }
+
+    // Prevent body scroll
+    document.body.style.overflow = 'hidden';
+
+    // Setup focus trap
+    setupFocusTrap(drawer);
+  }
+
+  /**
+   * Close mobile drawer
+   */
+  function closeDrawer() {
+    const hamburger = document.getElementById('btnHamburger');
+    const drawer = document.getElementById('mobileDrawer');
+    
+    if (!drawer) return;
+
+    mobileDrawerOpen = false;
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    
+    if (hamburger) {
+      hamburger.setAttribute('aria-expanded', 'false');
+      hamburger.focus(); // Return focus to hamburger
+    }
+
+    // Restore body scroll
+    document.body.style.overflow = '';
+
+    // Clear focus trap
+    focusableElements = [];
+    firstFocusable = null;
+    lastFocusable = null;
+  }
+
+  /**
+   * Handle ESC key to close drawer
+   */
+  function handleEscKey(e) {
+    if (e.key === 'Escape' && mobileDrawerOpen) {
+      closeDrawer();
+    }
+  }
+
+  /**
+   * Setup focus trap within drawer
+   */
+  function setupFocusTrap(drawer) {
+    // Get all focusable elements
+    focusableElements = drawer.querySelectorAll(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    
+    if (focusableElements.length === 0) return;
+
+    firstFocusable = focusableElements[0];
+    lastFocusable = focusableElements[focusableElements.length - 1];
+
+    // Focus first element
+    firstFocusable.focus();
+
+    // Trap focus
+    drawer.addEventListener('keydown', trapFocus);
+  }
+
+  /**
+   * Trap focus within drawer
+   */
+  function trapFocus(e) {
+    if (e.key !== 'Tab') return;
+
+    if (e.shiftKey) {
+      // Shift + Tab
+      if (document.activeElement === firstFocusable) {
+        e.preventDefault();
+        lastFocusable.focus();
+      }
+    } else {
+      // Tab
+      if (document.activeElement === lastFocusable) {
+        e.preventDefault();
+        firstFocusable.focus();
+      }
+    }
+  }
+
+  /**
+   * Update drawer language button text
+   */
+  function updateDrawerLanguageButton() {
+    const drawerLangBtn = document.getElementById('drawerLangToggle');
+    if (!drawerLangBtn) return;
+
+    const currentLang = getCurrentLang();
+    const config = LANG_CONFIG[currentLang];
+    
+    // Update button text to show OTHER language
+    const textContent = drawerLangBtn.querySelector('.drawer-link-text') || drawerLangBtn;
+    textContent.textContent = config.otherLabel;
+  }
+
+  /**
+   * Handle logout (for both header and drawer)
+   */
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Still redirect on error
+      window.location.href = '/';
+    }
+  }
+
+  /**
+   * Initialize logout buttons (header and drawer)
+   */
+  function initLogoutButtons() {
+    // Header logout button
+    const headerLogout = document.getElementById('headerLogoutBtn') || document.getElementById('logoutBtn');
+    if (headerLogout) {
+      headerLogout.addEventListener('click', handleLogout);
+    }
+
+    // Drawer logout button (handled in initMobileDrawer)
+  }
+
   // Export to window
   window.HeaderUtils = {
     initHeaderLanguageSwitch,
     initLanguage,
     getCurrentLang,
     setLanguage,
-    toggleLanguage
+    toggleLanguage,
+    initMobileDrawer,
+    initLogoutButtons,
+    handleLogout
   };
 
   // Auto-initialize language on load
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initLanguage);
+    document.addEventListener('DOMContentLoaded', () => {
+      initLanguage();
+      initMobileDrawer();
+      initLogoutButtons();
+    });
   } else {
     initLanguage();
+    initMobileDrawer();
+    initLogoutButtons();
   }
 
 })(window);

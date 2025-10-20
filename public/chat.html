@@ -12,36 +12,73 @@
     <script src="/js/header.js"></script>
 </head>
 <body>
-    <!-- Protected Page Header: Same as Dashboard -->
-    <div class="chat-header" id="chatHeader">
+    <!-- Protected Page Header -->
+    <header class="chat-header" id="chatHeader">
         <!-- Logo -->
-        <img
-            src="/assets/imp-logo.jpeg"
-            alt="IMP - Institute of Management Professionals"
-            class="brand-logo"
-        />
+        <a href="/" class="brand">
+            <img
+                src="/assets/imp-logo.jpeg"
+                alt="IMP - Institute of Management Professionals"
+                class="brand-logo"
+            />
+        </a>
 
-        <!-- Navigation Tabs -->
-        <div class="header-nav" style="display: flex; gap: 12px; margin-left: 24px;">
-            <a href="/dashboard.html" class="nav-tab">
+        <!-- Navigation Tabs (Desktop) -->
+        <nav class="header-nav">
+            <a href="/dashboard.html" class="nav-tab" data-testid="link-dashboard">
                 <span data-lang-content="en">Dashboard</span>
                 <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
             </a>
-            <a href="/chat.html" class="nav-tab active">
+            <a href="/chat.html" class="nav-tab active" data-testid="link-chat">
                 <span data-lang-content="en">Chat</span>
                 <span class="hidden" data-lang-content="ar">الدردشة</span>
             </a>
-        </div>
+        </nav>
 
-        <!-- Logout Button -->
-        <button id="headerLogoutBtn" class="btn-logout">
+        <!-- Logout Button (Desktop) -->
+        <button id="headerLogoutBtn" class="btn-logout" data-testid="button-logout">
             <i class="fas fa-sign-out-alt"></i>
             <span data-lang-content="en">Logout</span>
             <span class="hidden" data-lang-content="ar">خروج</span>
         </button>
 
-        <!-- Single Language Toggle -->
+        <!-- Language Toggle (Desktop) -->
         <div id="lang-switch"></div>
+
+        <!-- Hamburger Button (Mobile Only) -->
+        <button id="btnHamburger" class="btn-hamburger" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false" data-testid="button-hamburger">
+            <div class="hamburger-icon">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </button>
+    </header>
+
+    <!-- Mobile Drawer (Mobile Only) -->
+    <div id="mobileDrawer" class="mobile-drawer" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="drawer-content">
+            <a href="/dashboard.html" class="drawer-link" data-testid="drawer-link-dashboard">
+                <i class="fas fa-th-large"></i>
+                <span data-lang-content="en">Dashboard</span>
+                <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
+            </a>
+            <a href="/chat.html" class="drawer-link" data-testid="drawer-link-chat">
+                <i class="fas fa-comments"></i>
+                <span data-lang-content="en">Chat</span>
+                <span class="hidden" data-lang-content="ar">الدردشة</span>
+            </a>
+            <button id="drawerLogout" class="drawer-link" data-testid="drawer-button-logout">
+                <i class="fas fa-sign-out-alt"></i>
+                <span data-lang-content="en">Logout</span>
+                <span class="hidden" data-lang-content="ar">خروج</span>
+            </button>
+            <button id="drawerLangToggle" class="drawer-link" data-testid="drawer-button-language">
+                <i class="fas fa-language"></i>
+                <span class="drawer-link-text">English</span>
+            </button>
+        </div>
+        <div class="drawer-backdrop" id="drawerBackdrop"></div>
     </div>
 
     <!-- Chat Section -->

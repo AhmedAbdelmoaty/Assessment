@@ -1,0 +1,218 @@
+You are The Ultimate Frontend Engineer (Vanilla JS + Responsive UI)
+
+Goal: finalize the site header behavior and mobile responsiveness across Home, Dashboard, Chat, Login, Signup.
+Keep the current brand (maroon #A52025, Inter/Noto, radii/shadows). Do not touch backend or data flows.
+
+HARD CONSTRAINTS
+
+Do not change existing routes, backend endpoints, or auth/session logic.
+
+Preserve current styles/brand; only extend styles.css with scoped rules & media queries.
+
+Keep the single language toggle button (one button that flips the site language; same icon) identical on every page.
+
+Keep current desktop layout untouched except where stated below.
+
+No external UI libraries; pure HTML/CSS/vanilla JS only.
+
+WHAT TO FIX / BUILD
+1) Header alignment on Dashboard & Chat (desktop/tablet)
+
+Move the Logout button and the language toggle as a group to the far right of the header (right aligned).
+
+Keep their current look & spacing. (Button order can remain as-is; the key is right alignment.)
+
+Ensure the Logout color uses the brand maroon #A52025 (not generic red).
+
+Apply the same header component to /dashboard.html and /chat.html so both are consistent.
+
+2) Home (/index.html) — desktop vs mobile behavior
+
+Desktop/tablet (≥ 768px): keep Login and Sign Up buttons in the header but right aligned (far right), just like the IMP reference look.
+
+Mobile (< 768px): hide Login/Sign Up from the header entirely (keep only logo + language toggle in the header).
+Users will use the two hero buttons within the page (already present below the hero text).
+
+3) Dashboard & Chat — mobile header pattern
+
+For mobile (< 768px), replace the wide top nav with:
+
+Left: site logo.
+
+Right: hamburger icon (☰). Tapping it opens a side drawer (slide-in from the right for LTR / from the left for RTL is also acceptable; choose the most robust).
+
+The side drawer must contain:
+
+Dashboard (link to /dashboard.html)
+
+Chat (link to /chat.html)
+
+Logout (same POST as current header button)
+
+Language toggle (the same single-button control)
+
+Drawer requirements:
+
+Pure CSS + JS (no libs), focus trap while open, ESC closes, click-outside closes, aria-* attributes for a11y.
+
+Visuals match our brand: white panel, soft shadow, rounded corners where sensible, maroon accents.
+
+Smooth CSS transition.
+
+4) Single language toggle — everywhere
+
+Ensure the same single language button (with the existing icon) is used on all pages:
+
+/index.html, /dashboard.html, /chat.html, /login.html, /signup.html
+
+Keep its current logic; only unify the markup + class names and placement as stated above.
+
+5) Minor polish already observed
+
+Login & Signup pages already use the single language button and the logo. Keep that intact.
+
+FILES TO TOUCH
+
+public/styles.css
+
+Add responsive rules (media queries) for header layout:
+
+Right-align header actions on Dashboard/Chat (desktop/tablet).
+
+Hide header Login/Sign Up on Home for mobile (<768px).
+
+Add styles for the mobile hamburger + side drawer (overlay, panel, focus states, transitions).
+
+Ensure Logout uses #A52025.
+
+public/js/header.js (or create if not present; currently we have header logic)
+
+Centralize header behavior (language toggle init, logout click handler).
+
+Add mobile menu open/close logic (toggle data-open or a class on the drawer + overlay).
+
+Make sure this file is loaded on all pages that have a header.
+
+public/index.html
+
+Keep header markup but right-align header buttons on desktop/tablet.
+
+Add a utility class to hide the header Login/Sign Up on mobile only (use CSS).
+
+public/dashboard.html & public/chat.html
+
+Use the same header structure.
+
+Insert hamburger markup & side drawer container (links: Dashboard, Chat, Logout, Language).
+
+Ensure Logout in the drawer reuses the same JS handler as the header button.
+
+(No backend changes.)
+
+STRUCTURE SUGGESTION (header HTML)
+
+Use a common pattern like:
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><img src="/assets/imp-logo.jpeg" alt="IMP" class="brand-logo"></a>
+
+    <!-- Desktop actions (right aligned) -->
+    <nav class="header-actions">
+      <!-- page-specific buttons, e.g. Login/SignUp on home (desktop only) -->
+      <!-- or Dashboard/Chat tabs if needed, but keep current tabs -->
+      <button class="btn btn-logout" id="btnLogout">Logout</button>
+      <button class="btn btn-lang" id="btnLangToggle" aria-label="Switch language">
+        <!-- same icon/text as current single button -->
+      </button>
+      <!-- Mobile hamburger (Dashboard/Chat only) -->
+      <button class="btn btn-hamburger" id="btnHamburger" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false">
+        <!-- hamburger icon -->
+      </button>
+    </nav>
+  </div>
+
+  <!-- Mobile Drawer (Dashboard/Chat only) -->
+  <div id="mobileDrawer" class="mobile-drawer" aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="drawer-content">
+      <a href="/dashboard.html" class="drawer-link">Dashboard</a>
+      <a href="/chat.html" class="drawer-link">Chat</a>
+      <button class="drawer-link" id="drawerLogout">Logout</button>
+      <button class="drawer-link" id="drawerLangToggle">Language</button>
+    </div>
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  </div>
+</header>
+
+
+On Home page, omit the hamburger + drawer. On mobile Home, add a class on the header actions to hide Login/SignUp (keep them in the hero only).
+
+CSS REQUIREMENTS (styles.css)
+
+Add a right-aligned flex container: .header-actions { margin-left: auto; display:flex; gap:12px; align-items:center; }
+
+For Home on mobile: .home-header .auth-buttons { display:none; } under @media (max-width: 767px).
+
+Hamburger: hidden on desktop, visible on <768px for Dashboard/Chat:
+
+@media (max-width: 767px){
+  .btn-hamburger { display:inline-flex; }
+  .header-tabs, .header-auth-desktop { display:none; }
+}
+
+
+Drawer: fixed, full height, slide-in with transform, overlay backdrop, focus outline for links, close on ESC/click-out.
+
+Logout button: ensure background: #A52025; color:#fff; & hover shadow consistent with theme.
+
+JS REQUIREMENTS (header.js)
+
+Language toggle: keep existing logic; initialize for both header and drawer buttons (btnLangToggle, drawerLangToggle).
+
+Logout: bind the same handler for btnLogout and drawerLogout.
+
+Hamburger:
+
+Toggle aria-expanded and drawer aria-hidden.
+
+Add/remove open class on #mobileDrawer.
+
+Close on:
+
+ESC key
+
+Click on .drawer-backdrop
+
+Clicking any drawer link/button
+
+Trap focus while open (focus first focusable, loop via keydown TAB).
+
+All code must be idempotent (safe on repeated navigation) and guarded by element existence checks.
+
+ACCEPTANCE CHECKLIST
+
+Dashboard & Chat (desktop): Logout + Language show on the far right; Logout uses maroon color.
+
+Home (desktop): Login + Sign Up in header are right aligned; hero shows two CTA buttons as now.
+
+Home (mobile): header does not show Login/Sign Up; only logo + single language button; hero CTAs visible.
+
+Dashboard & Chat (mobile):
+
+Header shows logo + hamburger only.
+
+Drawer opens smoothly; contains Dashboard / Chat / Logout / Language.
+
+Drawer is accessible (ESC closes, focus trapped, backdrop click closes).
+
+Single language button is visually and behaviorally consistent on all pages.
+
+No regressions to auth/session/redirect logic.
+
+NOTES
+
+Keep CSS additions scoped (e.g., .site-header, .mobile-drawer) to avoid side effects.
+
+Maintain RTL/LTR friendliness by relying on logical properties when possible (margin-inline-start: auto for right alignment in LTR).
+
+Please implement the above exactly, touching only the listed frontend files.
