@@ -537,7 +537,7 @@ app.post("/api/auth/otp/verify", async (req, res) => {
       req.session.pendingEmail = oldSession.pendingEmail;
 
       db.select().from(users).where(eq(users.id, result.userId)).limit(1).then((user) => {
-        const needsPassword = !user[0].passwordHash;
+        const needsPassword = !user[0].passHash;
 
         res.json({ 
           success: true, 
@@ -573,10 +573,12 @@ app.post("/api/auth/set-password", async (req, res) => {
       });
     }
 
-    const passwordHash = await auth.hashPassword(password);
-    await db.update(users)
-      .set({ passwordHash, updatedAt: new Date() })
+    const hash = await auth.hashPassword(password);
+    const result = await db.update(users)
+      .set({ passHash: hash })
       .where(eq(users.id, req.session.userId));
+    
+    console.log("set-password ok", { userId: req.session.userId, updated: result.rowCount || 1 });
 
     // Create user_progress entry with intake data
     const intakeData = req.session.pendingIntake || {};
@@ -619,13 +621,13 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    if (!user[0].passwordHash) {
+    if (!user[0].passHash) {
       return res.status(401).json({ 
         error: lang === "ar" ? "يرجى التسجيل أولاً" : "Please sign up first" 
       });
     }
 
-    const valid = await auth.verifyPassword(password, user[0].passwordHash);
+    const valid = await auth.verifyPassword(password, user[0].passHash);
     if (!valid) {
       return res.status(401).json({ 
         error: lang === "ar" ? "البريد أو كلمة المرور خاطئة" : "Invalid email or password" 
