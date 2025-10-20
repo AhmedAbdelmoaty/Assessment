@@ -35,105 +35,11 @@
     // Initialize
     init();
 
-    async function init() {
+    function init() {
         setupLanguageToggle();
         setupStartButton();
         setupSendButton();
         setupInputHandlers();
-        
-        // Check session state for resume
-        await checkSessionState();
-    }
-    
-    async function checkSessionState() {
-        try {
-            const response = await fetch("/api/session/state");
-            const state = await response.json();
-            
-            // If not authenticated, show landing page
-            if (!state.auth) {
-                return;
-            }
-            
-            // User is authenticated - resume their state
-            landingSection.classList.remove("active");
-            chatSection.classList.add("active");
-            
-            // Resume based on progress
-            if (state.intakeStatus === "in-progress") {
-                // Continue intake flow
-                currentStep = "intake";
-                updateProgress(0);
-                startIntakeFlow();
-            } else if (state.intakeStatus === "complete" && !state.emailVerified) {
-                // Show OTP input for verification
-                currentStep = "intake";
-                updateProgress(0);
-                const welcomeMsg = currentLang === "ar" 
-                    ? "مرحبًا بعودتك! من فضلك أكمل التحقق من بريدك الإلكتروني."
-                    : "Welcome back! Please complete your email verification.";
-                addSystemMessage(welcomeMsg);
-                
-                // Request new OTP and show input
-                setTimeout(async () => {
-                    try {
-                        // Request new OTP
-                        const otpResponse = await fetch("/api/auth/otp/request", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ email: state.email, lang: currentLang })
-                        });
-                        
-                        const otpData = await otpResponse.json();
-                        
-                        if (otpData.success) {
-                            // Show OTP input with message
-                            const message = otpData.devMode
-                                ? (currentLang === "ar" 
-                                    ? `تم إرسال رمز جديد. [DEV MODE: الرمز في الكونسول]`
-                                    : `New code sent. [DEV MODE: Code is in console]`)
-                                : (currentLang === "ar"
-                                    ? `تم إرسال رمز جديد إلى ${state.email}`
-                                    : `New code sent to ${state.email}`);
-                            
-                            addOTPInput(state.email, message, otpData.devMode);
-                        } else {
-                            addSystemMessage(otpData.error || (currentLang === "ar" 
-                                ? "حدث خطأ في إرسال الرمز"
-                                : "Error sending code"));
-                        }
-                    } catch (err) {
-                        console.error("OTP request error:", err);
-                        addSystemMessage(currentLang === "ar"
-                            ? "حدث خطأ في إرسال الرمز"
-                            : "Error sending code");
-                    }
-                }, 500);
-            } else if (state.teachingStatus === "in-progress") {
-                // Resume teaching mode inside chat
-                currentStep = "teaching";
-                updateProgress(2);
-                teachingActive = true;
-                addSystemMessage(currentLang === "ar" 
-                    ? "مرحبًا بعودتك! هنكمل الشرح من حيث توقفنا."
-                    : "Welcome back! Let's continue where we left off.");
-                // Teaching state will be resumed from session
-            } else if (state.assessmentStatus === "in-progress") {
-                // Resume assessment
-                currentStep = "assessment";
-                updateProgress(1);
-                addSystemMessage(currentLang === "ar" 
-                    ? "مرحبًا بعودتك! هنكمل التقييم من حيث توقفنا."
-                    : "Welcome back! Let's continue your assessment.");
-                setTimeout(() => startAssessment(), 1000);
-            } else if (state.assessmentStatus === "complete") {
-                // Assessment complete - redirect to dashboard
-                window.location.href = "/dashboard";
-            }
-        } catch (err) {
-            console.error("Error checking session state:", err);
-            // Continue normally to landing page
-        }
     }
 
     function setupLanguageToggle() {
@@ -337,32 +243,6 @@
                 btn.textContent = currentLang === "ar" ? "تحقق" : "Verify";
                 alert(currentLang === "ar" ? "حدث خطأ" : "An error occurred");
             }
-        });
-    }
-
-    function addLoginButton() {
-        removeInteractiveUI();
-        
-        const container = document.createElement("div");
-        container.className = "auth-card";
-        container.innerHTML = `
-            <div class="auth-header">
-                <i class="fas fa-sign-in-alt" style="font-size:24px;color:var(--maroon);"></i>
-                <p style="margin:8px 0 0 0;font-size:14px;color:#666;">
-                    ${currentLang === "ar" ? "يوجد حساب مرتبط بهذا البريد" : "An account already exists with this email"}
-                </p>
-            </div>
-            <button class="auth-submit-btn" id="goToLoginBtn" data-testid="button-go-to-login">
-                ${currentLang === "ar" ? "تسجيل الدخول" : "Login"}
-            </button>
-        `;
-        
-        chatMessages.appendChild(container);
-        scrollToBottom();
-        
-        const btn = container.querySelector("#goToLoginBtn");
-        btn.addEventListener("click", () => {
-            window.location.href = "/login.html";
         });
     }
 
@@ -572,12 +452,6 @@
                     addSystemMessage(data.message);
                 }
                 
-                // Check if user needs to login (email already exists)
-                if (data.requiresLogin) {
-                    setTimeout(() => addLoginButton(), 500);
-                    return;
-                }
-                
                 // Check if OTP verification is required
                 if (data.requiresOTP) {
                     setTimeout(() => addOTPInput(data.email, data.message || "", data.devMode), 500);
@@ -731,45 +605,8 @@
             const response = await fetch("/api/assess/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ sessionId }),
             });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                
-                hideTypingIndicator();
-                
-                // Handle authentication error
-                if (response.status === 401) {
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "يرجى تسجيل الدخول أولاً"
-                            : "Please log in first"
-                    );
-                    setTimeout(() => {
-                        window.location.href = "/login.html";
-                    }, 1500);
-                    return;
-                }
-                
-                // Handle intake not completed
-                if (response.status === 409 && errorData.error === "intake_not_completed") {
-                    addSystemMessage(
-                        errorData.message || (currentLang === "ar"
-                            ? "يرجى إكمال بيانات الملف أولاً"
-                            : "Please complete intake first")
-                    );
-                    return;
-                }
-                
-                // Generic error
-                addSystemMessage(
-                    errorData.message || (currentLang === "ar"
-                        ? "عذراً، حدث خطأ في التقييم."
-                        : "Sorry, an error occurred during assessment.")
-                );
-                return;
-            }
 
             const mcq = await response.json();
             currentMCQ = mcq;
@@ -781,8 +618,8 @@
             hideTypingIndicator();
             addSystemMessage(
                 currentLang === "ar"
-                    ? "عذراً، حدث خطأ في الاتصال بالخادم."
-                    : "Sorry, a network error occurred.",
+                    ? "عذراً، حدث خطأ في التقييم."
+                    : "Sorry, an error occurred during assessment.",
             );
         }
     }
@@ -798,6 +635,7 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
+                    sessionId,
                     userChoiceIndex: userAnswer, // ← نبعت الفهرس فقط
                 }),
             });

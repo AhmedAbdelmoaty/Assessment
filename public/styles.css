@@ -320,46 +320,6 @@ body {
   }
 }
 
-/* Login Link in Header */
-.login-link {
-  margin-left: 16px;
-  padding: 10px 20px;
-  border-radius: 8px;
-  background: transparent;
-  border: 2px solid var(--primary);
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 15px;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.login-link:hover {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px var(--primary-15);
-}
-
-.login-link:focus-visible {
-  outline: 3px solid var(--primary-15);
-  outline-offset: 2px;
-}
-
-[dir="rtl"] .login-link {
-  margin-left: 0;
-  margin-right: 16px;
-}
-
-@media (max-width: 480px) {
-  .login-link {
-    padding: 8px 14px;
-    font-size: 13px;
-  }
-}
 
 .chat-header-icon {
     width: 48px;

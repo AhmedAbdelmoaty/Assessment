@@ -382,27 +382,12 @@ app.post("/api/intake/next", async (req, res) => {
     }
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
-      // Intake complete - now check if email exists
+      // Intake complete - now trigger OTP flow
       const email = session.intake.email;
       const name = session.intake.name_full;
       
       try {
-        // Check if user already exists with password
-        const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
-        
-        if (existingUser.length && existingUser[0].passHash) {
-          // User already has account - redirect to login
-          return res.json({
-            done: true,
-            requiresLogin: true,
-            email,
-            message: lang === "ar"
-              ? "هذا البريد مرتبط بحساب. من فضلك سجّل الدخول."
-              : "This email already has an account. Please log in."
-          });
-        }
-        
-        // Create or get user (for new sign-ups or incomplete registrations)
+        // Create or get user
         const user = await auth.upsertUser(email, name);
         
         // Generate OTP
@@ -433,17 +418,6 @@ app.post("/api/intake/next", async (req, res) => {
         });
       } catch (err) {
         console.error("Error creating user/OTP:", err);
-        
-        // Handle duplicate email error from database constraint
-        if (err.code === '23505' && err.constraint === 'users_email_unique') {
-          return res.status(409).json({ 
-            error: true, 
-            message: lang === "ar"
-              ? "هذا البريد مرتبط بحساب. من فضلك سجّل الدخول."
-              : "This email already has an account. Please log in."
-          });
-        }
-        
         return res.status(500).json({ error: true, message: "Failed to send verification code" });
       }
     }
@@ -563,7 +537,7 @@ app.post("/api/auth/otp/verify", async (req, res) => {
       req.session.pendingEmail = oldSession.pendingEmail;
 
       db.select().from(users).where(eq(users.id, result.userId)).limit(1).then((user) => {
-        const needsPassword = !user[0].passHash;
+        const needsPassword = !user[0].passwordHash;
 
         res.json({ 
           success: true, 
@@ -599,40 +573,29 @@ app.post("/api/auth/set-password", async (req, res) => {
       });
     }
 
-    const hash = await auth.hashPassword(password);
-    const result = await db.update(users)
-      .set({ passHash: hash })
+    const passwordHash = await auth.hashPassword(password);
+    await db.update(users)
+      .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, req.session.userId));
-    
-    console.log("set-password ok", { userId: req.session.userId, updated: result.rowCount || 1 });
 
     // Create user_progress entry with intake data
     const intakeData = req.session.pendingIntake || {};
     await db.insert(userProgress).values({
       userId: req.session.userId,
       intake: intakeData,
-      flowState: "assessment",
-      assessmentState: { intakeDone: true, stage: 'assessment' }
+      flowState: "assessment"
     }).onConflictDoNothing();
 
-    // Clean up temp session data but keep userId
+    // Clean up temp session data
     delete req.session.pendingIntake;
     delete req.session.pendingEmail;
     delete req.session.otpVerified;
 
-    // Save session before responding
-    req.session.save((err) => {
-      if (err) {
-        console.error("Session save error:", err);
-        return res.status(500).json({ error: "Failed to save session" });
-      }
-      
-      res.json({ 
-        success: true, 
-        message: lang === "ar" 
-          ? "تم! هنبدأ التقييم الآن" 
-          : "Done! Let's start the assessment"
-      });
+    res.json({ 
+      success: true, 
+      message: lang === "ar" 
+        ? "تم! هنبدأ التقييم الآن" 
+        : "Done! Let's start the assessment"
     });
   } catch (err) {
     console.error("Set password error:", err);
@@ -656,13 +619,13 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    if (!user[0].passHash) {
+    if (!user[0].passwordHash) {
       return res.status(401).json({ 
         error: lang === "ar" ? "يرجى التسجيل أولاً" : "Please sign up first" 
       });
     }
 
-    const valid = await auth.verifyPassword(password, user[0].passHash);
+    const valid = await auth.verifyPassword(password, user[0].passwordHash);
     if (!valid) {
       return res.status(401).json({ 
         error: lang === "ar" ? "البريد أو كلمة المرور خاطئة" : "Invalid email or password" 
@@ -728,79 +691,6 @@ app.post("/api/auth/logout", (req, res) => {
     }
     res.json({ success: true });
   });
-});
-
-// Get session state (for resume)
-app.get("/api/session/state", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.json({ 
-        auth: false,
-        intakeStatus: "not-started",
-        emailVerified: false,
-        assessmentStatus: "not-started",
-        teachingStatus: "not-started"
-      });
-    }
-
-    // Get user
-    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
-    if (!user.length) {
-      return res.json({ 
-        auth: false,
-        intakeStatus: "not-started",
-        emailVerified: false,
-        assessmentStatus: "not-started",
-        teachingStatus: "not-started"
-      });
-    }
-
-    // Get user progress
-    const progress = await db.select().from(userProgress).where(eq(userProgress.userId, req.session.userId)).limit(1);
-    
-    let intakeStatus = "not-started";
-    let assessmentStatus = "not-started";
-    let teachingStatus = "not-started";
-
-    if (progress.length) {
-      const flowState = progress[0].flowState || "intake";
-      const assessmentState = progress[0].assessmentState || {};
-      const intake = progress[0].intake || {};
-
-      // Determine intake status
-      if (assessmentState.intakeDone || Object.keys(intake).length >= 9) {
-        intakeStatus = "complete";
-      } else if (Object.keys(intake).length > 0) {
-        intakeStatus = "in-progress";
-      }
-
-      // Determine assessment status
-      if (assessmentState.stage === "assessment" || flowState === "assessment") {
-        assessmentStatus = "in-progress";
-      } else if (flowState === "report" || assessmentState.stage === "complete") {
-        assessmentStatus = "complete";
-      }
-
-      // Determine teaching status
-      if (flowState === "teaching") {
-        teachingStatus = "in-progress";
-      }
-    }
-
-    const emailVerified = !!user[0].emailVerifiedAt;
-
-    res.json({
-      auth: true,
-      intakeStatus,
-      emailVerified,
-      assessmentStatus,
-      teachingStatus,
-      email: user[0].email  // Include email for OTP verification resume
-    });
-  } catch (err) {
-    console.error("Session state error:", err);
-    res.status(500).json({ error: "Failed to get session state" });
-  }
 });
 
 
@@ -970,68 +860,10 @@ app.post("/api/assess/retake", async (req, res) => {
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
   try {
-    // Check authentication
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const lang = req.session.pendingLang || "en";
-
-    // Fetch user progress
-    const progress = await db.select()
-      .from(userProgress)
-      .where(eq(userProgress.userId, req.session.userId))
-      .limit(1);
-
-    if (!progress.length) {
-      return res.status(409).json({ 
-        error: "intake_not_completed",
-        message: lang === "ar" ? "يرجى إكمال بيانات الملف أولاً" : "Please complete intake first"
-      });
-    }
-
-    const assessmentState = progress[0].assessmentState || {};
-    if (!assessmentState.intakeDone) {
-      return res.status(409).json({ 
-        error: "intake_not_completed",
-        message: lang === "ar" ? "يرجى إكمال بيانات الملف أولاً" : "Please complete intake first"
-      });
-    }
-
-    // Get or create in-memory session for assessment flow
-    const sessionId = req.sessionID;
-    let session = getSession(sessionId);
-    if (!session || session.currentStep !== "assessment") {
-      // Initialize new assessment session
-      const newSession = {
-        sessionId: sessionId,
-        userId: req.session.userId,
-        lang: progress[0].intake?.lang || "en",
-        currentStep: "assessment",
-        intake: progress[0].intake || {},
-        assessment: {
-          currentLevel: "L1",
-          attempts: 0,
-          evidence: [],
-          questionIndexInAttempt: 1,
-          usedClustersCurrentAttempt: [],
-          currentQuestion: null,
-          stemsCurrentAttempt: [],
-          lastAttemptStems: {},
-        },
-        teaching: {
-          mode: "idle",
-          lang: progress[0].intake?.lang || "ar",
-          topics_queue: [],
-          current_topic_index: 0,
-          transcript: [],
-          assistant: { threadId: null }
-        },
-        finished: false,
-        report: null,
-      };
-      sessions.set(sessionId, newSession);
-      session = newSession;
+    const { sessionId } = req.body;
+    const session = getSession(sessionId);
+    if (session.currentStep !== "assessment") {
+      return res.status(400).json({ error: "Not in assessment phase" });
     }
 
     const A = session.assessment;
@@ -1121,21 +953,11 @@ app.post("/api/assess/next", async (req, res) => {
 // -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const { userChoiceIndex } = req.body;
-    const sessionId = req.sessionID;
+    const { sessionId, userChoiceIndex } = req.body;
     const session = getSession(sessionId);
-
-    if (!session || session.currentStep !== "assessment") {
-      return res.status(400).json({ error: "Not in assessment phase" });
-    }
-
     const A = session.assessment;
 
-    if (!A.currentQuestion) {
+    if (session.currentStep !== "assessment" || !A.currentQuestion) {
       return res.status(400).json({ error: "No active question" });
     }
 
