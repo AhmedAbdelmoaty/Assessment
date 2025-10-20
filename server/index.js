@@ -4,19 +4,10 @@ import { dirname, join } from "path";
 import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import fs from "fs";
-import session from "express-session";
-import pgSession from "connect-pg-simple";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import { z } from "zod";
 import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
-import { db } from "./db.js";
-import { users, userProgress, userAssessments } from "../shared/schema.js";
-import { eq, desc } from "drizzle-orm";
-import * as auth from "./auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,44 +16,8 @@ const app = express();
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
 
-// === Security & Sessions ===
-const sessionSecret = process.env.SESSION_SECRET;
-if (!sessionSecret) {
-  if (process.env.NODE_ENV === "production") {
-    console.error("FATAL: SESSION_SECRET environment variable is required in production");
-    process.exit(1);
-  } else {
-    console.warn("WARNING: SESSION_SECRET not set - using development fallback (NOT SECURE for production)");
-  }
-}
-
-app.set("trust proxy", 1);
-app.use(helmet({
-  contentSecurityPolicy: false, // Allow inline scripts for vanilla JS app
-}));
-
-const PgSession = pgSession(session);
-app.use(session({
-  store: new PgSession({ 
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: true,
-  }),
-  secret: sessionSecret || "dev_secret_only_for_local_development",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
-  }
-}));
-
-const otpLimiter = rateLimit({ 
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 requests per window
-  message: "Too many OTP requests, please try again later."
-});
+// In-memory session store
+const sessions = new Map();
 
 // OpenAI client
 const openai = new OpenAI({
@@ -75,9 +30,6 @@ const openai = new OpenAI({
 // IDs لمساعد الشرح (Assistants + File Search)
 const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
 const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
-
-// In-memory session storage for assessment flow (hybrid with PostgreSQL sessions)
-const sessions = new Map();
 
 /* =========================
    Helpers: logging + guards
@@ -157,9 +109,10 @@ async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 
   throw new Error("Run polling timeout");
 }
 
-// Intake order & opening (email moved to LAST position per auth requirements)
+// Intake order & opening
 const INTAKE_ORDER = [
   "name_full",
+  "email",
   "phone_number",
   "country",
   "age_band",
@@ -168,7 +121,6 @@ const INTAKE_ORDER = [
   "job_title_exact",
   "sector",
   "learning_reason",
-  "email", // LAST position - triggers OTP flow
 ];
 const INTAKE_OPENING = {
   ar: "أهلاً 👋 قبل ما نبدأ، هحتاج منك بعض التفاصيل البسيطة علشان نخصّص الاسئلة حسب خبرتك وهدفك. هنكملها خطوة بخطوة",
@@ -382,44 +334,14 @@ app.post("/api/intake/next", async (req, res) => {
     }
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
-      // Intake complete - now trigger OTP flow
-      const email = session.intake.email;
-      const name = session.intake.name_full;
-      
-      try {
-        // Create or get user
-        const user = await auth.upsertUser(email, name);
-        
-        // Generate OTP
-        const code = await auth.createOTP(user.id);
-        
-        // Send OTP (or log in DEV mode)
-        const { sent, devMode } = await auth.sendOTP(email, code, lang);
-        
-        // Store temp data in session for OTP verification
-        req.session.pendingIntake = session.intake;
-        req.session.pendingLang = lang;
-        req.session.pendingEmail = email;
-        
-        const message = devMode
-          ? (lang === "ar" 
-              ? `تمام! أرسلنا لك رمز التحقق. [DEV MODE: الرمز في الكونسول]`
-              : `Perfect! We sent you a verification code. [DEV MODE: Code is in console]`)
-          : (lang === "ar"
-              ? `تمام! أرسلنا لك رمز التحقق على ${email}. من فضلك اكتب الرمز المكون من 6 أرقام.`
-              : `Perfect! We sent a verification code to ${email}. Please enter the 6-digit code.`);
-        
-        return res.json({
-          done: true,
-          requiresOTP: true,
-          email,
-          message,
-          devMode
-        });
-      } catch (err) {
-        console.error("Error creating user/OTP:", err);
-        return res.status(500).json({ error: true, message: "Failed to send verification code" });
-      }
+      session.currentStep = "assessment";
+      return res.json({
+        done: true,
+        message:
+          lang === "ar"
+            ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
+            : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.",
+      });
     }
 
     if ((answer === undefined || answer === null) && session.intakeStepIndex === 0 && !session.openingShown) {
@@ -462,401 +384,6 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
-
-// ==================== AUTH ROUTES ====================
-
-// Request OTP (rate limited)
-app.post("/api/auth/otp/request", otpLimiter, async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: "Invalid email address" });
-    }
-
-    const lang = req.body.lang || "en";
-    
-    // Find or create user
-    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (!existingUser.length) {
-      return res.status(404).json({ error: "Email not found. Please complete intake first." });
-    }
-
-    // Generate and send OTP
-    const code = await auth.createOTP(existingUser[0].id);
-    const { sent, devMode } = await auth.sendOTP(email, code, lang);
-
-    // CRITICAL FIX: Store in session for verification
-    req.session.pendingEmail = email;
-    req.session.pendingLang = lang;
-
-    const message = devMode
-      ? (lang === "ar" ? "تم إرسال الرمز [DEV MODE: في الكونسول]" : "Code sent [DEV MODE: check console]")
-      : (lang === "ar" ? `تم إرسال الرمز إلى ${email}` : `Code sent to ${email}`);
-
-    res.json({ success: true, message, devMode });
-  } catch (err) {
-    console.error("OTP request error:", err);
-    res.status(500).json({ error: "Failed to send OTP" });
-  }
-});
-
-// Verify OTP
-app.post("/api/auth/otp/verify", async (req, res) => {
-  try {
-    const { code } = req.body;
-    const email = req.session.pendingEmail;
-    const lang = req.session.pendingLang || "en";
-
-    if (!email) {
-      return res.status(400).json({ error: "No pending verification" });
-    }
-    if (!code || code.length !== 6) {
-      return res.status(400).json({ error: "Invalid OTP format" });
-    }
-
-    const result = await auth.verifyOTP(email, code);
-    if (!result.success) {
-      return res.status(400).json({ 
-        error: lang === "ar" ? "رمز خاطئ أو منتهي الصلاحية" : "Invalid or expired code" 
-      });
-    }
-
-    // Regenerate session to prevent fixation attacks
-    const oldSession = { ...req.session };
-    req.session.regenerate((err) => {
-      if (err) {
-        console.error("Session regeneration error:", err);
-        return res.status(500).json({ error: "Session error" });
-      }
-
-      // Restore necessary session data
-      req.session.userId = result.userId;
-      req.session.otpVerified = true;
-      req.session.pendingIntake = oldSession.pendingIntake;
-      req.session.pendingLang = oldSession.pendingLang;
-      req.session.pendingEmail = oldSession.pendingEmail;
-
-      db.select().from(users).where(eq(users.id, result.userId)).limit(1).then((user) => {
-        const needsPassword = !user[0].passwordHash;
-
-        res.json({ 
-          success: true, 
-          needsPassword,
-          message: needsPassword 
-            ? (lang === "ar" ? "رائع! الآن اختر كلمة مرور" : "Great! Now set your password")
-            : (lang === "ar" ? "تم التحقق بنجاح" : "Verified successfully")
-        });
-      }).catch((err) => {
-        console.error("User fetch error:", err);
-        res.status(500).json({ error: "Verification failed" });
-      });
-    });
-  } catch (err) {
-    console.error("OTP verify error:", err);
-    res.status(500).json({ error: "Verification failed" });
-  }
-});
-
-// Set password (after OTP verification)
-app.post("/api/auth/set-password", async (req, res) => {
-  try {
-    if (!req.session.otpVerified || !req.session.userId) {
-      return res.status(401).json({ error: "OTP not verified" });
-    }
-
-    const { password } = req.body;
-    const lang = req.session.pendingLang || "en";
-
-    if (!password || password.length < 6) {
-      return res.status(400).json({ 
-        error: lang === "ar" ? "كلمة المرور يجب أن تكون 6 أحرف على الأقل" : "Password must be at least 6 characters" 
-      });
-    }
-
-    const passwordHash = await auth.hashPassword(password);
-    await db.update(users)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(users.id, req.session.userId));
-
-    // Create user_progress entry with intake data
-    const intakeData = req.session.pendingIntake || {};
-    await db.insert(userProgress).values({
-      userId: req.session.userId,
-      intake: intakeData,
-      flowState: "assessment"
-    }).onConflictDoNothing();
-
-    // Clean up temp session data
-    delete req.session.pendingIntake;
-    delete req.session.pendingEmail;
-    delete req.session.otpVerified;
-
-    res.json({ 
-      success: true, 
-      message: lang === "ar" 
-        ? "تم! هنبدأ التقييم الآن" 
-        : "Done! Let's start the assessment"
-    });
-  } catch (err) {
-    console.error("Set password error:", err);
-    res.status(500).json({ error: "Failed to set password" });
-  }
-});
-
-// Login with email + password
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { email, password, lang = "en" } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password required" });
-    }
-
-    const user = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (!user.length) {
-      return res.status(401).json({ 
-        error: lang === "ar" ? "البريد أو كلمة المرور خاطئة" : "Invalid email or password" 
-      });
-    }
-
-    if (!user[0].passwordHash) {
-      return res.status(401).json({ 
-        error: lang === "ar" ? "يرجى التسجيل أولاً" : "Please sign up first" 
-      });
-    }
-
-    const valid = await auth.verifyPassword(password, user[0].passwordHash);
-    if (!valid) {
-      return res.status(401).json({ 
-        error: lang === "ar" ? "البريد أو كلمة المرور خاطئة" : "Invalid email or password" 
-      });
-    }
-
-    // Regenerate session to prevent fixation attacks
-    req.session.regenerate((err) => {
-      if (err) {
-        console.error("Session regeneration error:", err);
-        return res.status(500).json({ error: "Login failed" });
-      }
-
-      req.session.userId = user[0].id;
-      
-      res.json({ 
-        success: true, 
-        user: { id: user[0].id, email: user[0].email, name: user[0].name }
-      });
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ error: "Login failed" });
-  }
-});
-
-// Get current user
-app.get("/api/auth/me", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.json({ authenticated: false });
-    }
-
-    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
-    if (!user.length) {
-      return res.json({ authenticated: false });
-    }
-
-    // Get user progress
-    const progress = await db.select().from(userProgress).where(eq(userProgress.userId, req.session.userId)).limit(1);
-
-    res.json({ 
-      authenticated: true,
-      user: { 
-        id: user[0].id, 
-        email: user[0].email, 
-        name: user[0].name,
-        emailVerified: !!user[0].emailVerifiedAt
-      },
-      progress: progress.length ? progress[0] : null
-    });
-  } catch (err) {
-    console.error("Auth check error:", err);
-    res.status(500).json({ error: "Failed to check authentication" });
-  }
-});
-
-// Logout
-app.post("/api/auth/logout", (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ error: "Logout failed" });
-    }
-    res.json({ success: true });
-  });
-});
-
-
-// ==================== DASHBOARD ROUTES ====================
-
-// Serve dashboard page
-app.get("/dashboard", (req, res) => {
-  if (!req.session.userId) {
-    return res.redirect("/?login=1");
-  }
-  res.sendFile(join(__dirname, "../public/dashboard.html"));
-});
-
-// Get user profile
-app.get("/api/user/profile", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
-    if (!user.length) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const progress = await db.select().from(userProgress).where(eq(userProgress.userId, req.session.userId)).limit(1);
-
-    res.json({
-      user: {
-        id: user[0].id,
-        name: user[0].name,
-        email: user[0].email,
-        emailVerified: !!user[0].emailVerifiedAt,
-      },
-      intake: progress.length ? progress[0].intake : null,
-      flowState: progress.length ? progress[0].flowState : "intake"
-    });
-  } catch (err) {
-    console.error("Profile fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch profile" });
-  }
-});
-
-// Update user profile
-app.post("/api/user/profile", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const { name, email } = req.body;
-    
-    if (name) {
-      await db.update(users)
-        .set({ name, updatedAt: new Date() })
-        .where(eq(users.id, req.session.userId));
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Profile update error:", err);
-    res.status(500).json({ error: "Failed to update profile" });
-  }
-});
-
-// Get user assessments
-app.get("/api/user/assessments", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const assessments = await db.select()
-      .from(userAssessments)
-      .where(eq(userAssessments.userId, req.session.userId))
-      .orderBy(desc(userAssessments.startedAt));
-
-    res.json({ assessments });
-  } catch (err) {
-    console.error("Assessments fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch assessments" });
-  }
-});
-
-// Get tutorials (placeholder for now)
-app.get("/api/user/tutorials", async (req, res) => {
-  try {
-    // Placeholder - would come from a tutorials table or CMS
-    const tutorials = [
-      {
-        id: "1",
-        title: "Introduction to Descriptive Statistics",
-        titleAr: "مقدمة في الإحصاء الوصفي",
-        description: "Learn the fundamentals of descriptive statistics including mean, median, and mode",
-        descriptionAr: "تعلم أساسيات الإحصاء الوصفي بما في ذلك المتوسط والوسيط والمنوال",
-        duration: "15 min",
-        level: "beginner",
-        url: "#"
-      },
-      {
-        id: "2",
-        title: "Understanding Data Dispersion",
-        titleAr: "فهم تشتت البيانات",
-        description: "Explore variance, standard deviation, and range",
-        descriptionAr: "استكشف التباين والانحراف المعياري والمدى",
-        duration: "20 min",
-        level: "intermediate",
-        url: "#"
-      }
-    ];
-
-    res.json({ tutorials });
-  } catch (err) {
-    console.error("Tutorials fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch tutorials" });
-  }
-});
-
-
-// Retake assessment with harder difficulty
-app.post("/api/assess/retake", async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const { sessionId } = req.body;
-    const session = getSession(sessionId || randomUUID());
-    
-    // Load user progress from DB
-    const progress = await db.select().from(userProgress)
-      .where(eq(userProgress.userId, req.session.userId))
-      .limit(1);
-    
-    if (!progress.length) {
-      return res.status(404).json({ error: "No progress found" });
-    }
-
-    // Reset session for retake with harder difficulty
-    session.userId = req.session.userId;
-    session.lang = progress[0].intake?.lang || "en";
-    session.currentStep = "assessment";
-    session.intake = progress[0].intake || {};
-    session.assessment = {
-      currentLevel: "L1",
-      attempts: 1, // Mark as retake
-      evidence: [],
-      questionIndexInAttempt: 1,
-      usedClustersCurrentAttempt: [],
-      currentQuestion: null,
-      stemsCurrentAttempt: [],
-      lastAttemptStems: {},
-    };
-
-    res.json({
-      success: true,
-      sessionId: session.sessionId,
-      message: session.lang === "ar" 
-        ? "تمام! هنبدأ تقييم جديد بمستوى أصعب" 
-        : "Great! Let's start a new assessment with harder questions"
-    });
-  } catch (err) {
-    console.error("Retake error:", err);
-    res.status(500).json({ error: "Failed to start retake" });
-  }
-});
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
   try {
