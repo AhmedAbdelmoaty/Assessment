@@ -76,6 +76,9 @@ const openai = new OpenAI({
 const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
 const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
 
+// In-memory session storage for assessment flow (hybrid with PostgreSQL sessions)
+const sessions = new Map();
+
 /* =========================
    Helpers: logging + guards
    ========================= */

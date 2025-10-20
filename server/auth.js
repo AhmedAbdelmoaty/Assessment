@@ -22,20 +22,20 @@ export async function verifyPassword(password, hash) {
 }
 
 // Create or get user by email
-export async function upsertUser(email, name) {
+export async function upsertUser(email, username) {
   const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
   
   if (existing.length > 0) {
-    // Update name if changed
+    // Update username if changed
     await db.update(users)
-      .set({ name, updatedAt: new Date() })
+      .set({ username })
       .where(eq(users.id, existing[0].id));
     return existing[0];
   }
   
   // Create new user
   const newUsers = await db.insert(users)
-    .values({ email, name })
+    .values({ email, username })
     .returning();
   return newUsers[0];
 }

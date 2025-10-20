@@ -6,14 +6,14 @@ import { createInsertSchema } from "drizzle-zod";
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
-  name: text("name").notNull(),
-  passwordHash: text("password_hash"),
-  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  username: text("username"),
+  passHash: text("pass_hash"),
+  profileJson: jsonb("profile_json"),
   createdAt: timestamp("created_at", { withTimezone: true }).default(sql`now()`).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).default(sql`now()`).notNull(),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
 });
 
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 
 // OTP table for email verification
 export const authOtps = pgTable("auth_otps", {
