@@ -25,6 +25,12 @@
         <button type="button" class="lang-btn active" data-lang="en">English</button>
         <button type="button" class="lang-btn" data-lang="ar">العربية</button>
       </div>
+
+      <!-- Login Button -->
+      <a href="/login.html" class="login-link" id="loginLink" data-testid="link-login">
+        <span data-lang-content="en">Login</span>
+        <span class="hidden" data-lang-content="ar">تسجيل الدخول</span>
+      </a>
     </div>
 
     <!-- Landing Section -->
@@ -48,9 +54,9 @@
                     <p class="hero-subtitle">هدفي مساعدتك في تعلم تحليل البيانات، سنقيّم مستواك خطوة بخطوة، وفي النهاية ستحصل على خطة تعلم واضحة تناسب هدفك.</p>
                 </div>
                 
-                <button class="cta-button" id="startBtn">
-                    <span class="cta-text" data-lang-content="en">Start Assessment</span>
-                    <span class="cta-text hidden" data-lang-content="ar">ابدأ التقييم</span>
+                <button class="cta-button" id="startBtn" data-testid="button-signup">
+                    <span class="cta-text" data-lang-content="en">Sign Up</span>
+                    <span class="cta-text hidden" data-lang-content="ar">إنشاء حساب</span>
                     <i class="fas fa-arrow-right"></i>
                 </button>
             </div>

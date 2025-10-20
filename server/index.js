@@ -585,19 +585,28 @@ app.post("/api/auth/set-password", async (req, res) => {
     await db.insert(userProgress).values({
       userId: req.session.userId,
       intake: intakeData,
-      flowState: "assessment"
+      flowState: "assessment",
+      assessmentState: { intakeDone: true, stage: 'assessment' }
     }).onConflictDoNothing();
 
-    // Clean up temp session data
+    // Clean up temp session data but keep userId
     delete req.session.pendingIntake;
     delete req.session.pendingEmail;
     delete req.session.otpVerified;
 
-    res.json({ 
-      success: true, 
-      message: lang === "ar" 
-        ? "تم! هنبدأ التقييم الآن" 
-        : "Done! Let's start the assessment"
+    // Save session before responding
+    req.session.save((err) => {
+      if (err) {
+        console.error("Session save error:", err);
+        return res.status(500).json({ error: "Failed to save session" });
+      }
+      
+      res.json({ 
+        success: true, 
+        message: lang === "ar" 
+          ? "تم! هنبدأ التقييم الآن" 
+          : "Done! Let's start the assessment"
+      });
     });
   } catch (err) {
     console.error("Set password error:", err);
@@ -862,10 +871,56 @@ app.post("/api/assess/retake", async (req, res) => {
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
   try {
-    const { sessionId } = req.body;
-    const session = getSession(sessionId);
-    if (session.currentStep !== "assessment") {
-      return res.status(400).json({ error: "Not in assessment phase" });
+    // Check authentication
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const lang = req.session.pendingLang || "en";
+
+    // Fetch user progress
+    const progress = await db.select()
+      .from(userProgress)
+      .where(eq(userProgress.userId, req.session.userId))
+      .limit(1);
+
+    if (!progress.length) {
+      return res.status(409).json({ 
+        error: "intake_not_completed",
+        message: lang === "ar" ? "يرجى إكمال بيانات الملف أولاً" : "Please complete intake first"
+      });
+    }
+
+    const assessmentState = progress[0].assessmentState || {};
+    if (!assessmentState.intakeDone) {
+      return res.status(409).json({ 
+        error: "intake_not_completed",
+        message: lang === "ar" ? "يرجى إكمال بيانات الملف أولاً" : "Please complete intake first"
+      });
+    }
+
+    // Get or create in-memory session for assessment flow
+    const sessionId = req.sessionID;
+    let session = getSession(sessionId);
+    if (!session || session.currentStep !== "assessment") {
+      // Initialize new assessment session
+      session = createSession({
+        sessionId: sessionId,
+        userId: req.session.userId,
+        lang: progress[0].intake?.lang || "en",
+        currentStep: "assessment",
+        intake: progress[0].intake || {},
+        assessment: {
+          currentLevel: "L1",
+          attempts: 0,
+          evidence: [],
+          questionIndexInAttempt: 1,
+          usedClustersCurrentAttempt: [],
+          currentQuestion: null,
+          stemsCurrentAttempt: [],
+          lastAttemptStems: {},
+        }
+      });
     }
 
     const A = session.assessment;
@@ -955,11 +1010,21 @@ app.post("/api/assess/next", async (req, res) => {
 // -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
-    const { sessionId, userChoiceIndex } = req.body;
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const { userChoiceIndex } = req.body;
+    const sessionId = req.sessionID;
     const session = getSession(sessionId);
+
+    if (!session || session.currentStep !== "assessment") {
+      return res.status(400).json({ error: "Not in assessment phase" });
+    }
+
     const A = session.assessment;
 
-    if (session.currentStep !== "assessment" || !A.currentQuestion) {
+    if (!A.currentQuestion) {
       return res.status(400).json({ error: "No active question" });
     }
 

@@ -1,0 +1,76 @@
+Change the main CTA on public/index.html from “Start Assessment” to “Sign Up”.
+
+Arabic version must read “إنشاء حساب”.
+
+Keep the design exactly aligned with the project’s current IMP theme (same colors, typography, spacing).
+
+2) Home page entry points (no test runs):
+
+The home page must always show two clear actions:
+
+Login button (header) → opens /login.html (or the login modal) to sign in first, then redirect to chat/dashboard based on saved state.
+
+Sign Up CTA (the big red button) → starts the first-time flow inside chat (intake → OTP → set password → then assessment).
+
+Do not move Login into the chat for returning users. If a not-authenticated user opens the chat URL directly, redirect to /login.html.
+
+3) Fix the regression: “Sorry, an error occurred during assessment.”
+The error currently appears after OTP + Set Password, when the client calls /api/assess/next in startAssessment(). Fix it without breaking OTP (currently working).
+
+Diagnosis checklist (apply and fix what’s wrong):
+
+Ensure the session persists after POST /auth/set-password:
+
+After hashing + saving password, the server must keep req.session.userId and req.session.save() before responding.
+
+Cookies must be set with app.set('trust proxy', 1) and correct cookie options (secure on Replit HTTPS, proper sameSite).
+
+Ensure Intake → Assessment transition flag is written:
+
+When intake finishes, store an explicit marker (e.g., users.state.stage = 'assessment' and users.state.intakeDone = true).
+
+The assessment routes must gate on intakeDone === true, otherwise return a clear 409 with JSON ({error:'intake_not_completed'}), not a generic 500.
+
+Verify /api/assess/next:
+
+It must read userId from session, not from body.
+
+It should return the next MCQ deterministically; if the user has no current attempt, create one and return Q1.
+
+Handle empty/invalid state with structured errors and log the root cause.
+
+No SQL syntax errors in assessment queries. The earlier syntax error at or near "where" must be fully resolved.
+
+Concrete server fixes to implement:
+
+In auth controller after setPassword:
+
+Keep req.session.userId intact, call req.session.save(cb) and respond only after save callback succeeds.
+
+In intake completion endpoint/service:
+
+Set intakeDone = true, stage = 'assessment' in the user state/attempts table.
+
+In assessment controller:
+
+On GET/POST /api/assess/next, if !req.session.userId → 401 JSON.
+
+If intakeDone !== true → 409 JSON with {error:'intake_not_completed'}.
+
+Otherwise, upsert (or fetch) the current attempt and return { level, prompt, choices, questionNumber, totalQuestions }.
+
+Client (public/app.js) guardrails (don’t alter styles):
+
+In startAssessment(), if the server returns 401 → show a small login hint and redirect to /login.html.
+
+If it returns 409 intake_not_completed → resume intake instead of showing the generic “Sorry, an error occurred during assessment.” Replace that generic message with a contextual one.
+
+Keep all UI intact (IMP theme, Arabic/English handling) — no new pages or colors other than /login.html that already matches the site theme.
+
+Important constraints:
+
+Do not change the OTP flow (it is working again after rollback). Only fix the assessment start error and session persistence after set-password.
+
+Keep everything within the existing visual system (no purple gradients, no foreign theme).
+
+Do not run automated tests; I will do the manual verification.

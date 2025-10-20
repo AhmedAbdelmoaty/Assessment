@@ -605,8 +605,45 @@
             const response = await fetch("/api/assess/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId }),
+                body: JSON.stringify({}),
             });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                
+                hideTypingIndicator();
+                
+                // Handle authentication error
+                if (response.status === 401) {
+                    addSystemMessage(
+                        currentLang === "ar"
+                            ? "يرجى تسجيل الدخول أولاً"
+                            : "Please log in first"
+                    );
+                    setTimeout(() => {
+                        window.location.href = "/login.html";
+                    }, 1500);
+                    return;
+                }
+                
+                // Handle intake not completed
+                if (response.status === 409 && errorData.error === "intake_not_completed") {
+                    addSystemMessage(
+                        errorData.message || (currentLang === "ar"
+                            ? "يرجى إكمال بيانات الملف أولاً"
+                            : "Please complete intake first")
+                    );
+                    return;
+                }
+                
+                // Generic error
+                addSystemMessage(
+                    errorData.message || (currentLang === "ar"
+                        ? "عذراً، حدث خطأ في التقييم."
+                        : "Sorry, an error occurred during assessment.")
+                );
+                return;
+            }
 
             const mcq = await response.json();
             currentMCQ = mcq;
@@ -618,8 +655,8 @@
             hideTypingIndicator();
             addSystemMessage(
                 currentLang === "ar"
-                    ? "عذراً، حدث خطأ في التقييم."
-                    : "Sorry, an error occurred during assessment.",
+                    ? "عذراً، حدث خطأ في الاتصال بالخادم."
+                    : "Sorry, a network error occurred.",
             );
         }
     }
@@ -635,7 +672,6 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    sessionId,
                     userChoiceIndex: userAnswer, // ← نبعت الفهرس فقط
                 }),
             });
