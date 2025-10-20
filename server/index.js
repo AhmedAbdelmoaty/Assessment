@@ -382,12 +382,27 @@ app.post("/api/intake/next", async (req, res) => {
     }
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
-      // Intake complete - now trigger OTP flow
+      // Intake complete - now check if email exists
       const email = session.intake.email;
       const name = session.intake.name_full;
       
       try {
-        // Create or get user
+        // Check if user already exists with password
+        const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+        
+        if (existingUser.length && existingUser[0].passHash) {
+          // User already has account - redirect to login
+          return res.json({
+            done: true,
+            requiresLogin: true,
+            email,
+            message: lang === "ar"
+              ? "هذا البريد مرتبط بحساب. من فضلك سجّل الدخول."
+              : "This email already has an account. Please log in."
+          });
+        }
+        
+        // Create or get user (for new sign-ups or incomplete registrations)
         const user = await auth.upsertUser(email, name);
         
         // Generate OTP
@@ -418,6 +433,17 @@ app.post("/api/intake/next", async (req, res) => {
         });
       } catch (err) {
         console.error("Error creating user/OTP:", err);
+        
+        // Handle duplicate email error from database constraint
+        if (err.code === '23505' && err.constraint === 'users_email_unique') {
+          return res.status(409).json({ 
+            error: true, 
+            message: lang === "ar"
+              ? "هذا البريد مرتبط بحساب. من فضلك سجّل الدخول."
+              : "This email already has an account. Please log in."
+          });
+        }
+        
         return res.status(500).json({ error: true, message: "Failed to send verification code" });
       }
     }
@@ -704,6 +730,79 @@ app.post("/api/auth/logout", (req, res) => {
   });
 });
 
+// Get session state (for resume)
+app.get("/api/session/state", async (req, res) => {
+  try {
+    if (!req.session.userId) {
+      return res.json({ 
+        auth: false,
+        intakeStatus: "not-started",
+        emailVerified: false,
+        assessmentStatus: "not-started",
+        teachingStatus: "not-started"
+      });
+    }
+
+    // Get user
+    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
+    if (!user.length) {
+      return res.json({ 
+        auth: false,
+        intakeStatus: "not-started",
+        emailVerified: false,
+        assessmentStatus: "not-started",
+        teachingStatus: "not-started"
+      });
+    }
+
+    // Get user progress
+    const progress = await db.select().from(userProgress).where(eq(userProgress.userId, req.session.userId)).limit(1);
+    
+    let intakeStatus = "not-started";
+    let assessmentStatus = "not-started";
+    let teachingStatus = "not-started";
+
+    if (progress.length) {
+      const flowState = progress[0].flowState || "intake";
+      const assessmentState = progress[0].assessmentState || {};
+      const intake = progress[0].intake || {};
+
+      // Determine intake status
+      if (assessmentState.intakeDone || Object.keys(intake).length >= 9) {
+        intakeStatus = "complete";
+      } else if (Object.keys(intake).length > 0) {
+        intakeStatus = "in-progress";
+      }
+
+      // Determine assessment status
+      if (assessmentState.stage === "assessment" || flowState === "assessment") {
+        assessmentStatus = "in-progress";
+      } else if (flowState === "report" || assessmentState.stage === "complete") {
+        assessmentStatus = "complete";
+      }
+
+      // Determine teaching status
+      if (flowState === "teaching") {
+        teachingStatus = "in-progress";
+      }
+    }
+
+    const emailVerified = !!user[0].emailVerifiedAt;
+
+    res.json({
+      auth: true,
+      intakeStatus,
+      emailVerified,
+      assessmentStatus,
+      teachingStatus,
+      email: user[0].email  // Include email for OTP verification resume
+    });
+  } catch (err) {
+    console.error("Session state error:", err);
+    res.status(500).json({ error: "Failed to get session state" });
+  }
+});
+
 
 // ==================== DASHBOARD ROUTES ====================
 
@@ -904,7 +1003,7 @@ app.post("/api/assess/next", async (req, res) => {
     let session = getSession(sessionId);
     if (!session || session.currentStep !== "assessment") {
       // Initialize new assessment session
-      session = createSession({
+      const newSession = {
         sessionId: sessionId,
         userId: req.session.userId,
         lang: progress[0].intake?.lang || "en",
@@ -919,8 +1018,20 @@ app.post("/api/assess/next", async (req, res) => {
           currentQuestion: null,
           stemsCurrentAttempt: [],
           lastAttemptStems: {},
-        }
-      });
+        },
+        teaching: {
+          mode: "idle",
+          lang: progress[0].intake?.lang || "ar",
+          topics_queue: [],
+          current_topic_index: 0,
+          transcript: [],
+          assistant: { threadId: null }
+        },
+        finished: false,
+        report: null,
+      };
+      sessions.set(sessionId, newSession);
+      session = newSession;
     }
 
     const A = session.assessment;
