@@ -521,19 +521,35 @@ app.post("/api/auth/otp/verify", async (req, res) => {
       });
     }
 
-    const user = await db.select().from(users).where(eq(users.id, result.userId)).limit(1);
-    const needsPassword = !user[0]?.passHash;
+    // Regenerate session to prevent fixation attacks
+    const oldSession = { ...req.session };
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error("Session regeneration error:", err);
+        return res.status(500).json({ error: "Session error" });
+      }
 
-    // Set pending user ID in session
-    req.session.userId_pending = result.userId;
-    await new Promise(resolve => req.session.save(resolve));
+      // Restore necessary session data
+      req.session.userId = result.userId;
+      req.session.otpVerified = true;
+      req.session.pendingIntake = oldSession.pendingIntake;
+      req.session.pendingLang = oldSession.pendingLang;
+      req.session.pendingEmail = oldSession.pendingEmail;
 
-    res.json({ 
-      ok: true,
-      next: needsPassword ? "set_password" : "dashboard",
-      message: needsPassword 
-        ? (lang === "ar" ? "رائع! الآن اختر كلمة مرور" : "Great! Now set your password")
-        : (lang === "ar" ? "تم التحقق بنجاح" : "Verified successfully")
+      db.select().from(users).where(eq(users.id, result.userId)).limit(1).then((user) => {
+        const needsPassword = !user[0].passwordHash;
+
+        res.json({ 
+          success: true, 
+          needsPassword,
+          message: needsPassword 
+            ? (lang === "ar" ? "رائع! الآن اختر كلمة مرور" : "Great! Now set your password")
+            : (lang === "ar" ? "تم التحقق بنجاح" : "Verified successfully")
+        });
+      }).catch((err) => {
+        console.error("User fetch error:", err);
+        res.status(500).json({ error: "Verification failed" });
+      });
     });
   } catch (err) {
     console.error("OTP verify error:", err);
@@ -544,7 +560,7 @@ app.post("/api/auth/otp/verify", async (req, res) => {
 // Set password (after OTP verification)
 app.post("/api/auth/set-password", async (req, res) => {
   try {
-    if (!req.session.userId_pending) {
+    if (!req.session.otpVerified || !req.session.userId) {
       return res.status(401).json({ error: "OTP not verified" });
     }
 
@@ -557,35 +573,26 @@ app.post("/api/auth/set-password", async (req, res) => {
       });
     }
 
-    const hash = await auth.hashPassword(password);
-    const pendingId = req.session.userId_pending;
-    
-    // Debug log before update
-    console.log(`[SET-PASSWORD] Updating user ${pendingId} with hash length ${hash?.length}`);
-    
+    const passwordHash = await auth.hashPassword(password);
     await db.update(users)
-      .set({ passHash: hash })
-      .where(eq(users.id, pendingId));
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, req.session.userId));
 
     // Create user_progress entry with intake data
     const intakeData = req.session.pendingIntake || {};
     await db.insert(userProgress).values({
-      userId: pendingId,
+      userId: req.session.userId,
       intake: intakeData,
       flowState: "assessment"
     }).onConflictDoNothing();
 
-    // Move pending to active session
-    req.session.userId = pendingId;
-    delete req.session.userId_pending;
+    // Clean up temp session data
     delete req.session.pendingIntake;
     delete req.session.pendingEmail;
-    
-    await new Promise(resolve => req.session.save(resolve));
+    delete req.session.otpVerified;
 
     res.json({ 
-      ok: true,
-      next: "dashboard",
+      success: true, 
       message: lang === "ar" 
         ? "تم! هنبدأ التقييم الآن" 
         : "Done! Let's start the assessment"
@@ -612,13 +619,13 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    if (!user[0].passHash) {
+    if (!user[0].passwordHash) {
       return res.status(401).json({ 
         error: lang === "ar" ? "يرجى التسجيل أولاً" : "Please sign up first" 
       });
     }
 
-    const valid = await auth.verifyPassword(password, user[0].passHash);
+    const valid = await auth.verifyPassword(password, user[0].passwordHash);
     if (!valid) {
       return res.status(401).json({ 
         error: lang === "ar" ? "البريد أو كلمة المرور خاطئة" : "Invalid email or password" 
@@ -636,7 +643,7 @@ app.post("/api/auth/login", async (req, res) => {
       
       res.json({ 
         success: true, 
-        user: { id: user[0].id, email: user[0].email, username: user[0].username }
+        user: { id: user[0].id, email: user[0].email, name: user[0].name }
       });
     });
   } catch (err) {
@@ -665,7 +672,7 @@ app.get("/api/auth/me", async (req, res) => {
       user: { 
         id: user[0].id, 
         email: user[0].email, 
-        username: user[0].username,
+        name: user[0].name,
         emailVerified: !!user[0].emailVerifiedAt
       },
       progress: progress.length ? progress[0] : null
