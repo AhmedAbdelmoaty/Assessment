@@ -22,24 +22,8 @@
         }
 
         // User is authenticated, proceed with setup
-        // Initialize language switch using shared header.js
-        if (window.HeaderUtils) {
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
-        }
-        
-        setupLogout();
+        // header.js automatically handles language switch and logout
         loadDashboardData();
-    }
-
-    function setupLogout() {
-        document.getElementById("logoutBtn").addEventListener("click", async () => {
-            try {
-                await fetch("/api/auth/logout", { method: "POST" });
-                window.location.href = "/";
-            } catch (error) {
-                console.error("Logout failed:", error);
-            }
-        });
     }
 
     async function loadDashboardData() {

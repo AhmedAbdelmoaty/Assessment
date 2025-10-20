@@ -344,5 +344,19 @@
             }
         });
     </script>
+
+    <!-- Client-side guard: redirect logged-in users immediately -->
+    <script>
+      (async () => {
+        try {
+          const r = await fetch('/api/session/state', { credentials: 'include' });
+          const s = await r.json();
+          if (s && s.loggedIn) {
+            // Use replace so Back button won't return here
+            window.location.replace('/dashboard.html');
+          }
+        } catch (e) { /* no-op */ }
+      })();
+    </script>
 </body>
 </html>

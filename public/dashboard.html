@@ -104,46 +104,52 @@
 </head>
 <body>
     <!-- Protected Page Header -->
-    <header class="chat-header" id="dashboardHeader">
+    <header class="app-header">
+      <div class="header-inner">
         <!-- Logo -->
-        <a href="/" class="brand">
-            <img
-                src="/assets/imp-logo.jpeg"
-                alt="IMP - Institute of Management Professionals"
-                class="brand-logo"
-            />
+        <a class="brand" href="/">
+          <img src="/assets/imp-logo.jpeg" alt="IMP" class="brand-logo">
         </a>
 
-        <!-- Navigation Tabs (Desktop) -->
-        <nav class="header-nav">
-            <a href="/dashboard.html" class="nav-tab active" data-testid="link-dashboard">
-                <span data-lang-content="en">Dashboard</span>
-                <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
-            </a>
-            <a href="/chat.html" class="nav-tab" data-testid="link-chat">
-                <span data-lang-content="en">Chat</span>
-                <span class="hidden" data-lang-content="ar">الدردشة</span>
-            </a>
+        <!-- Left nav tabs (Dashboard/Chat) -->
+        <nav class="page-tabs" data-auth-only="true">
+          <a href="/dashboard.html" class="tab active" data-testid="link-dashboard">
+            <span data-lang-content="en">Dashboard</span>
+            <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
+          </a>
+          <a href="/chat.html" class="tab" data-testid="link-chat">
+            <span data-lang-content="en">Chat</span>
+            <span class="hidden" data-lang-content="ar">الدردشة</span>
+          </a>
         </nav>
 
-        <!-- Logout Button (Desktop) -->
-        <button id="headerLogoutBtn" class="btn-logout" data-testid="button-logout">
-            <i class="fas fa-sign-out-alt"></i>
-            <span data-lang-content="en">Logout</span>
-            <span class="hidden" data-lang-content="ar">خروج</span>
-        </button>
+        <!-- Right controls -->
+        <div class="header-actions">
+          <!-- Session controls (logged in only) -->
+          <div class="auth-session" data-logged-in-only="true">
+            <button id="logoutBtn" class="btn btn-primary --maroon" data-testid="button-logout">
+              <i class="fas fa-sign-out-alt"></i>
+              <span data-lang-content="en">Logout</span>
+              <span class="hidden" data-lang-content="ar">خروج</span>
+            </button>
+          </div>
 
-        <!-- Language Toggle (Desktop) -->
-        <div id="lang-switch"></div>
+          <!-- Language button (always visible) -->
+          <button id="langToggle" class="lang-btn" aria-label="Language switch" data-testid="button-language">
+            <i class="fa-solid fa-language"></i>
+            <span class="lang-label"></span>
+          </button>
 
-        <!-- Hamburger Button (Mobile Only) -->
-        <button id="btnHamburger" class="btn-hamburger" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false" data-testid="button-hamburger">
+          <!-- Hamburger Button (Mobile Only) -->
+          <button id="btnHamburger" class="btn-hamburger" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false" data-testid="button-hamburger">
             <div class="hamburger-icon">
-                <span></span>
-                <span></span>
-                <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
             </div>
-        </button>
+          </button>
+        </div>
+      </div>
     </header>
 
     <!-- Mobile Drawer (Mobile Only) -->

@@ -1,0 +1,238 @@
+You are The Ultimate Full-Stack Engineer (Node.js + Express + Vanilla JS).
+Implement the following two fixes precisely. Keep the current branding (maroon, fonts, radii), and do not alter unrelated logic.
+
+0) Repo context (so you wire things in the right places)
+
+We have multiple static pages under /public: index.html (Home), login.html, signup.html, dashboard.html (protected), chat.html (protected).
+
+Shared header logic lives in public/js/header.js (already created in previous update).
+
+Session state endpoint exists: GET /api/session/state → { loggedIn, stage }.
+
+Express server root under /server (main app bootstrap in server/index.js or equivalent). Sessions via express-session + connect-pg-simple are already configured.
+
+1) Reverse Guards for Public Pages + No-Cache
+Goal
+
+When a user is logged in, they must never see Home/Login/Signup—even via Back button. Any access to /, /index.html, /login.html, or /signup.html must redirect (302) to /dashboard.html. Also, prevent stale cached auth pages.
+
+Server changes
+
+File: server/index.js (or your main Express entry)
+
+Add middleware redirectIfLoggedIn and mount it before static serving:
+
+function redirectIfLoggedIn(req, res, next) {
+  const isAuth = !!(req.session && req.session.userId);
+  const isPublicAuthPage = req.path === '/' ||
+                           req.path === '/index.html' ||
+                           req.path === '/login.html' ||
+                           req.path === '/signup.html';
+  if (isAuth && isPublicAuthPage) {
+    return res.redirect(302, '/dashboard.html');
+  }
+  return next();
+}
+
+
+Add no-store cache headers for auth pages to kill back/forward cache:
+
+function noStoreForAuth(req, res, next) {
+  const isAuthPage = req.path === '/login.html' || req.path === '/signup.html' || req.path === '/' || req.path === '/index.html';
+  if (isAuthPage) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+  }
+  next();
+}
+
+
+Register in correct order (important):
+
+app.use(noStoreForAuth);
+app.use(redirectIfLoggedIn);
+// then your static middleware: app.use(express.static(path.join(__dirname, '..', 'public')));
+
+Client-side safety (instant redirect without history entry)
+
+For public pages only (home/login/signup), add a tiny guard that immediately redirects if a session exists.
+
+Files:
+
+public/index.html
+
+public/login.html
+
+public/signup.html
+
+At the end of body, include:
+
+<script>
+  (async () => {
+    try {
+      const r = await fetch('/api/session/state', { credentials: 'include' });
+      const s = await r.json();
+      if (s && s.loggedIn) {
+        // Use replace so Back button won’t return here
+        window.location.replace('/dashboard.html');
+      }
+    } catch (e) { /* no-op */ }
+  })();
+</script>
+
+
+This, plus the server guard + no-store, ensures Back won’t expose public pages while logged in.
+
+2) Mobile Header: keep language button visible & push controls to the right
+Goals
+
+Home (index.html) on small screens: hide Login/Sign Up buttons only, but keep the language button visible at the far right.
+
+Dashboard/Chat headers: right-aligned Logout (maroon) followed by the single language button, on both desktop and mobile.
+
+Do not hide the language button due to a parent container’s display:none.
+
+HTML structure (ensure separate containers)
+
+File: public/partials/header.html or directly inside each page’s header markup (you created public/js/header.js to render header — keep the same API, just split groups):
+
+<header class="app-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><img src="/assets/imp-logo.jpeg" alt="IMP" class="brand-logo"></a>
+
+    <!-- Left nav tabs (Dashboard/Chat) where applicable -->
+    <nav class="page-tabs" data-auth-only="true">
+      <a href="/dashboard.html" class="tab">Dashboard</a>
+      <a href="/chat.html" class="tab">Chat</a>
+    </nav>
+
+    <!-- Right controls -->
+    <div class="header-actions">
+      <div class="auth-buttons" data-logged-out-only="true">
+        <a class="btn btn-outline" href="/login.html">Login</a>
+        <a class="btn btn-primary" href="/signup.html">Sign Up</a>
+      </div>
+
+      <div class="auth-session" data-logged-in-only="true">
+        <button id="logoutBtn" class="btn btn-primary --maroon">Logout</button>
+      </div>
+
+      <!-- language stays OUTSIDE auth groups -->
+      <button id="langToggle" class="lang-btn" aria-label="Language switch">
+        <i class="fa-solid fa-language"></i>
+        <span class="lang-label">العربية</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+
+Key: .auth-buttons and .auth-session are separate from the language button wrapper to avoid being hidden together.
+
+CSS (styles.css)
+
+Add/adjust rules:
+
+.app-header .header-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Push right controls fully to the right */
+.app-header .header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Maroon logout */
+.btn.--maroon {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+/* Mobile behavior */
+@media (max-width: 640px) {
+  /* Home page: hide only auth buttons; keep lang visible */
+  .home-page .header-actions .auth-buttons { display: none; }
+
+  /* Tabs can collapse/hide as per your drawer logic; keep language & logout visible */
+  .app-header .page-tabs { display: none; }
+
+  /* Ensure language button remains visible and right aligned */
+  #langToggle { display: inline-flex; }
+}
+
+
+Ensure index.html <body> has class="home-page" so the mobile rule applies to Home only.
+
+Header runtime logic (header.js)
+
+File: public/js/header.js
+
+Keep the current fetch to /api/session/state.
+
+Toggle visibility using the data-logged-in-only / data-logged-out-only attributes (add utility):
+
+function applyAuthVisibility(state) {
+  document.querySelectorAll('[data-logged-in-only]').forEach(el => {
+    el.style.display = state.loggedIn ? '' : 'none';
+  });
+  document.querySelectorAll('[data-logged-out-only]').forEach(el => {
+    el.style.display = state.loggedIn ? 'none' : '';
+  });
+}
+
+
+Order and alignment are controlled by CSS; just ensure the DOM order is: Logout container, then Language button.
+
+On Logout click → POST /api/auth/logout then location.replace('/').
+
+Language button (single toggle)
+
+Keep the single toggle button pattern you already implemented: it shows “العربية” when current is English and vice versa.
+
+Make sure the language button is not inside any container hidden on mobile.
+
+3) Sanity checks / Edge cases
+
+Manually verify:
+
+While logged in, trying /, /index.html, /login.html, /signup.html → redirected to /dashboard.html.
+
+Pressing browser Back from protected pages doesn’t show public pages (thanks to no-store + location.replace guard).
+
+On mobile home, language button is visible at the far right; Login/Sign Up are hidden in the header but still visible as big hero buttons in the page body.
+
+On mobile dashboard/chat, right side shows Logout (maroon) then the language button; tabs may collapse per your drawer/mobile pattern, but the two buttons stay visible and aligned right.
+
+Do not change brand styles (colors, fonts, shadows).
+
+Keep everything accessible (buttons have labels, focus outlines preserved).
+
+Files you will likely edit
+
+server/index.js (or main server bootstrap): add noStoreForAuth + redirectIfLoggedIn.
+
+public/index.html, public/login.html, public/signup.html: add client guard <script> snippet.
+
+public/js/header.js: split auth vs language containers and visibility logic.
+
+public/styles.css: add mobile rules described above.
+
+If header is templated via JS injection, adjust that template there instead of static HTML.
+
+Deliverables are accepted when:
+
+Public pages cannot be seen when logged in (including with Back).
+
+Language button is always visible on mobile home (right aligned).
+
+Dashboard/Chat show Logout (maroon) then Language on the right, desktop & mobile.
+
+Please implement now.

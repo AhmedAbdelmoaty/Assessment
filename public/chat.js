@@ -16,7 +16,6 @@
     const chatMessages = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput");
     const sendBtn = document.getElementById("sendBtn");
-    const headerLogoutBtn = document.getElementById("headerLogoutBtn");
 
     // Initialize
     init();
@@ -37,15 +36,13 @@
         }
 
         // User is authenticated, proceed with setup
-        // Initialize language switch using shared header.js
+        // header.js automatically handles language switch and logout
         if (window.HeaderUtils) {
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
             currentLang = HeaderUtils.getCurrentLang();
         }
         
         setupSendButton();
         setupInputHandlers();
-        setupLogout();
         
         // Check session state and resume if needed
         await checkSessionState();
@@ -126,17 +123,6 @@
                     ? chatInput.getAttribute("data-placeholder-ar")
                     : chatInput.getAttribute("data-placeholder-en");
         }
-    }
-
-    function setupLogout() {
-        headerLogoutBtn.addEventListener("click", async () => {
-            try {
-                await fetch("/api/auth/logout", { method: "POST" });
-                window.location.href = "/";
-            } catch (error) {
-                console.error("Logout failed:", error);
-            }
-        });
     }
 
     function setupSendButton() {
