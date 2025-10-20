@@ -32,7 +32,7 @@ if (SMTP_CONFIGURED) {
  * Send verification email (magic link)
  */
 export async function sendVerificationEmail(email, token, lang = 'en') {
-  const verifyLink = `${BASE_URL}/verify?token=${token}&type=verify`;
+  const verifyLink = `${BASE_URL}/verify.html?token=${token}&type=verify`;
   
   const subject = lang === 'ar' 
     ? 'فعّل حسابك - Learning Advisor' 
@@ -74,7 +74,7 @@ export async function sendVerificationEmail(email, token, lang = 'en') {
  * Send password reset email
  */
 export async function sendResetEmail(email, token, lang = 'en') {
-  const resetLink = `${BASE_URL}/verify?token=${token}&type=reset`;
+  const resetLink = `${BASE_URL}/verify.html?token=${token}&type=reset`;
   
   const subject = lang === 'ar' 
     ? 'إعادة تعيين كلمة المرور - Learning Advisor' 

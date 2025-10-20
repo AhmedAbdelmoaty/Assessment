@@ -1047,7 +1047,7 @@ app.post("/api/auth/bootstrap", async (req, res) => {
                      (REPL_SLUG ? `https://${REPL_SLUG}.replit.dev` : null) ||
                      'http://localhost:5000';
     
-    const devLink = `${BASE_URL}/verify?token=${rawToken}&type=verify`;
+    const devLink = `${BASE_URL}/verify.html?token=${rawToken}&type=verify`;
 
     const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
     
@@ -1095,7 +1095,7 @@ app.post("/api/auth/resend", async (req, res) => {
                      (REPL_SLUG ? `https://${REPL_SLUG}.replit.dev` : null) ||
                      'http://localhost:5000';
     
-    const devLink = `${BASE_URL}/verify?token=${rawToken}&type=verify`;
+    const devLink = `${BASE_URL}/verify.html?token=${rawToken}&type=verify`;
     
     const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
     
