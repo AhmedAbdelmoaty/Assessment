@@ -7,22 +7,22 @@ import { eq, and, gt, isNull } from "drizzle-orm";
 const SALT_ROUNDS = 10;
 
 // Generate 6-digit OTP
-export function generateOTP(): string {
+export function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 // Hash password with bcrypt
-export async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password) {
   return bcrypt.hash(password, SALT_ROUNDS);
 }
 
 // Verify password with bcrypt
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
 // Create or get user by email
-export async function upsertUser(email: string, name: string) {
+export async function upsertUser(email, name) {
   const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
   
   if (existing.length > 0) {
@@ -41,7 +41,7 @@ export async function upsertUser(email: string, name: string) {
 }
 
 // Create OTP for user
-export async function createOTP(userId: string): Promise<string> {
+export async function createOTP(userId) {
   const code = generateOTP();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
   
@@ -55,7 +55,7 @@ export async function createOTP(userId: string): Promise<string> {
 }
 
 // Verify OTP
-export async function verifyOTP(email: string, code: string): Promise<{ success: boolean; userId?: string }> {
+export async function verifyOTP(email, code) {
   const user = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (!user.length) {
     return { success: false };
@@ -95,7 +95,7 @@ export async function verifyOTP(email: string, code: string): Promise<{ success:
 }
 
 // Send OTP via email (or log in DEV mode)
-export async function sendOTP(email: string, code: string, lang: string = "en"): Promise<{ sent: boolean; devMode: boolean }> {
+export async function sendOTP(email, code, lang = "en") {
   const hasSmtp = process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS;
   
   if (!hasSmtp) {

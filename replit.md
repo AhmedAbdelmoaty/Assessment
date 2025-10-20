@@ -34,11 +34,26 @@ Preferred communication style: Simple, everyday language.
 
 ### Backend Architecture
 
-**Dual Server Implementation**
-- **Development Server**: Express.js with TypeScript (server/index.ts) using Vite middleware for HMR
-- **Production Server**: Vanilla JavaScript Express server (server/index.js) with static file serving
-- Session-based architecture using in-memory Map storage for user data
+**Server Implementation**
+- Express.js server (server/index.js) with persistent session management
+- PostgreSQL database integration via Drizzle ORM
+- Session middleware: express-session + connect-pg-simple for persistent sessions
+- Security: helmet middleware, bcrypt password hashing, rate limiting for OTP requests
 - RESTful API design with `/api` prefix for all endpoints
+
+**Authentication System**
+- OTP-based email verification flow (with SMTP or DEV mode console logging)
+- Password-based authentication with bcrypt hashing
+- Session regeneration on login/OTP verify to prevent fixation attacks
+- Email verification tracking with emailVerifiedAt timestamp
+- Auth routes: /api/auth/otp/request, /api/auth/otp/verify, /api/auth/set-password, /api/auth/login, /api/auth/me, /api/auth/logout
+
+**Dashboard & User Management**
+- User dashboard at /dashboard with 4 sections: My Info, Past Assessments, Tutorials, Videos
+- Profile management: GET/POST /api/user/profile
+- Assessment history: GET /api/user/assessments
+- Tutorial library: GET /api/user/tutorials
+- Retake functionality: POST /api/assess/retake for harder difficulty assessments
 
 **Assessment Engine Logic**
 - Three-level proficiency system (L1: Foundations, L2: Core Applied, L3: Professional)
@@ -54,24 +69,29 @@ Preferred communication style: Simple, everyday language.
 
 ### Data Storage Solutions
 
-**In-Memory Session Storage**
-- Map-based session store keyed by session ID
-- No persistent database - stateless session design
-- Session data includes: intake information, assessment progress, evidence trail, and final report
+**PostgreSQL Database (Primary Storage)**
+- Neon serverless PostgreSQL with Drizzle ORM
+- Schema defined in `shared/schema.ts` and `shared/schema.js`
+- Tables: users, auth_otps, user_progress, user_assessments, session
+- All primary keys use UUID with `gen_random_uuid()` default
+- Database schema synchronization via `npm run db:push`
 
-**Session Data Structure**
-- `sessionId`: Unique identifier
-- `lang`: Language preference (en/ar)
-- `currentStep`: Workflow state (intake/assessment/report/completed)
-- `intake`: User profile data (name, email, country, job details, learning goals)
-- `assessment`: Progress tracking (level, attempts, evidence array, asked clusters)
-- `report`: Final assessment results (message, strengths, gaps, proficiency level)
+**Database Tables**
+- `users`: User accounts with email, name, password hash, email verification timestamp
+- `auth_otps`: One-time passwords for email verification (15-minute expiry, consumed_at tracking)
+- `user_progress`: User intake data, flow state, assessment state (JSONB)
+- `user_assessments`: Assessment history with difficulty, score percentage, evidence
+- `session`: Persistent session storage via connect-pg-simple
 
-**Database Configuration (Future-Ready)**
-- Drizzle ORM configured with PostgreSQL dialect
-- Schema defined in `shared/schema.ts` with Zod validation
-- Neon serverless PostgreSQL driver ready for integration
-- Migration system in place via drizzle-kit
+**Hybrid Session Architecture**
+- Persistent sessions: PostgreSQL-backed via connect-pg-simple for authenticated users
+- In-memory sessions: Map-based storage for backward compatibility with existing assessment code
+- Session regeneration on authentication to prevent fixation attacks
+
+**Session Data in Database**
+- Session ID, session data (JSONB), expiration timestamp
+- 30-day cookie maxAge for persistent login
+- HTTP-only, SameSite=lax cookies for security
 
 ### External Dependencies
 

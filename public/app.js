@@ -167,6 +167,235 @@
         }
     }
 
+
+    // ==================== AUTH UI FUNCTIONS ====================
+    function addOTPInput(email, message, devMode) {
+        removeInteractiveUI();
+        addSystemMessage(message);
+        
+        const container = document.createElement("div");
+        container.className = "auth-card";
+        container.innerHTML = `
+            <div class="auth-header">
+                <i class="fas fa-envelope-open" style="font-size:24px;color:var(--maroon);"></i>
+                <p style="margin:8px 0 0 0;font-size:14px;color:#666;">
+                    ${currentLang === "ar" ? "أدخل الرمز المكون من 6 أرقام" : "Enter the 6-digit code"}
+                </p>
+            </div>
+            <div class="otp-input-container">
+                <input type="text" class="otp-input" maxlength="6" placeholder="000000" autocomplete="one-time-code" data-testid="input-otp" />
+            </div>
+            <button class="auth-submit-btn" id="verifyOtpBtn" data-testid="button-verify-otp">
+                ${currentLang === "ar" ? "تحقق" : "Verify"}
+            </button>
+        `;
+        
+        chatMessages.appendChild(container);
+        scrollToBottom();
+        
+        const input = container.querySelector(".otp-input");
+        const btn = container.querySelector("#verifyOtpBtn");
+        
+        input.focus();
+        input.addEventListener("keypress", (e) => {
+            if (e.key === "Enter" && input.value.length === 6) {
+                btn.click();
+            }
+        });
+        
+        btn.addEventListener("click", async () => {
+            const code = input.value.trim();
+            if (code.length !== 6) {
+                alert(currentLang === "ar" ? "الرمز يجب أن يكون 6 أرقام" : "Code must be 6 digits");
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = currentLang === "ar" ? "جاري التحقق..." : "Verifying...";
+            
+            try {
+                const res = await fetch("/api/auth/otp/verify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ code })
+                });
+                
+                const data = await res.json();
+                
+                if (!data.success) {
+                    btn.disabled = false;
+                    btn.textContent = currentLang === "ar" ? "تحقق" : "Verify";
+                    alert(data.error || (currentLang === "ar" ? "رمز خاطئ" : "Invalid code"));
+                    return;
+                }
+                
+                container.remove();
+                addSystemMessage(data.message);
+                
+                if (data.needsPassword) {
+                    setTimeout(() => addPasswordInput(), 500);
+                } else {
+                    setTimeout(() => startAssessment(), 1000);
+                }
+            } catch (err) {
+                console.error("OTP verify error:", err);
+                btn.disabled = false;
+                btn.textContent = currentLang === "ar" ? "تحقق" : "Verify";
+                alert(currentLang === "ar" ? "حدث خطأ" : "An error occurred");
+            }
+        });
+    }
+
+    function addPasswordInput() {
+        removeInteractiveUI();
+        
+        const container = document.createElement("div");
+        container.className = "auth-card";
+        container.innerHTML = `
+            <div class="auth-header">
+                <i class="fas fa-lock" style="font-size:24px;color:var(--maroon);"></i>
+                <p style="margin:8px 0 0 0;font-size:14px;color:#666;">
+                    ${currentLang === "ar" ? "اختر كلمة مرور (6 أحرف على الأقل)" : "Choose a password (min 6 characters)"}
+                </p>
+            </div>
+            <div class="password-input-container">
+                <input type="password" class="password-input" placeholder="••••••••" data-testid="input-password" />
+            </div>
+            <button class="auth-submit-btn" id="setPasswordBtn" data-testid="button-set-password">
+                ${currentLang === "ar" ? "حفظ" : "Save"}
+            </button>
+        `;
+        
+        chatMessages.appendChild(container);
+        scrollToBottom();
+        
+        const input = container.querySelector(".password-input");
+        const btn = container.querySelector("#setPasswordBtn");
+        
+        input.focus();
+        input.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") {
+                btn.click();
+            }
+        });
+        
+        btn.addEventListener("click", async () => {
+            const password = input.value.trim();
+            if (password.length < 6) {
+                alert(currentLang === "ar" ? "كلمة المرور يجب أن تكون 6 أحرف على الأقل" : "Password must be at least 6 characters");
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = currentLang === "ar" ? "جاري الحفظ..." : "Saving...";
+            
+            try {
+                const res = await fetch("/api/auth/set-password", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password })
+                });
+                
+                const data = await res.json();
+                
+                if (!data.success) {
+                    btn.disabled = false;
+                    btn.textContent = currentLang === "ar" ? "حفظ" : "Save";
+                    alert(data.error || (currentLang === "ar" ? "حدث خطأ" : "An error occurred"));
+                    return;
+                }
+                
+                container.remove();
+                addSystemMessage(data.message);
+                updateProgress(1);
+                setTimeout(() => startAssessment(), 1000);
+            } catch (err) {
+                console.error("Set password error:", err);
+                btn.disabled = false;
+                btn.textContent = currentLang === "ar" ? "حفظ" : "Save";
+                alert(currentLang === "ar" ? "حدث خطأ" : "An error occurred");
+            }
+        });
+    }
+
+    function addLoginUI() {
+        removeInteractiveUI();
+        addSystemMessage(currentLang === "ar" ? "مرحبًا بعودتك! سجل دخولك للمتابعة" : "Welcome back! Please log in to continue");
+        
+        const container = document.createElement("div");
+        container.className = "auth-card";
+        container.innerHTML = `
+            <div class="auth-header">
+                <i class="fas fa-user-circle" style="font-size:24px;color:var(--maroon);"></i>
+                <p style="margin:8px 0 0 0;font-size:14px;color:#666;">
+                    ${currentLang === "ar" ? "تسجيل الدخول" : "Login"}
+                </p>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <input type="email" class="login-input" id="loginEmail" placeholder="${currentLang === "ar" ? "البريد الإلكتروني" : "Email"}" data-testid="input-login-email" />
+                <input type="password" class="login-input" id="loginPassword" placeholder="${currentLang === "ar" ? "كلمة المرور" : "Password"}" data-testid="input-login-password" />
+            </div>
+            <button class="auth-submit-btn" id="loginBtn" data-testid="button-login">
+                ${currentLang === "ar" ? "دخول" : "Login"}
+            </button>
+        `;
+        
+        chatMessages.appendChild(container);
+        scrollToBottom();
+        
+        const emailInput = container.querySelector("#loginEmail");
+        const passwordInput = container.querySelector("#loginPassword");
+        const btn = container.querySelector("#loginBtn");
+        
+        emailInput.focus();
+        [emailInput, passwordInput].forEach(input => {
+            input.addEventListener("keypress", (e) => {
+                if (e.key === "Enter") btn.click();
+            });
+        });
+        
+        btn.addEventListener("click", async () => {
+            const email = emailInput.value.trim();
+            const password = passwordInput.value.trim();
+            
+            if (!email || !password) {
+                alert(currentLang === "ar" ? "يرجى ملء جميع الحقول" : "Please fill in all fields");
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = currentLang === "ar" ? "جاري تسجيل الدخول..." : "Logging in...";
+            
+            try {
+                const res = await fetch("/api/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password, lang: currentLang })
+                });
+                
+                const data = await res.json();
+                
+                if (!data.success) {
+                    btn.disabled = false;
+                    btn.textContent = currentLang === "ar" ? "دخول" : "Login";
+                    alert(data.error || (currentLang === "ar" ? "بيانات خاطئة" : "Invalid credentials"));
+                    return;
+                }
+                
+                container.remove();
+                addSystemMessage(currentLang === "ar" ? "أهلاً بك!" : "Welcome back!");
+                
+                // Load user progress and continue
+                window.location.href = "/dashboard";
+            } catch (err) {
+                console.error("Login error:", err);
+                btn.disabled = false;
+                btn.textContent = currentLang === "ar" ? "دخول" : "Login";
+                alert(currentLang === "ar" ? "حدث خطأ" : "An error occurred");
+            }
+        });
+    }
+
     async function sendMessage() {
         const message = chatInput.value.trim();
         if (!message || isProcessing) return;
@@ -222,6 +451,13 @@
                 if (data.message) {
                     addSystemMessage(data.message);
                 }
+                
+                // Check if OTP verification is required
+                if (data.requiresOTP) {
+                    setTimeout(() => addOTPInput(data.email, data.message || "", data.devMode), 500);
+                    return;
+                }
+                
                 currentStep = "assessment";
                 updateProgress(1);
                 setTimeout(() => startAssessment(), 1000);
@@ -451,6 +687,7 @@
                 report.message.trim()
             ) {
                 addSystemMessage(report.message.trim());
+                addRetakeButton();
                 addStartTeachingCTA();
             }
 
@@ -779,6 +1016,64 @@ ${mcq.choices
         chatMessages.appendChild(container);
         scrollToBottom();
     }
+    function addRetakeButton() {
+        const bubbles = Array.from(document.querySelectorAll(".message-bubble.system"));
+        const last = bubbles[bubbles.length - 1];
+        if (!last) return;
+        
+        const content = last.querySelector(".message-content");
+        if (!content) return;
+        
+        const wrap = document.createElement("div");
+        wrap.className = "retake-cta";
+        wrap.style.marginTop = "16px";
+        
+        const btn = document.createElement("button");
+        btn.className = "retake-btn";
+        btn.setAttribute("data-testid", "button-retake");
+        btn.innerHTML = `<i class="fas fa-redo"></i> ${currentLang === "ar" ? "إعادة التقييم بمستوى أصعب" : "Retake with Harder Questions"}`;
+        
+        btn.addEventListener("click", async () => {
+            if (!confirm(currentLang === "ar" ? "هل تريد إعادة التقييم بمستوى أصعب؟" : "Start a new assessment with harder questions?")) {
+                return;
+            }
+            
+            btn.disabled = true;
+            showTypingIndicator();
+            
+            try {
+                const res = await fetch("/api/assess/retake", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sessionId })
+                });
+                
+                const data = await res.json();
+                
+                if (!data.success) {
+                    hideTypingIndicator();
+                    alert(data.error || (currentLang === "ar" ? "حدث خطأ" : "An error occurred"));
+                    btn.disabled = false;
+                    return;
+                }
+                
+                sessionId = data.sessionId;
+                currentStep = "assessment";
+                hideTypingIndicator();
+                addSystemMessage(data.message);
+                setTimeout(() => startAssessment(), 1000);
+            } catch (err) {
+                console.error("Retake error:", err);
+                hideTypingIndicator();
+                alert(currentLang === "ar" ? "حدث خطأ" : "An error occurred");
+                btn.disabled = false;
+            }
+        });
+        
+        wrap.appendChild(btn);
+        content.appendChild(wrap);
+    }
+
     function addStartTeachingCTA() {
         // احذف أي CTA قديم علشان ما يتكرّرش
         document.querySelectorAll(".teaching-cta").forEach((el) => el.remove());
