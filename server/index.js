@@ -13,11 +13,17 @@ import { getTeachingSystemPrompt } from "./prompts/teach.js";
 import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/user.js";
 import { authRateLimiter } from "./middleware/security.js";
+import * as authService from "./services/authService.js";
+import * as emailService from "./services/emailService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
+
+// Enable trust proxy for Replit/Proxies so rate-limit & secure cookies work properly
+app.set("trust proxy", 1);
+
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
 
@@ -361,13 +367,17 @@ app.post("/api/intake/next", async (req, res) => {
     }
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
-      session.currentStep = "assessment";
+      // After intake: pause for auth step inside the chat
+      const email = session.intake?.email || "";
+      session.currentStep = "auth_pending";
       return res.json({
         done: true,
+        requireAuth: true,
         message:
           lang === "ar"
-            ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
-            : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.",
+            ? "تمام! هنفعّل حسابك دلوقتي. راجع بريدك لرابط التفعيل، وبعدها ارجع هنا وسجّل دخولك لبدء التقييم."
+            : "Great! Let's activate your account. Check your email for a verification link, then log in here to start.",
+        emailHint: email || undefined
       });
     }
 
@@ -999,6 +1009,106 @@ app.post("/api/teach/message", async (req, res) => {
   } catch (err) {
     console.error("/api/teach/message error:", err?.message || err, err?.stack);
     return res.status(500).json({ error: true, message: "Teaching message failed." });
+  }
+});
+
+// Bootstrap: create/ensure user from Intake & send magic link (dev returns devLink)
+app.post("/api/auth/bootstrap", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = getSession(sessionId);
+    const email = session?.intake?.email;
+    const fullName = session?.intake?.name_full;
+    const lang = session?.lang || 'en';
+
+    if (!email || !fullName) {
+      return res.status(400).json({ error: true, message: "Missing intake email/name" });
+    }
+
+    // Check if user already exists
+    let user = await authService.findUserByEmail(email);
+    
+    if (!user) {
+      // Create new user with profile from intake
+      user = await authService.createUser(email, session.intake);
+    }
+    
+    // Generate verification token
+    const rawToken = authService.generateToken();
+    await authService.createEmailToken(user.id, rawToken, 'verify');
+    
+    // Get BASE_URL
+    const REPLIT_DOMAINS = process.env.REPLIT_DOMAINS;
+    const REPL_SLUG = process.env.REPL_SLUG;
+    const REPLIT_DEV_DOMAIN = process.env.REPLIT_DEV_DOMAIN;
+    const BASE_URL = process.env.BASE_URL || 
+                     (REPLIT_DOMAINS ? `https://${REPLIT_DOMAINS.split(',')[0]}` : null) ||
+                     (REPL_SLUG && REPLIT_DEV_DOMAIN ? `https://${REPL_SLUG}.${REPLIT_DEV_DOMAIN}` : null) ||
+                     (REPL_SLUG ? `https://${REPL_SLUG}.replit.dev` : null) ||
+                     'http://localhost:5000';
+    
+    const devLink = `${BASE_URL}/verify?token=${rawToken}&type=verify`;
+
+    const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    
+    if (!hasSmtp) {
+      console.log("[DEV] SMTP not configured — use verification link:", devLink);
+      return res.json({ ok: true, devLink });
+    }
+    
+    // Send email and don't expose the link
+    await emailService.sendVerificationEmail(email, rawToken, lang);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("/api/auth/bootstrap error:", e);
+    return res.status(500).json({ error: true, message: "Bootstrap failed" });
+  }
+});
+
+// Resend verification link
+app.post("/api/auth/resend", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    
+    if (!email) {
+      return res.status(400).json({ error: true, message: "Email required" });
+    }
+    
+    const user = await authService.findUserByEmail(email);
+    
+    if (!user) {
+      // Don't reveal if user exists or not
+      return res.json({ ok: true });
+    }
+    
+    // Generate new token
+    const rawToken = authService.generateToken();
+    await authService.createEmailToken(user.id, rawToken, 'verify');
+    
+    // Get BASE_URL
+    const REPLIT_DOMAINS = process.env.REPLIT_DOMAINS;
+    const REPL_SLUG = process.env.REPL_SLUG;
+    const REPLIT_DEV_DOMAIN = process.env.REPLIT_DEV_DOMAIN;
+    const BASE_URL = process.env.BASE_URL || 
+                     (REPLIT_DOMAINS ? `https://${REPLIT_DOMAINS.split(',')[0]}` : null) ||
+                     (REPL_SLUG && REPLIT_DEV_DOMAIN ? `https://${REPL_SLUG}.${REPLIT_DEV_DOMAIN}` : null) ||
+                     (REPL_SLUG ? `https://${REPL_SLUG}.replit.dev` : null) ||
+                     'http://localhost:5000';
+    
+    const devLink = `${BASE_URL}/verify?token=${rawToken}&type=verify`;
+    
+    const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    
+    if (!hasSmtp) {
+      console.log("[DEV] Resend link:", devLink);
+    } else {
+      await emailService.sendVerificationEmail(email, rawToken, user.profile_json?.lang || 'en');
+    }
+    
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("/api/auth/resend error:", e);
+    return res.status(500).json({ error: true, message: "Resend failed" });
   }
 });
 

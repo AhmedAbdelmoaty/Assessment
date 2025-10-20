@@ -1,0 +1,310 @@
+You are a senior full-stack engineer working inside this repo. You already created auth pages and a dashboard, but several things don’t match the product spec. Fix them precisely as follows.
+
+ROLE & STYLE
+
+Keep the existing stack: Express + vanilla HTML/CSS/JS, OpenAI, PostgreSQL sessions (connect-pg-simple).
+
+Design must match our current UI in /public/index.html + /public/styles.css:
+
+Use the existing brand variables (maroon --primary, etc.).
+
+No gradients or new color schemes. Cards/inputs/buttons must reuse existing classes/components.
+
+New UI blocks should look like chat bubbles/cards already used in the app (e.g., .mcq-container, .send-button, .chat-input).
+
+Language toggle and RTL/LTR support must continue working.
+
+WHAT WENT WRONG (please fix)
+
+You added standalone auth pages (/register.html, /login.html) and a header Sign Up button. Spec requires: first-time registration happens inside the chat after Intake, not separate pages.
+
+Emails didn’t send; server log shows: SMTP not configured. For dev, you must print dev verification link and optionally return it via API, until SMTP is configured.
+
+Warning: X-Forwarded-For header ... trust proxy is false. On Replit behind a proxy, enable app.set('trust proxy', 1).
+
+The standalone pages you added use a different look (purple gradient). All new UI must use the site’s existing styles.
+
+TARGET FLOW (must implement)
+
+Landing → Intake (collects name/email/… as it already does) →
+Auth step inside the chat:
+
+Server sends magic link to the Intake email (or devLink in response/logs if SMTP missing).
+
+Chat shows “Check your email to verify, then set a password” + an inline login block (Email + Password) inside the chat.
+
+After the user verifies (verify.html) and sets password, the user comes back and logs in inside the chat.
+→ Start Assessment (unchanged) → Report → Teaching → (Offer “Retake assessment” harder).
+
+Keep /login.html and /register.html if you want for future, but do not surface links in the header. The default experience is in-chat.
+
+ACCEPTANCE CRITERIA
+
+After Intake completes, frontend does not jump to questions. Instead it shows an in-chat login block and a message to check email.
+
+Server prints a dev verification link if SMTP isn’t configured and optionally returns it in JSON.
+
+trust proxy enabled. No rate-limit/header warning in logs.
+
+UI for any new block matches existing styles (no gradients; use .mcq-container, .send-button, .chat-input, variables in styles.css).
+
+Header has no Sign Up button.
+
+Logging in inside chat starts assessment as before.
+
+Existing assessment, report, teaching remain functional.
+
+Sessions persist in PostgreSQL (unchanged).
+
+CHANGES (file-by-file with exact anchors)
+1) server/index.js — enable proxy
+
+Where: right after const app = express();
+Insert AFTER this line:
+
+// Enable trust proxy for Replit/Proxies so rate-limit & secure cookies work properly
+app.set("trust proxy", 1);
+
+2) server/index.js — return auth step instead of starting assessment immediately
+
+Find in /api/intake/next handler: block that runs when Intake finishes and currently sets session.currentStep = "assessment" and returns { done: true, message: ... }.
+
+REPLACE that block with:
+
+if (session.intakeStepIndex >= INTAKE_ORDER.length) {
+  // After intake: pause for auth step inside the chat
+  const email = session.intake?.email || "";
+  session.currentStep = "auth_pending";
+  return res.json({
+    done: true,
+    requireAuth: true,
+    message:
+      lang === "ar"
+        ? "تمام! هنفعّل حسابك دلوقتي. راجع بريدك لرابط التفعيل، وبعدها ارجع هنا وسجّل دخولك لبدء التقييم."
+        : "Great! Let’s activate your account. Check your email for a verification link, then log in here to start.",
+    emailHint: email || undefined
+  });
+}
+
+3) server/index.js — add bootstrap endpoint to trigger magic-link and return devLink when SMTP is absent
+
+Insert BEFORE the health check route:
+
+// Bootstrap: create/ensure user from Intake & send magic link (dev returns devLink)
+app.post("/api/auth/bootstrap", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = getSession(sessionId);
+    const email = session?.intake?.email;
+    const fullName = session?.intake?.name_full;
+
+    if (!email || !fullName) {
+      return res.status(400).json({ error: true, message: "Missing intake email/name" });
+    }
+
+    // TODO: integrate with your existing auth service if present:
+    // await authService.ensureUser(email, fullName) && emailService.sendMagicLink(email, tokenUrl);
+
+    const base = process.env.BASE_URL || `https://${process.env.REPL_SLUG ? `${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co` : "localhost:5000"}`;
+    const token = Math.random().toString(36).slice(2);
+    const devLink = `${base}/verify.html?token=${token}&type=verify`;
+
+    const hasSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    if (!hasSmtp) {
+      console.log("[DEV] SMTP not configured — use verification link:", devLink);
+      return res.json({ ok: true, devLink });
+    }
+    // If SMTP configured, send and don't expose the link:
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("/api/auth/bootstrap error:", e);
+    return res.status(500).json({ error: true, message: "Bootstrap failed" });
+  }
+});
+
+
+If you already created services/authService.js and services/emailService.js, call them instead of the inline dev stub.
+
+4) public/app.js — after Intake, show the auth step inside chat
+
+In handleIntakeAnswer, find:
+
+if (data.done) {
+  if (data.message) {
+    addSystemMessage(data.message);
+  }
+  currentStep = "assessment";
+  updateProgress(1);
+  setTimeout(() => startAssessment(), 1000);
+  return;
+}
+
+
+REPLACE with:
+
+if (data.done) {
+  if (data.message) addSystemMessage(data.message);
+
+  currentStep = "auth";
+  updateProgress(1);
+
+  // Ask server to bootstrap (send magic link); show devLink if returned
+  try {
+    const resp = await fetch("/api/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId })
+    });
+    const r = await resp.json();
+    if (r?.devLink) {
+      addSystemMessage(
+        currentLang === "ar"
+          ? `رابط التفعيل (للتجربة فقط): ${r.devLink}`
+          : `Verification link (dev only): ${r.devLink}`
+      );
+    }
+  } catch {}
+
+  addLoginBlock(data.emailHint);
+  return;
+}
+
+
+Add the login block helper (only if it doesn’t already exist) NEAR THE BOTTOM of public/app.js, BEFORE the closing IIFE:
+
+function addLoginBlock(prefillEmail) {
+  const wrap = document.createElement("div");
+  wrap.className = "mcq-container";
+
+  const tEmail = currentLang === "ar" ? "البريد الإلكتروني" : "Email";
+  const tPass  = currentLang === "ar" ? "كلمة السر"       : "Password";
+  const tBtn   = currentLang === "ar" ? "تسجيل الدخول"     : "Log in";
+  const tHint  = currentLang === "ar"
+    ? "افتح بريدك وفعّل حسابك من الرابط، ثم سجّل الدخول هنا."
+    : "Check your email, verify your account, then log in here.";
+
+  wrap.innerHTML = `
+    <div class="mcq-header">
+      <span class="mcq-level">${currentLang === "ar" ? "تفعيل الحساب" : "Account Activation"}</span>
+      <span class="mcq-number"></span>
+    </div>
+    <div class="mcq-question">${tHint}</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <input id="loginEmail" type="email" placeholder="${tEmail}" class="chat-input" style="border-radius:8px;">
+      <input id="loginPass" type="password" placeholder="${tPass}" class="chat-input" style="border-radius:8px;">
+      <button id="loginSubmit" class="send-button" style="width:140px; border-radius:10px; align-self:flex-start;">${tBtn}</button>
+      <button id="resendLink" class="send-button" style="width:180px; border-radius:10px; align-self:flex-start; background:#6b7280;">${currentLang==="ar"?"إعادة إرسال رابط":"Resend link"}</button>
+    </div>
+  `;
+  chatMessages.appendChild(wrap);
+  scrollToBottom();
+
+  const elEmail = wrap.querySelector("#loginEmail");
+  const elPass  = wrap.querySelector("#loginPass");
+  const btn     = wrap.querySelector("#loginSubmit");
+  const resend  = wrap.querySelector("#resendLink");
+  if (prefillEmail) elEmail.value = prefillEmail;
+
+  btn.addEventListener("click", async () => {
+    const email = elEmail.value.trim();
+    const password = elPass.value;
+    if (!email || !password) {
+      addSystemMessage(currentLang==="ar"?"من فضلك أدخل البريد وكلمة السر.":"Please enter email and password.");
+      return;
+    }
+    showTypingIndicator();
+    try {
+      const resp = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const r = await resp.json();
+      hideTypingIndicator();
+      if (r?.ok) {
+        addSystemMessage(currentLang==="ar"?"تم تسجيل الدخول. هنبدأ التقييم الآن.":"Logged in. Starting your assessment.");
+        currentStep = "assessment";
+        setTimeout(() => startAssessment(), 800);
+      } else {
+        addSystemMessage(r?.message || (currentLang==="ar"?"فشل تسجيل الدخول.":"Login failed."));
+      }
+    } catch (e) {
+      hideTypingIndicator();
+      addSystemMessage(currentLang==="ar"?"حصلت مشكلة في تسجيل الدخول.":"There was a problem logging in.");
+    }
+  });
+
+  resend.addEventListener("click", async () => {
+    const email = elEmail.value.trim();
+    if (!email) {
+      addSystemMessage(currentLang==="ar"?"اكتب البريد لإعادة الإرسال.":"Enter your email to resend.");
+      return;
+    }
+    showTypingIndicator();
+    try {
+      const resp = await fetch("/api/auth/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      const r = await resp.json();
+      hideTypingIndicator();
+      addSystemMessage(
+        r?.ok
+          ? (currentLang==="ar"?"تم إرسال الرابط (لو البريد مضبوط).":"Link sent if email is valid.")
+          : (r?.message || (currentLang==="ar"?"تعذر إرسال الرابط.":"Could not send link."))
+      );
+    } catch (e) {
+      hideTypingIndicator();
+      addSystemMessage(currentLang==="ar"?"تعذر إرسال الرابط.":"Could not send link.");
+    }
+  });
+}
+
+5) public/index.html or public/styles.css — hide header “Sign Up” button (if present)
+
+If a Sign Up link/button exists in the header, remove it or add class="hidden" or CSS:
+
+#navSignUp { display: none !important; }
+
+6) Keep UI consistent
+
+Remove gradient backgrounds and alien styles in any of /public/login.html, /public/register.html, /public/verify.html, /public/dashboard.html.
+
+If these pages must remain for testing, wrap their content using our existing components:
+
+Use .chat-header, .mcq-container, .chat-input, .send-button, and CSS vars from :root.
+
+Directionality/Arabic terms follow our existing rules.
+
+SMTP & DEV NOTES
+
+If SMTP is not set, the server must log and/or return a devLink so QA can verify accounts.
+
+When SMTP is configured (Resend/SendGrid/Gmail), send the real email and do not return the link.
+
+DO NOT BREAK
+
+Assessment endpoints /api/assess/next, /api/assess/answer stay the same.
+
+Report/Teach flows remain as-is.
+
+Session storage in Postgres connect-pg-simple remains intact.
+
+DONE CHECKLIST (Agent self-check)
+
+ app.set('trust proxy', 1) present.
+
+ Intake end returns { done:true, requireAuth:true, message, emailHint? }.
+
+ /api/auth/bootstrap exists and returns {ok:true} or {ok:true, devLink}.
+
+ Frontend shows inline login block in chat after Intake; uses our styles.
+
+ Header has no Sign Up button.
+
+ Dev link printed/returned when SMTP missing.
+
+ Login inside chat starts assessment.
+
+ No purple/gradient pages; all match current theme.
