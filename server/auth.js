@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import nodemailer from "nodemailer";
 import { db } from "./db.js";
 import { users, authOtps, userProgress } from "../shared/schema.js";
-import { eq, and, gt, isNull } from "drizzle-orm";
+import { eq, and, gt, isNull, desc } from "drizzle-orm";
 
 const SALT_ROUNDS = 10;
 
@@ -55,36 +55,63 @@ export async function createOTP(userId) {
 }
 
 // Verify OTP
-export async function verifyOTP(email, code) {
+export async function verifyOTP(email, inputCode) {
   const user = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (!user.length) {
+    console.log("otp-verify debug: user not found for email", email);
     return { success: false };
   }
   
   const userId = user[0].id;
   const now = new Date();
+  const codeStr = String(inputCode);
   
-  // Find valid, unconsumed OTP
+  // Find latest unconsumed OTP for this user
   const otpRecords = await db.select()
     .from(authOtps)
     .where(
       and(
         eq(authOtps.userId, userId),
-        eq(authOtps.code, code),
-        gt(authOtps.expiresAt, now),
         isNull(authOtps.consumedAt)
       )
     )
+    .orderBy(desc(authOtps.createdAt))
     .limit(1);
   
-  if (!otpRecords.length) {
+  const row = otpRecords.length ? otpRecords[0] : null;
+  
+  // Debug logging
+  console.log("otp-verify debug", {
+    email,
+    input: codeStr,
+    found: !!row,
+    codeLen: row?.code?.length,
+    expiresAt: row?.expiresAt,
+    nowUTC: now.toISOString(),
+    expired: row ? now >= new Date(row.expiresAt) : null,
+    codeMatch: row ? String(row.code) === codeStr : null
+  });
+  
+  if (!row) {
+    return { success: false };
+  }
+  
+  // Check expiration (UTC)
+  if (now >= new Date(row.expiresAt)) {
+    console.log("otp-verify: code expired");
+    return { success: false };
+  }
+  
+  // Compare codes as strings
+  if (String(row.code) !== codeStr) {
+    console.log("otp-verify: code mismatch");
     return { success: false };
   }
   
   // Mark as consumed
   await db.update(authOtps)
     .set({ consumedAt: now })
-    .where(eq(authOtps.id, otpRecords[0].id));
+    .where(eq(authOtps.id, row.id));
   
   // Mark email as verified
   await db.update(users)
