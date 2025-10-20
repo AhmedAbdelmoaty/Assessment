@@ -1,0 +1,324 @@
+You are The Ultimate Full-Stack Engineer (Node.js + Express + Vanilla JS + PostgreSQL + Drizzle).
+Goal: implement a clean, production-ready account system + dashboard + protected chat flow for an existing vanilla project, without changing the project’s visual style.
+
+HARD CONSTRAINTS (DO NOT VIOLATE)
+
+Do not add test runners or long automated tests. Don’t run E2E “testing flows.”
+
+Keep the current visual identity (brand maroon, fonts, spacing). Reuse public/styles.css and the existing design language. Any new UI must blend in perfectly.
+
+No login block inside chat. Auth must be on separate pages (/signup.html, /login.html).
+
+Session storage: PostgreSQL with connect-pg-simple.
+
+OTP dev mode: when SMTP isn’t configured, print the OTP to the server console and show a small “DEV MODE: code is in console” note near the OTP input; still require the user to enter the code.
+
+Redirect rules and page guards below must be followed exactly.
+
+Language toggle remains; header shows “Login” when logged out and “Logout” when logged in.
+
+TOP-LEVEL FLOW (exactly)
+
+Home (/)**
+
+Replace the current “Start Assessment” hero button with two buttons:
+Sign Up → /signup.html, Login → /login.html.
+
+Header (right side): if logged out → show Login; if logged in → show Logout. Keep language switcher.
+
+Sign Up (/signup.html)
+
+Form fields (with client+server validation):
+
+Full name (required)
+
+Username (required, unique, 3–30, a–z 0–9 _ -)
+
+Email (required, unique)
+
+Phone (optional)
+
+Password + Confirm (required, min 6, must match)
+
+POST creates the user (hashed password), generates OTP (6 digits, valid 15 min, single-use), sends email if SMTP configured, otherwise prints OTP to server console.
+
+Show OTP input UI on the same page (or as an in-page step).
+On success → activate the account, then redirect to /login.html with a “Account verified, please login” success notice.
+(Do not auto-login on verification.)
+
+Login (/login.html)
+
+Email + Password → on success: create session and redirect to /dashboard.html.
+
+On failure: show an inline error.
+
+Dashboard (/dashboard.html) (Protected)
+
+A top navigation/switcher: Dashboard | Chat (left: brand logo; right: language switcher + Logout).
+
+Dashboard shows four sections:
+
+My Info (profile from Sign Up + Intake fields): display and Edit Profile (PATCH).
+
+My Assessments: list attempts with percentage score and a small progress bar.
+
+My Explanations: list generated teaching/explanations; can open each.
+
+My Videos: placeholder grid for future use.
+
+Clicking Chat → go to chat page (/index.html#chat or /chat.html as you prefer with existing code).
+
+Chat (Protected)
+
+First time after Sign Up: run Intake (light) without asking for Full name / Email / Phone (they were collected at Sign Up). Keep the rest (country, age, role, goal… etc).
+
+After Intake completes: show a CTA button “Start Assessment”.
+
+Only when the user clicks it, call the start endpoint and begin MCQs.
+
+During assessment: save every answer/progress in DB. If user reloads or returns later → resume at last point.
+
+On completion: compute score (0–100%), generate Report + Teaching, save attempt and explanations.
+
+After teaching ends: show “Retake assessment” CTA → starts a new attempt slightly harder; save it too.
+
+SECURITY & SESSIONS
+
+Use express-session + connect-pg-simple (PostgreSQL).
+
+app.set('trust proxy', 1) (Replit/Proxy).
+
+Cookie flags: in dev allow non-secure; in prod set secure: true, sameSite: "lax".
+
+Rate-limit auth endpoints (signup, login, otp) with express-rate-limit.
+
+Use helmet.
+
+Hash passwords with bcrypt.
+
+DATABASE (Drizzle – PostgreSQL)
+
+Create/ensure the following tables (names can match your project conventions). Migrations must be idempotent:
+
+-- users
+id UUID PK, created_at, updated_at
+name TEXT NOT NULL
+username TEXT UNIQUE NOT NULL
+email TEXT UNIQUE NOT NULL
+phone TEXT NULL
+pass_hash TEXT NOT NULL
+email_verified BOOLEAN DEFAULT false
+
+-- intake_answers
+id UUID PK
+user_id UUID FK -> users(id)
+key TEXT NOT NULL
+value TEXT NOT NULL
+created_at TIMESTAMPTZ DEFAULT now()
+
+-- assessment_sessions
+id UUID PK
+user_id UUID FK
+status TEXT CHECK (status IN ('in-progress','complete')) NOT NULL
+difficulty TEXT NULL
+started_at TIMESTAMPTZ DEFAULT now()
+finished_at TIMESTAMPTZ NULL
+score_percent INT NULL
+meta JSONB NULL
+
+-- assessment_answers
+id UUID PK
+session_id UUID FK -> assessment_sessions(id)
+q_index INT NOT NULL
+choice_index INT NOT NULL
+is_correct BOOLEAN NULL
+created_at TIMESTAMPTZ DEFAULT now()
+
+-- teach_sessions
+id UUID PK
+user_id UUID FK
+assessment_session_id UUID FK
+content TEXT NOT NULL
+created_at TIMESTAMPTZ DEFAULT now()
+
+-- auth_otps
+id UUID PK
+user_id UUID FK
+code TEXT NOT NULL            -- store as string to keep leading zeros
+expires_at TIMESTAMPTZ NOT NULL
+consumed_at TIMESTAMPTZ NULL
+created_at TIMESTAMPTZ DEFAULT now()
+
+
+Important: Fix/avoid prior bug patterns: no raw WHERE ... WHERE concatenations; use Drizzle’s eq/and/isNull builders correctly.
+
+BACKEND ENDPOINTS (exact contract)
+
+Auth
+
+POST /api/auth/signup
+Body: { name, username, email, phone?, password, confirmPassword }
+Validates + creates user (email_verified=false), inserts OTP record (6 digits, expires_at=now()+15m, consumed_at=null), send email if SMTP, else log:
+console.log("[DEV MODE] OTP for", email, ":", code);
+Response: { ok:true }
+(Do NOT return the OTP in the HTTP body.)
+
+POST /api/auth/verify-otp
+Body: { email, code }
+Logic: fetch latest UNCONSUMED OTP for that user, check expires_at, compare as strings, on success set consumed_at=now(), set users.email_verified=true.
+Response: { ok:true }
+
+POST /api/auth/login
+Body: { email, password } → on success create session (req.session.userId) and return { ok:true }.
+
+POST /api/auth/logout → destroy session { ok:true }.
+
+GET /api/session/state → returns { loggedIn, stage } where stage ∈ {"intake-pending","assessment-cta","assessment-in-progress","teaching","idle"} for last known state.
+
+Profile
+
+GET /api/me → profile fields.
+
+PATCH /api/me → editable fields (name, username, phone, plus intake fields stored in profileJson if you keep a merged view); enforce unique username.
+
+Intake
+
+POST /api/intake/next
+Request identifies user by session. Do NOT ask for name/email/phone.
+Returns next prompt/options or { done:true }.
+
+Assessment
+
+POST /api/assess/start → create or resume an assessment_sessions with status='in-progress'.
+
+POST /api/assess/next → returns next MCQ.
+
+POST /api/assess/answer → body { sessionId, qIndex, choiceIndex }, save answer.
+
+When complete → compute score_percent, set finished_at, status='complete', persist Report & Teaching (see below).
+
+Teaching
+
+POST /api/teach/start → create teach_sessions linked to the last completed assessment.
+
+POST /api/teach/message → append tutor responses (your current logic).
+
+Guards & Redirects
+
+Add middleware requireAuth for protected routes & static pages.
+
+Static protection:
+
+/dashboard.html and the Chat page are protected; if not logged in → redirect to /login.html.
+
+SMTP / EMAIL
+
+Use nodemailer. Environment variables: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL.
+
+If these are missing, fall back to dev mode (do not throw): print OTP to console and show small notice near the OTP input: “DEV MODE: the code is printed in server logs.”
+
+FRONTEND IMPLEMENTATION
+
+Files to CREATE
+
+public/signup.html
+
+public/login.html
+
+public/dashboard.html (protected)
+
+If needed: public/chat.html (or continue using current index.html with #chat anchor)
+
+Files to MODIFY
+
+public/index.html (Home):
+
+Replace “Start Assessment” button with two buttons in hero: Sign Up (links to /signup.html) and Login (links to /login.html).
+
+Header: when logged in show Logout; when logged out show Login. Implement by fetching /api/session/state on load.
+
+public/styles.css: do not change brand; only add minimal utility classes if absolutely necessary. New forms must use the same maroon, radii, shadows, and fonts already defined.
+
+public/app.js:
+
+The intake flow must skip name/email/phone.
+
+After intake is done, render CTA “Start Assessment”. Only when clicked, call /api/assess/start and begin MCQs.
+
+Ensure resume logic: if session says “assessment-in-progress”, fetch next and continue; if “teaching”, render teaching.
+
+UI Behaviors
+
+Sign Up page: multi-step or single-step is fine, but keep the OTP step on the same page for a smooth flow. After verify → redirect to /login.html.
+
+Login page: simple card with email/password; on success redirect to /dashboard.html.
+
+Dashboard page:
+
+Header nav: Dashboard | Chat (active state), logo left; language switcher + Logout right.
+
+My Info: show data with an Edit button → small form → PATCH /api/me → refresh view.
+
+My Assessments: list each attempt with date and score %; render a simple progress bar (reuse your muted colors).
+
+My Explanations: list clickable items to view stored explanation text.
+
+My Videos: placeholder tiles.
+
+Logout
+
+Call POST /api/auth/logout then redirect to /.
+
+RESUME RULES (after login)
+
+If user never did Intake → open Chat positioned at next Intake question.
+
+If Intake done but no assessment yet → open Chat showing the CTA “Start Assessment.”
+
+If an assessment is in progress → open Chat at the next MCQ.
+
+If completed & teaching exists → open Chat showing the teaching thread.
+
+In all cases, Dashboard remains the default redirect after login; user can switch to Chat from the header.
+
+VALIDATION & ERRORS
+
+Enforce unique username and email at DB level and return 409 JSON with clear messages.
+
+Password min length 6. Confirm must match.
+
+OTP compare as string (preserve leading zeros). Latest unconsumed OTP only; reject expired or consumed.
+
+Add basic rate limits: /api/auth/signup, /api/auth/login, /api/auth/verify-otp (e.g., 10/min per IP).
+
+DELIVERABLES CHECKLIST (must be complete)
+
+ New pages: signup.html, login.html, dashboard.html (and optional chat.html if you prefer).
+
+ Home hero buttons updated; header Login/Logout behavior wired.
+
+ Auth endpoints + session via Postgres store.
+
+ OTP dev mode logging + input UI + verification step + redirect to login.
+
+ Intake updated to skip name/email/phone.
+
+ Assessment starts only via CTA; resume works; answers & attempts saved; score calculated.
+
+ Teaching saved and listed in Dashboard → My Explanations.
+
+ Dashboard shows My Info (editable), My Assessments (scores % bars), My Explanations, My Videos (placeholder).
+
+ Protected routes & redirects enforced.
+
+ Styling matches current site (colors, fonts, radii, shadows).
+
+ No extraneous pages, frameworks, or auto tests.
+
+NOTES
+
+Keep code modular: routes in server/routes/*, services in server/services/*, shared Drizzle schema in server/shared/db.ts (or existing pattern).
+
+If you must add environment variables, document them at the top of server/index.js comments.
+
+Implement now exactly as specified. Do not run prolonged test workflows.
