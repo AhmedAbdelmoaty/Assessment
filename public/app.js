@@ -219,12 +219,33 @@
 
             // Handle completion
             if (data.done) {
-                if (data.message) {
-                    addSystemMessage(data.message);
-                }
-                currentStep = "assessment";
+                if (data.message) addSystemMessage(data.message);
+
+                currentStep = "auth";
                 updateProgress(1);
-                setTimeout(() => startAssessment(), 1000);
+
+                // Ask server to bootstrap (send magic link); show devLink if returned
+                (async () => {
+                  try {
+                    const resp = await fetch("/api/auth/bootstrap", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ sessionId })
+                    });
+                    const r = await resp.json();
+                    if (r?.devLink) {
+                      addSystemMessage(
+                        currentLang === "ar"
+                          ? `رابط التفعيل (للتجربة فقط): ${r.devLink}`
+                          : `Verification link (dev only): ${r.devLink}`
+                      );
+                    }
+                  } catch (e) {
+                    console.error('Bootstrap error:', e);
+                  }
+                  addLoginBlock(data.emailHint);
+                })();
+                
                 return;
             }
 
@@ -904,5 +925,94 @@ ${mcq.choices
         const div = document.createElement("div");
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function addLoginBlock(prefillEmail) {
+        const wrap = document.createElement("div");
+        wrap.className = "mcq-container";
+
+        const tEmail = currentLang === "ar" ? "البريد الإلكتروني" : "Email";
+        const tPass = currentLang === "ar" ? "كلمة السر" : "Password";
+        const tBtn = currentLang === "ar" ? "تسجيل الدخول" : "Log in";
+        const tHint = currentLang === "ar"
+            ? "افتح بريدك وفعّل حسابك من الرابط، ثم سجّل الدخول هنا."
+            : "Check your email, verify your account, then log in here.";
+
+        wrap.innerHTML = `
+    <div class="mcq-header">
+      <span class="mcq-level">${currentLang === "ar" ? "تفعيل الحساب" : "Account Activation"}</span>
+      <span class="mcq-number"></span>
+    </div>
+    <div class="mcq-question">${tHint}</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <input id="loginEmail" type="email" placeholder="${tEmail}" class="chat-input" style="border-radius:8px;" data-testid="input-login-email">
+      <input id="loginPass" type="password" placeholder="${tPass}" class="chat-input" style="border-radius:8px;" data-testid="input-login-password">
+      <button id="loginSubmit" class="send-button" style="width:140px; border-radius:10px; align-self:flex-start;" data-testid="button-login-submit">${tBtn}</button>
+      <button id="resendLink" class="send-button" style="width:180px; border-radius:10px; align-self:flex-start; background:#6b7280;" data-testid="button-resend-link">${currentLang === "ar" ? "إعادة إرسال رابط" : "Resend link"}</button>
+    </div>
+  `;
+        chatMessages.appendChild(wrap);
+        scrollToBottom();
+
+        const elEmail = wrap.querySelector("#loginEmail");
+        const elPass = wrap.querySelector("#loginPass");
+        const btn = wrap.querySelector("#loginSubmit");
+        const resend = wrap.querySelector("#resendLink");
+        if (prefillEmail) elEmail.value = prefillEmail;
+
+        btn.addEventListener("click", async () => {
+            const email = elEmail.value.trim();
+            const password = elPass.value;
+            if (!email || !password) {
+                addSystemMessage(currentLang === "ar" ? "من فضلك أدخل البريد وكلمة السر." : "Please enter email and password.");
+                return;
+            }
+            showTypingIndicator();
+            try {
+                const resp = await fetch("/api/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password })
+                });
+                const r = await resp.json();
+                hideTypingIndicator();
+                if (r?.ok || r?.success) {
+                    addSystemMessage(currentLang === "ar" ? "تم تسجيل الدخول. هنبدأ التقييم الآن." : "Logged in. Starting your assessment.");
+                    currentStep = "assessment";
+                    setTimeout(() => startAssessment(), 800);
+                } else {
+                    addSystemMessage(r?.message || (currentLang === "ar" ? "فشل تسجيل الدخول." : "Login failed."));
+                }
+            } catch (e) {
+                hideTypingIndicator();
+                addSystemMessage(currentLang === "ar" ? "حصلت مشكلة في تسجيل الدخول." : "There was a problem logging in.");
+            }
+        });
+
+        resend.addEventListener("click", async () => {
+            const email = elEmail.value.trim();
+            if (!email) {
+                addSystemMessage(currentLang === "ar" ? "اكتب البريد لإعادة الإرسال." : "Enter your email to resend.");
+                return;
+            }
+            showTypingIndicator();
+            try {
+                const resp = await fetch("/api/auth/resend", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email })
+                });
+                const r = await resp.json();
+                hideTypingIndicator();
+                addSystemMessage(
+                    r?.ok
+                        ? (currentLang === "ar" ? "تم إرسال الرابط (لو البريد مضبوط)." : "Link sent if email is valid.")
+                        : (r?.message || (currentLang === "ar" ? "تعذر إرسال الرابط." : "Could not send link."))
+                );
+            } catch (e) {
+                hideTypingIndicator();
+                addSystemMessage(currentLang === "ar" ? "تعذر إرسال الرابط." : "Could not send link.");
+            }
+        });
     }
 })();
