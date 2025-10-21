@@ -1394,6 +1394,10 @@ html.lang-ar body {
 
 /* Tablet and below (< 768px) */
 @media (max-width: 767px) {
+    /* Home header on mobile: keep language visible, hide only auth buttons */
+    #globalHeader #lang-switch {
+      display: inline-flex !important;
+    }
     
     /* HOME PAGE - Hide Login/Sign Up from header on mobile */
     .header-auth-buttons {
@@ -1496,4 +1500,102 @@ html.lang-ar body {
     .header-actions {
         margin-left: auto;
     }
+}
+/* ===== Form & Modal polish (dashboard edit profile) ===== */
+:root {
+  --form-h: 44px;
+}
+
+.modal-panel {
+  padding: 22px 22px 18px;
+  border: 1px solid var(--border);
+}
+
+.modal-header {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--foreground);
+}
+
+.form-section-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin: 14px 0 8px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px; /* (row col) */
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--foreground);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  height: var(--form-h);
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--foreground);
+  font-size: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.form-input::placeholder { color: color-mix(in oklab, var(--muted-foreground), #000 20%); opacity: .7; }
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-10);
+  background: #fff;
+}
+
+.form-input[readonly],
+.form-input:disabled { background: var(--muted); color: var(--muted-foreground); }
+
+.form-error, .success-notice {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.form-error {
+  background: hsla(0,84%,60%,.08);
+  color: hsl(0,84%,35%);
+  border: 1px solid hsla(0,84%,60%,.35);
+}
+.success-notice {
+  background: hsla(160,84%,39%,.10);
+  color: var(--accent);
+  border: 1px solid hsla(160,84%,39%,.35);
+}
+
+/* Buttons row inside modal */
+.modal .actions-row {
+  display: flex; gap: 10px; justify-content: flex-end; align-items: center;
+  margin-top: 6px;
+}
+
+/* Mobile tweaks */
+@media (max-width: 640px) {
+  .modal-panel { width: min(760px, calc(100% - 16px)); }
+  .form-row { grid-template-columns: 1fr; gap: 12px; }
+  :root { --form-h: 46px; }
 }

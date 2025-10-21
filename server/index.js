@@ -442,7 +442,7 @@ app.post("/api/intake/next", async (req, res) => {
       });
     }
 
-    if ((answer === undefined || answer === null) && session.intakeStepIndex === 0 && !session.openingShown) {
+    if ((answer === undefined || answer === null) && !session.openingShown) {
       session.openingShown = true;
       return res.json({
         sessionId,
@@ -485,7 +485,7 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
   try {
-    const { sessionId } = req.body;
+      const { sessionId } = req.body;
     const session = getSession(sessionId);
     if (session.currentStep !== "assessment") {
       return res.status(400).json({ error: "Not in assessment phase" });

@@ -100,6 +100,111 @@
             justify-content: center;
             color: var(--muted-foreground);
         }
+        <!-- ✅ Accordion + Modal styles -->
+        <style>
+          /* Accordion header */
+          .dash-accordion {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 16px;
+            background: var(--card);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+          }
+          .dash-accordion .acc-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 18px;
+            cursor: pointer;
+            user-select: none;
+          }
+          .dash-accordion .acc-header:hover { background: var(--muted); }
+          .dash-accordion .acc-title {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-weight: 700; color: var(--foreground);
+          }
+          .dash-accordion .acc-icon {
+            transition: transform .2s ease;
+          }
+          .dash-accordion.open .acc-icon { transform: rotate(90deg); }
+
+          .dash-accordion .acc-body {
+            display: none;
+            padding: 16px 18px 20px;
+            border-top: 1px solid var(--border);
+          }
+          .dash-accordion.open .acc-body { display: block; }
+
+          /* Small actions row */
+          .section-actions {
+            display: flex; gap: 10px; align-items: center; margin-bottom: 12px;
+          }
+          .inline-select, .inline-input {
+            padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff;
+          }
+
+          /* Simple modal */
+          .modal {
+            position: fixed; inset: 0; display: none; z-index: 10000;
+          }
+          .modal.open { display: block; }
+          .modal-backdrop {
+            position: absolute; inset: 0; background: rgba(0,0,0,.5);
+          }
+          .modal-panel {
+            position: absolute; left: 50%; top: 50%;
+            transform: translate(-50%, -50%);
+            width: min(680px, calc(100% - 24px));
+            background: var(--card); border-radius: var(--radius);
+            box-shadow: 0 10px 30px rgba(0,0,0,.25);
+            padding: 18px;
+            max-height: 85vh; overflow: auto;
+          }
+          .modal-header {
+            display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 6px;
+          }
+          .modal-title { font-weight: 800; font-size: 18px; }
+          .modal-close {
+            border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 6px 10px; cursor: pointer;
+          }
+          .form-row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+          .form-row .form-group { margin-bottom: 12px; }
+          @media (max-width: 640px){ .form-row{ grid-template-columns: 1fr; } }
+
+          .btn {
+            padding: 10px 16px; border-radius: 10px; border: 1px solid var(--border); background:#fff; cursor:pointer; font-weight:700;
+          }
+          .btn-primary {
+            background: var(--primary); color: #fff; border-color: var(--primary);
+            box-shadow: 0 3px 10px rgba(165, 32, 37, 0.25);
+          }
+          .btn-primary:hover{ filter:brightness(.96) }
+          .btn-outline { background:#fff; color: var(--primary); border-color: var(--primary); }
+          .mini { padding: 8px 12px; font-size: 14px; }
+
+          /* Key/value grid for "My Info" */
+          .kv-grid{
+            display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+          }
+          .kv-item{ background: var(--muted); border-radius: 8px; padding: 12px; }
+          .kv-k{ font-size: 12px; color: var(--muted-foreground); margin-bottom: 4px;}
+          .kv-v{ font-weight: 700; color: var(--foreground); word-break: break-word; }
+
+          /* Explanation list */
+          .explain-item{
+            border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:8px; background:#fff;
+            cursor:pointer; transition: background .15s;
+          }
+          .explain-item:hover{ background: var(--muted); }
+          .explain-title{ font-weight: 700; }
+          .explain-snippet{ color: var(--muted-foreground); margin-top: 6px; }
+
+          /* Empty state */
+          .empty-state { text-align:center; padding: 26px; color: var(--muted-foreground); }
+        </style>
+
     </style>
 </head>
 <body>
@@ -173,71 +278,253 @@
     </div>
 
     <div class="dashboard-container">
-        <!-- My Info -->
-        <div class="dash-section">
-            <h2 class="section-title">
-                <i class="fas fa-user"></i>
-                <span data-lang-content="en">My Info</span>
-                <span class="hidden" data-lang-content="ar">معلوماتي</span>
-            </h2>
-            <div class="info-grid" id="infoGrid">
-                <div class="info-item">
-                    <div class="info-label" data-lang-content="en">Name</div>
-                    <div class="info-label hidden" data-lang-content="ar">الاسم</div>
-                    <div class="info-value" id="infoName">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label" data-lang-content="en">Email</div>
-                    <div class="info-label hidden" data-lang-content="ar">البريد</div>
-                    <div class="info-value" id="infoEmail">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label" data-lang-content="en">Username</div>
-                    <div class="info-label hidden" data-lang-content="ar">اسم المستخدم</div>
-                    <div class="info-value" id="infoUsername">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label" data-lang-content="en">Phone</div>
-                    <div class="info-label hidden" data-lang-content="ar">الهاتف</div>
-                    <div class="info-value" id="infoPhone">-</div>
-                </div>
+
+      <!-- ============ Accordion: My Info ============ -->
+      <section class="dash-accordion" id="acc-myinfo">
+        <div class="acc-header" data-acc-toggle>
+          <div class="acc-title">
+            <i class="fas fa-user"></i>
+            <span data-lang-content="en">My Info</span>
+            <span class="hidden" data-lang-content="ar">معلوماتي</span>
+          </div>
+          <i class="fas fa-chevron-right acc-icon"></i>
+        </div>
+        <div class="acc-body">
+          <div class="section-actions">
+            <button class="btn btn-primary mini" id="btnOpenEditProfile">
+              <i class="fas fa-edit"></i>
+              <span data-lang-content="en">Edit Profile</span>
+              <span class="hidden" data-lang-content="ar">تعديل البيانات</span>
+            </button>
+          </div>
+
+          <div class="kv-grid" id="infoGridFull">
+            <!-- Basic (signup) -->
+            <div class="kv-item">
+              <div class="kv-k" data-lang-content="en">Full Name</div>
+              <div class="kv-k hidden" data-lang-content="ar">الاسم الكامل</div>
+              <div class="kv-v" id="kv_name">-</div>
             </div>
-        </div>
-
-        <!-- My Assessments -->
-        <div class="dash-section">
-            <h2 class="section-title">
-                <i class="fas fa-clipboard-check"></i>
-                <span data-lang-content="en">My Assessments</span>
-                <span class="hidden" data-lang-content="ar">تقييماتي</span>
-            </h2>
-            <div id="assessmentsList"></div>
-        </div>
-
-        <!-- My Explanations -->
-        <div class="dash-section">
-            <h2 class="section-title">
-                <i class="fas fa-book"></i>
-                <span data-lang-content="en">My Explanations</span>
-                <span class="hidden" data-lang-content="ar">شروحاتي</span>
-            </h2>
-            <div id="explanationsList"></div>
-        </div>
-
-        <!-- My Videos -->
-        <div class="dash-section">
-            <h2 class="section-title">
-                <i class="fas fa-video"></i>
-                <span data-lang-content="en">My Videos</span>
-                <span class="hidden" data-lang-content="ar">فيديوهاتي</span>
-            </h2>
-            <div class="placeholder-grid">
-                <div class="placeholder-card">
-                    <span data-lang-content="en">Coming Soon</span>
-                    <span class="hidden" data-lang-content="ar">قريبا</span>
-                </div>
+            <div class="kv-item">
+              <div class="kv-k" data-lang-content="en">Username</div>
+              <div class="kv-k hidden" data-lang-content="ar">اسم المستخدم</div>
+              <div class="kv-v" id="kv_username">-</div>
             </div>
+            <div class="kv-item">
+              <div class="kv-k" data-lang-content="en">Email</div>
+              <div class="kv-k hidden" data-lang-content="ar">البريد الإلكتروني</div>
+              <div class="kv-v" id="kv_email">-</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-k" data-lang-content="en">Phone</div>
+              <div class="kv-k hidden" data-lang-content="ar">الهاتف</div>
+              <div class="kv-v" id="kv_phone">-</div>
+            </div>
+
+            <!-- Intake -->
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Country</div><div class="kv-k hidden" data-lang-content="ar">الدولة</div><div class="kv-v" id="kv_country">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Age Band</div><div class="kv-k hidden" data-lang-content="ar">الفئة العمرية</div><div class="kv-v" id="kv_age_band">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Job Nature</div><div class="kv-k hidden" data-lang-content="ar">طبيعة العمل</div><div class="kv-v" id="kv_job_nature">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Experience</div><div class="kv-k hidden" data-lang-content="ar">سنوات الخبرة</div><div class="kv-v" id="kv_experience">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Exact Job Title</div><div class="kv-k hidden" data-lang-content="ar">المسمى الوظيفي</div><div class="kv-v" id="kv_job_title">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Sector</div><div class="kv-k hidden" data-lang-content="ar">القطاع</div><div class="kv-v" id="kv_sector">-</div></div>
+            <div class="kv-item"><div class="kv-k" data-lang-content="en">Learning Reason</div><div class="kv-k hidden" data-lang-content="ar">سبب التعلم</div><div class="kv-v" id="kv_reason">-</div></div>
+          </div>
         </div>
+      </section>
+
+      <!-- ============ Accordion: My Assessments ============ -->
+      <section class="dash-accordion" id="acc-assess">
+        <div class="acc-header" data-acc-toggle>
+          <div class="acc-title">
+            <i class="fas fa-clipboard-check"></i>
+            <span data-lang-content="en">My Assessments</span>
+            <span class="hidden" data-lang-content="ar">تقييماتي</span>
+          </div>
+          <i class="fas fa-chevron-right acc-icon"></i>
+        </div>
+        <div class="acc-body">
+          <div class="section-actions">
+            <select id="assessSort" class="inline-select">
+              <option value="date_desc" data-lang-content="en">Newest first</option>
+              <option value="date_desc" class="hidden" data-lang-content="ar">الأحدث أولاً</option>
+
+              <option value="date_asc" data-lang-content="en">Oldest first</option>
+              <option value="date_asc" class="hidden" data-lang-content="ar">الأقدم أولاً</option>
+
+              <option value="score_desc" data-lang-content="en">Highest score</option>
+              <option value="score_desc" class="hidden" data-lang-content="ar">الأعلى نتيجة</option>
+
+              <option value="score_asc" data-lang-content="en">Lowest score</option>
+              <option value="score_asc" class="hidden" data-lang-content="ar">الأقل نتيجة</option>
+            </select>
+            <select id="assessFilter" class="inline-select">
+              <option value="all" data-lang-content="en">All</option>
+              <option value="all" class="hidden" data-lang-content="ar">الكل</option>
+
+              <option value="complete" data-lang-content="en">Complete</option>
+              <option value="complete" class="hidden" data-lang-content="ar">مكتمل</option>
+
+              <option value="in-progress" data-lang-content="en">In Progress</option>
+              <option value="in-progress" class="hidden" data-lang-content="ar">جاري</option>
+            </select>
+          </div>
+          <div id="assessmentsList"></div>
+        </div>
+      </section>
+
+      <!-- ============ Accordion: My Explanations ============ -->
+      <section class="dash-accordion" id="acc-explain">
+        <div class="acc-header" data-acc-toggle>
+          <div class="acc-title">
+            <i class="fas fa-book"></i>
+            <span data-lang-content="en">My Explanations</span>
+            <span class="hidden" data-lang-content="ar">شروحاتي</span>
+          </div>
+          <i class="fas fa-chevron-right acc-icon"></i>
+        </div>
+        <div class="acc-body">
+          <div id="explanationsList"></div>
+        </div>
+      </section>
+
+      <!-- ============ Accordion: My Videos (placeholder) ============ -->
+      <section class="dash-accordion" id="acc-videos">
+        <div class="acc-header" data-acc-toggle>
+          <div class="acc-title">
+            <i class="fas fa-video"></i>
+            <span data-lang-content="en">My Videos</span>
+            <span class="hidden" data-lang-content="ar">فيديوهاتي</span>
+          </div>
+          <i class="fas fa-chevron-right acc-icon"></i>
+        </div>
+        <div class="acc-body">
+          <div class="placeholder-grid">
+            <div class="placeholder-card" id="videosPlaceholder">
+              <span data-lang-content="en">Coming Soon</span>
+              <span class="hidden" data-lang-content="ar">قريباً</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- =================== MODALS =================== -->
+
+    <!-- Edit Profile Modal -->
+    <div class="modal" id="editProfileModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="editProfileModal"></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="editProfileTitle">
+        <div class="modal-header">
+          <div class="modal-title" id="editProfileTitle" data-lang-content="en">Edit Profile</div>
+          <div class="modal-title hidden" data-lang-content="ar">تعديل البيانات</div>
+          <button class="modal-close" data-close-modal="editProfileModal"><i class="fas fa-times"></i></button>
+        </div>
+
+        <form id="editProfileForm">
+          <!-- ===== Basic info ===== -->
+          <div class="form-section-title" data-lang-content="en">Basic Info</div>
+          <div class="form-section-title hidden" data-lang-content="ar">البيانات الأساسية</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="f_name" data-lang-content="en">Full Name</label>
+              <label class="form-label hidden" for="f_name" data-lang-content="ar">الاسم الكامل</label>
+              <input type="text" class="form-input" id="f_name" placeholder="Your full name">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_username" data-lang-content="en">Username</label>
+              <label class="form-label hidden" for="f_username" data-lang-content="ar">اسم المستخدم</label>
+              <input type="text" class="form-input" id="f_username" placeholder="john_doe">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_phone" data-lang-content="en">Phone</label>
+              <label class="form-label hidden" for="f_phone" data-lang-content="ar">الهاتف</label>
+              <input type="tel" class="form-input" id="f_phone" placeholder="+20123456789">
+            </div>
+          </div>
+
+          <!-- Divider -->
+          <div class="rt-hr" style="margin: 12px 0;"></div>
+
+          <!-- ===== Intake / Work info ===== -->
+          <div class="form-section-title" data-lang-content="en">Work & Intake</div>
+          <div class="form-section-title hidden" data-lang-content="ar">العمل وبيانات التقييم</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="f_country" data-lang-content="en">Country</label>
+              <label class="form-label hidden" for="f_country" data-lang-content="ar">الدولة</label>
+              <input type="text" class="form-input" id="f_country" placeholder="Egypt">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_age_band" data-lang-content="en">Age Band</label>
+              <label class="form-label hidden" for="f_age_band" data-lang-content="ar">الفئة العمرية</label>
+              <input type="text" class="form-input" id="f_age_band" placeholder="25–34">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_job_nature" data-lang-content="en">Job Nature</label>
+              <label class="form-label hidden" for="f_job_nature" data-lang-content="ar">طبيعة العمل</label>
+              <input type="text" class="form-input" id="f_job_nature" placeholder="Marketing / IT / ...">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_experience" data-lang-content="en">Experience</label>
+              <label class="form-label hidden" for="f_experience" data-lang-content="ar">سنوات الخبرة</label>
+              <input type="text" class="form-input" id="f_experience" placeholder="3–5y">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_job_title" data-lang-content="en">Exact Job Title</label>
+              <label class="form-label hidden" for="f_job_title" data-lang-content="ar">المسمى الوظيفي</label>
+              <input type="text" class="form-input" id="f_job_title" placeholder="Senior Analyst">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_sector" data-lang-content="en">Sector</label>
+              <label class="form-label hidden" for="f_sector" data-lang-content="ar">القطاع</label>
+              <input type="text" class="form-input" id="f_sector" placeholder="Banking / Telecom / ...">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="f_reason" data-lang-content="en">Learning Reason</label>
+              <label class="form-label hidden" for="f_reason" data-lang-content="ar">سبب التعلم</label>
+              <input type="text" class="form-input" id="f_reason" placeholder="Promotion / Career shift / ...">
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="actions-row">
+            <button type="button" class="btn" data-close-modal="editProfileModal">
+              <span data-lang-content="en">Cancel</span>
+              <span class="hidden" data-lang-content="ar">إلغاء</span>
+            </button>
+            <button type="submit" class="btn btn-primary" id="btnSaveProfile">
+              <span data-lang-content="en">Save</span>
+              <span class="hidden" data-lang-content="ar">حفظ</span>
+            </button>
+          </div>
+
+          <div id="editProfileError" class="form-error" style="display:none;"></div>
+          <div id="editProfileSuccess" class="success-notice" style="display:none; margin-top:10px;"></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Explanation Modal -->
+    <div class="modal" id="explainModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="explainModal"></div>
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="explainTitle">
+        <div class="modal-header">
+          <div class="modal-title" id="explainTitle">—</div>
+          <button class="modal-close" data-close-modal="explainModal"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="explainBody" class="message-content" style="white-space:pre-wrap;"></div>
+      </div>
     </div>
 
     <script src="dashboard.js"></script>

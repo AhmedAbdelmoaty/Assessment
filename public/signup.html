@@ -9,7 +9,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
-    <script src="/js/header.js"></script>
     <style>
         .auth-container {
             min-height: 100vh;
@@ -144,11 +143,7 @@
     </style>
 </head>
 <body>
-    <!-- Single Language Toggle -->
-    <div class="lang-toggle">
-        <div id="lang-switch"></div>
-    </div>
-
+ 
     <div class="auth-container">
         <div class="auth-card">
             <img src="/assets/imp-logo.jpeg" alt="IMP Logo" class="auth-logo">
@@ -247,102 +242,119 @@
     </div>
 
     <script>
-        let userEmail = '';
-        
-        // Initialize language switch
-        document.addEventListener('DOMContentLoaded', () => {
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
-        });
+      let userEmail = '';
 
-        // Signup form
-        document.getElementById('signupForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const name = document.getElementById('name').value;
-            const username = document.getElementById('username').value;
-            const email = document.getElementById('email').value;
-            const phone = document.getElementById('phone').value;
-            const password = document.getElementById('password').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.style.display = 'none';
-            
-            try {
-                const response = await fetch('/api/auth/signup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, username, email, phone, password, confirmPassword })
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    errorDiv.textContent = data.error || 'Signup failed';
-                    errorDiv.style.display = 'block';
-                    return;
-                }
-                
-                userEmail = email;
-                
-                // Show OTP section
-                document.querySelector('.signup-section').classList.add('hidden');
-                document.getElementById('otpSection').classList.add('active');
-                
-                if (data.devMode) {
-                    document.getElementById('devNotice').style.display = 'block';
-                }
-                
-            } catch (error) {
-                errorDiv.textContent = 'Network error. Please try again.';
-                errorDiv.style.display = 'block';
-            }
+      // Lightweight language applier (no external header.js)
+      function getPersistedLang() {
+        return (
+          localStorage.getItem('siteLang') ||
+          localStorage.getItem('preferred_lang') ||
+          document.documentElement.lang ||
+          'en'
+        );
+      }
+      function applyLanguage(lang) {
+        const html = document.documentElement;
+        const isAr = lang === 'ar';
+        html.setAttribute('lang', isAr ? 'ar' : 'en');
+        html.setAttribute('dir', isAr ? 'rtl' : 'ltr');
+        document.querySelectorAll('[data-lang-content]').forEach(el => {
+          el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== lang);
         });
+      }
 
-        // OTP form
-        document.getElementById('otpForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const code = document.getElementById('otpCode').value;
-            const errorDiv = document.getElementById('otpError');
-            errorDiv.style.display = 'none';
-            
-            try {
-                const response = await fetch('/api/auth/verify-otp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: userEmail, code })
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    errorDiv.textContent = data.error || 'Verification failed';
-                    errorDiv.style.display = 'block';
-                    return;
-                }
-                
-                // Show success and redirect
-                const currentLang = HeaderUtils.getCurrentLang();
-                const successMsg = currentLang === 'ar' ? 
-                    'تم التحقق بنجاح! جاري التوجيه إلى صفحة تسجيل الدخول...' :
-                    'Verification successful! Redirecting to login...';
-                
-                document.getElementById('otpSection').innerHTML = `
-                    <div class="success-notice">
-                        <i class="fas fa-check-circle"></i> ${successMsg}
-                    </div>
-                `;
-                
-                setTimeout(() => {
-                    window.location.href = '/login.html';
-                }, 2000);
-                
-            } catch (error) {
-                errorDiv.textContent = 'Network error. Please try again.';
-                errorDiv.style.display = 'block';
-            }
-        });
+      document.addEventListener('DOMContentLoaded', () => {
+        applyLanguage(getPersistedLang());
+      });
+
+      // Signup form (كما هو)
+      document.getElementById('signupForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const name = document.getElementById('name').value;
+        const username = document.getElementById('username').value;
+        const email = document.getElementById('email').value;
+        const phone = document.getElementById('phone').value;
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+
+        const errorDiv = document.getElementById('errorMessage');
+        errorDiv.style.display = 'none';
+
+        try {
+          const response = await fetch('/api/auth/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, username, email, phone, password, confirmPassword })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            errorDiv.textContent = data.error || 'Signup failed';
+            errorDiv.style.display = 'block';
+            return;
+          }
+
+          userEmail = email;
+
+          // Show OTP
+          document.querySelector('.signup-section').classList.add('hidden');
+          document.getElementById('otpSection').classList.add('active');
+
+          if (data.devMode) {
+            document.getElementById('devNotice').style.display = 'block';
+          }
+        } catch (error) {
+          errorDiv.textContent = 'Network error. Please try again.';
+          errorDiv.style.display = 'block';
+        }
+      });
+
+      // OTP form (كما هو مع اعتماد اللغة المخزّنة)
+      document.getElementById('otpForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const code = document.getElementById('otpCode').value;
+        const errorDiv = document.getElementById('otpError');
+        errorDiv.style.display = 'none';
+
+        try {
+          const response = await fetch('/api/auth/verify-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: userEmail, code })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            errorDiv.textContent = data.error || 'Verification failed';
+            errorDiv.style.display = 'block';
+            return;
+          }
+
+          const lang = getPersistedLang();
+          const successMsg = (lang === 'ar')
+            ? 'تم التحقق بنجاح! جاري التوجيه إلى صفحة تسجيل الدخول...'
+            : 'Verification successful! Redirecting to login...';
+
+          document.getElementById('otpSection').innerHTML = `
+            <div class="success-notice">
+              <i class="fas fa-check-circle"></i> ${successMsg}
+            </div>
+          `;
+
+          setTimeout(() => {
+            // مرّر إشارة verified لتعرض رسالة النجاح في login
+            window.location.href = '/login.html?verified=true';
+          }, 1500);
+        } catch (error) {
+          errorDiv.textContent = 'Network error. Please try again.';
+          errorDiv.style.display = 'block';
+        }
+      });
     </script>
+
 </body>
 </html>

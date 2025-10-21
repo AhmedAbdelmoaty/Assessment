@@ -344,7 +344,7 @@ app.post("/api/intake/next", async (req, res) => {
       });
     }
 
-    if ((answer === undefined || answer === null) && session.intakeStepIndex === 0 && !session.openingShown) {
+    if ((answer === undefined || answer === null) && !session.openingShown) {
       session.openingShown = true;
       return res.json({
         sessionId,

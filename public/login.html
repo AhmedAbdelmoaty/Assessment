@@ -9,7 +9,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
-    <script src="/js/header.js"></script>
     <style>
         .auth-container {
             min-height: 100vh;
@@ -114,11 +113,7 @@
     </style>
 </head>
 <body>
-    <!-- Single Language Toggle -->
-    <div class="lang-toggle">
-        <div id="lang-switch"></div>
-    </div>
-
+    
     <div class="auth-container">
         <div class="auth-card">
             <img src="/assets/imp-logo.jpeg" alt="IMP Logo" class="auth-logo">
@@ -162,61 +157,77 @@
     </div>
 
     <script>
-        // Initialize language switch and check for success message
-        document.addEventListener('DOMContentLoaded', () => {
-            // Initialize language toggle
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
-            
-            // Check for success message from signup
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('verified') === 'true') {
-                const successDiv = document.getElementById('successMessage');
-                const currentLang = HeaderUtils.getCurrentLang();
-                successDiv.textContent = currentLang === 'ar' ? 
-                    'تم التحقق من حسابك بنجاح! الرجاء تسجيل الدخول.' :
-                    'Account verified successfully! Please login.';
-                successDiv.style.display = 'block';
-            }
+      // Lightweight language applier (no external header.js)
+      function getPersistedLang() {
+        // جرّب أكثر من مفتاح تحسباً
+        return (
+          localStorage.getItem('siteLang') ||
+          localStorage.getItem('preferred_lang') ||
+          document.documentElement.lang ||
+          'en'
+        );
+      }
+      function applyLanguage(lang) {
+        const html = document.documentElement;
+        const isAr = lang === 'ar';
+        html.setAttribute('lang', isAr ? 'ar' : 'en');
+        html.setAttribute('dir', isAr ? 'rtl' : 'ltr');
+        document.querySelectorAll('[data-lang-content]').forEach(el => {
+          el.classList.toggle('hidden', el.getAttribute('data-lang-content') !== lang);
         });
+      }
 
-        // Login form
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            
-            const errorDiv = document.getElementById('errorMessage');
-            const loginBtn = document.getElementById('loginBtn');
-            
-            errorDiv.style.display = 'none';
-            loginBtn.disabled = true;
-            
-            try {
-                const response = await fetch('/api/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    errorDiv.textContent = data.error || 'Login failed';
-                    errorDiv.style.display = 'block';
-                    loginBtn.disabled = false;
-                    return;
-                }
-                
-                // Redirect to dashboard
-                window.location.href = '/dashboard.html';
-                
-            } catch (error) {
-                errorDiv.textContent = 'Network error. Please try again.';
-                errorDiv.style.display = 'block';
-                loginBtn.disabled = false;
-            }
-        });
+      document.addEventListener('DOMContentLoaded', () => {
+        const lang = getPersistedLang();
+        applyLanguage(lang);
+
+        // عرض رسالة نجاح بعد تحقق الإيميل (لو جاي من signup)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('verified') === 'true') {
+          const successDiv = document.getElementById('successMessage');
+          successDiv.textContent = (lang === 'ar')
+            ? 'تم التحقق من حسابك بنجاح! الرجاء تسجيل الدخول.'
+            : 'Account verified successfully! Please login.';
+          successDiv.style.display = 'block';
+        }
+      });
+
+      // Login form (بدون تغيير في الAPI)
+      document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        const errorDiv = document.getElementById('errorMessage');
+        const loginBtn = document.getElementById('loginBtn');
+
+        errorDiv.style.display = 'none';
+        loginBtn.disabled = true;
+
+        try {
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            errorDiv.textContent = data.error || 'Login failed';
+            errorDiv.style.display = 'block';
+            loginBtn.disabled = false;
+            return;
+          }
+
+          window.location.href = '/dashboard.html';
+        } catch (error) {
+          errorDiv.textContent = 'Network error. Please try again.';
+          errorDiv.style.display = 'block';
+          loginBtn.disabled = false;
+        }
+      });
     </script>
 </body>
 </html>
