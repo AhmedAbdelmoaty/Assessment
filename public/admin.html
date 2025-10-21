@@ -47,66 +47,147 @@
 
     <!-- Admin Content -->
     <main class="admin-container">
-        <!-- Top Controls -->
-        <div class="admin-controls">
-            <button id="refreshBtn" class="refresh-btn" data-testid="button-refresh">
-                <i class="fas fa-sync-alt"></i>
-                <span data-lang-content="en">Refresh Data</span>
-                <span class="hidden" data-lang-content="ar">تحديث البيانات</span>
-            </button>
-        </div>
-
-        <!-- Counters Section -->
-        <section class="counters-section">
-            <div class="counter-card" data-testid="counter-total-users">
-                <div class="counter-icon">
+        <!-- KPI Cards -->
+        <section class="kpi-section">
+            <div class="kpi-card" data-testid="kpi-total-users">
+                <div class="kpi-icon">
                     <i class="fas fa-users"></i>
                 </div>
-                <div class="counter-content">
-                    <div class="counter-label">
+                <div class="kpi-content">
+                    <div class="kpi-label">
                         <span data-lang-content="en">Total Users</span>
                         <span class="hidden" data-lang-content="ar">إجمالي المستخدمين</span>
                     </div>
-                    <div class="counter-value" id="totalUsersValue">-</div>
+                    <div class="kpi-value" id="totalUsersKPI">-</div>
                 </div>
             </div>
 
-            <div class="counter-card" data-testid="counter-top-country">
-                <div class="counter-icon">
+            <div class="kpi-card" data-testid="kpi-filtered-users">
+                <div class="kpi-icon">
+                    <i class="fas fa-filter"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-label">
+                        <span data-lang-content="en">Filtered Users</span>
+                        <span class="hidden" data-lang-content="ar">المستخدمين المصفّين</span>
+                    </div>
+                    <div class="kpi-value" id="filteredUsersKPI">-</div>
+                </div>
+            </div>
+
+            <div class="kpi-card" data-testid="kpi-top-country">
+                <div class="kpi-icon">
                     <i class="fas fa-globe"></i>
                 </div>
-                <div class="counter-content">
-                    <div class="counter-label">
+                <div class="kpi-content">
+                    <div class="kpi-label">
                         <span data-lang-content="en">Top Country</span>
                         <span class="hidden" data-lang-content="ar">أعلى دولة</span>
                     </div>
-                    <div class="counter-value" id="topCountryValue">-</div>
-                    <div class="counter-subtext" id="topCountryCount"></div>
+                    <div class="kpi-value" id="topCountryKPI">-</div>
+                    <div class="kpi-subtext" id="topCountryCount"></div>
                 </div>
             </div>
         </section>
 
-        <!-- Drilldown Section -->
-        <section class="drilldown-section">
-            <h2 class="section-title">
-                <i class="fas fa-sitemap"></i>
-                <span data-lang-content="en">User Distribution Analysis</span>
-                <span class="hidden" data-lang-content="ar">تحليل توزيع المستخدمين</span>
-            </h2>
-
-            <div class="drilldown-help">
-                <i class="fas fa-info-circle"></i>
-                <span data-lang-content="en">Click on any row to expand and view detailed breakdown</span>
-                <span class="hidden" data-lang-content="ar">انقر على أي صف لتوسيعه ومشاهدة التفاصيل</span>
+        <!-- Pivot Controls -->
+        <section class="pivot-controls">
+            <div class="control-group">
+                <label for="rowsSelect">
+                    <i class="fas fa-arrows-alt-v"></i>
+                    <span data-lang-content="en">Rows</span>
+                    <span class="hidden" data-lang-content="ar">الصفوف</span>
+                </label>
+                <select id="rowsSelect" data-testid="select-rows">
+                    <option value="country">Country</option>
+                    <option value="sector">Sector</option>
+                    <option value="job_nature">Job Nature</option>
+                    <option value="age_band">Age Band</option>
+                    <option value="experience_years_band">Experience</option>
+                    <option value="learning_reason">Learning Reason</option>
+                </select>
             </div>
 
-            <div id="drilldownContainer" class="drilldown-container" data-testid="drilldown-table">
+            <div class="control-group">
+                <label for="columnsSelect">
+                    <i class="fas fa-arrows-alt-h"></i>
+                    <span data-lang-content="en">Columns</span>
+                    <span class="hidden" data-lang-content="ar">الأعمدة</span>
+                </label>
+                <select id="columnsSelect" data-testid="select-columns">
+                    <option value="none">None</option>
+                    <option value="country">Country</option>
+                    <option value="sector">Sector</option>
+                    <option value="job_nature">Job Nature</option>
+                    <option value="age_band">Age Band</option>
+                    <option value="experience_years_band">Experience</option>
+                    <option value="learning_reason">Learning Reason</option>
+                </select>
+            </div>
+
+            <div class="control-group filters-group">
+                <label>
+                    <i class="fas fa-filter"></i>
+                    <span data-lang-content="en">Filters</span>
+                    <span class="hidden" data-lang-content="ar">المرشحات</span>
+                </label>
+                <div id="filtersContainer" class="filters-container"></div>
+            </div>
+
+            <button id="refreshBtn" class="refresh-btn" data-testid="button-refresh">
+                <i class="fas fa-sync-alt"></i>
+                <span data-lang-content="en">Refresh</span>
+                <span class="hidden" data-lang-content="ar">تحديث</span>
+            </button>
+        </section>
+
+        <!-- Pivot Matrix -->
+        <section class="pivot-section">
+            <h2 class="section-title">
+                <i class="fas fa-table"></i>
+                <span data-lang-content="en">Pivot Matrix</span>
+                <span class="hidden" data-lang-content="ar">مصفوفة التحليل</span>
+            </h2>
+            <div id="pivotContainer" class="pivot-container" data-testid="pivot-matrix">
                 <div class="loading-state">
                     <i class="fas fa-spinner fa-spin"></i>
                     <span data-lang-content="en">Loading data...</span>
                     <span class="hidden" data-lang-content="ar">جاري تحميل البيانات...</span>
                 </div>
             </div>
+        </section>
+
+        <!-- Users Table -->
+        <section class="users-section">
+            <div class="users-header">
+                <h2 class="section-title">
+                    <i class="fas fa-users"></i>
+                    <span data-lang-content="en">Users Table</span>
+                    <span class="hidden" data-lang-content="ar">جدول المستخدمين</span>
+                </h2>
+                <div class="users-actions">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        placeholder="Search name, email, username..." 
+                        class="search-input"
+                        data-testid="input-search"
+                    />
+                    <button id="exportBtn" class="export-btn" data-testid="button-export">
+                        <i class="fas fa-download"></i>
+                        <span data-lang-content="en">Export CSV</span>
+                        <span class="hidden" data-lang-content="ar">تصدير CSV</span>
+                    </button>
+                </div>
+            </div>
+            <div id="usersTableContainer" class="users-table-container" data-testid="users-table">
+                <div class="loading-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span data-lang-content="en">Loading data...</span>
+                    <span class="hidden" data-lang-content="ar">جاري تحميل البيانات...</span>
+                </div>
+            </div>
+            <div id="paginationContainer" class="pagination-container"></div>
         </section>
     </main>
 

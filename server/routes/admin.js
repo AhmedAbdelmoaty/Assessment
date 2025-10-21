@@ -5,87 +5,66 @@ import { sql } from 'drizzle-orm';
 const router = express.Router();
 
 /**
- * GET /api/admin/counters
- * Returns basic counters: total users and top country
+ * GET /api/admin/users/raw
+ * Returns flat rows with all user data for pivot analysis
+ * Fields: id, email, username, name, country, age_band, sector, job_nature, experience_years_band, learning_reason
+ * 
+ * SQL verification queries:
+ * 
+ * Total users:
+ * SELECT COUNT(*) FROM users;
+ * 
+ * Count by country:
+ * SELECT NULLIF(TRIM(profile_json->'intake'->>'country'), '') AS country,
+ *        COUNT(*) AS users_count
+ * FROM users
+ * GROUP BY 1
+ * ORDER BY users_count DESC NULLS LAST;
+ * 
+ * Country × Sector:
+ * SELECT NULLIF(TRIM(profile_json->'intake'->>'country'), '') AS country,
+ *        NULLIF(TRIM(profile_json->'intake'->>'sector'), '')  AS sector,
+ *        COUNT(*) AS users_count
+ * FROM users
+ * GROUP BY 1,2
+ * ORDER BY country NULLS LAST, users_count DESC;
  */
-router.get('/counters', async (req, res) => {
+router.get('/users/raw', async (req, res) => {
   try {
-    // Get total users count
-    const totalResult = await db.execute(sql`
-      SELECT COUNT(*)::int as total
-      FROM users
-    `);
-    const totalUsers = totalResult.rows[0]?.total || 0;
-
-    // Get top country (most common country in profile_json->intake)
-    const topCountryResult = await db.execute(sql`
-      SELECT 
-        profile_json->'intake'->>'country' as country,
-        COUNT(*)::int as count
-      FROM users
-      WHERE profile_json->'intake'->>'country' IS NOT NULL
-      GROUP BY profile_json->'intake'->>'country'
-      ORDER BY count DESC
-      LIMIT 1
-    `);
-
-    const topCountry = topCountryResult.rows[0] || { country: 'N/A', count: 0 };
-
-    res.json({
-      totalUsers,
-      topCountry: {
-        name: topCountry.country,
-        count: topCountry.count
-      }
-    });
-  } catch (error) {
-    console.error('[ADMIN COUNTERS ERROR]', error);
-    res.status(500).json({ error: 'Failed to fetch counters' });
-  }
-});
-
-/**
- * GET /api/admin/drilldown
- * Returns aggregated data for 4-level drilldown: country → age_band → sector → job_nature
- * Returns flat array; client will build tree structure
- */
-router.get('/drilldown', async (req, res) => {
-  try {
-    // Query to get all combinations with counts
     const result = await db.execute(sql`
       SELECT 
+        id,
+        email,
+        username,
+        profile_json->>'name' as name,
         profile_json->'intake'->>'country' as country,
         profile_json->'intake'->>'age_band' as age_band,
         profile_json->'intake'->>'sector' as sector,
         profile_json->'intake'->>'job_nature' as job_nature,
-        COUNT(*)::int as count
+        profile_json->'intake'->>'experience_years_band' as experience_years_band,
+        profile_json->'intake'->>'learning_reason' as learning_reason
       FROM users
-      WHERE profile_json->'intake' IS NOT NULL
-      GROUP BY 
-        profile_json->'intake'->>'country',
-        profile_json->'intake'->>'age_band',
-        profile_json->'intake'->>'sector',
-        profile_json->'intake'->>'job_nature'
-      ORDER BY 
-        country NULLS LAST,
-        age_band NULLS LAST,
-        sector NULLS LAST,
-        job_nature NULLS LAST
+      ORDER BY email
     `);
 
-    // Convert rows to plain objects
+    // Convert rows to plain objects with proper null handling
     const data = result.rows.map(row => ({
+      id: row.id || '',
+      email: row.email || '',
+      username: row.username || '',
+      name: row.name || '',
       country: row.country || null,
       age_band: row.age_band || null,
       sector: row.sector || null,
       job_nature: row.job_nature || null,
-      count: row.count
+      experience_years_band: row.experience_years_band || null,
+      learning_reason: row.learning_reason || null
     }));
 
     res.json({ data });
   } catch (error) {
-    console.error('[ADMIN DRILLDOWN ERROR]', error);
-    res.status(500).json({ error: 'Failed to fetch drilldown data' });
+    console.error('[ADMIN USERS RAW ERROR]', error);
+    res.status(500).json({ error: 'Failed to fetch users data' });
   }
 });
 
