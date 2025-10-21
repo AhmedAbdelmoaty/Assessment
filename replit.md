@@ -115,13 +115,25 @@ Preferred communication style: Simple, everyday language.
 ## Admin Dashboard
 
 ### Overview
-Admin-only interactive data dashboard for analyzing user distribution across demographic and professional categories. Provides real-time insights without exposing individual user PII.
+Admin-only interactive data dashboard with pivot matrix analytics for analyzing user distribution across demographic and professional categories. Provides real-time insights with configurable dimensions and multi-select filters, showing real database aggregations without exposing individual user PII.
 
 ### Features
 - **Role-Based Access**: Only users with `role = 'admin'` can access `/admin.html` and `/api/admin/*` endpoints
-- **Key Metrics**: Total users count and top country by user count
-- **Interactive Drilldown**: 4-level hierarchical analysis (Country → Age Band → Sector → Job Nature)
-- **Client-Side Interaction**: Expand/collapse nodes with keyboard support (Enter/Space/ESC)
+- **KPI Cards**: Total Users, Filtered Users, Top Country (from real database queries)
+- **Pivot Matrix**: Interactive 2D matrix with configurable row/column dimensions
+  - 6 available dimensions: Country, Sector, Job Nature, Age Band, Experience, Learning Reason
+  - Swap rows/columns freely for different views
+  - Row totals, column totals, and grand total
+  - Lightweight heatmap coloring for visual patterns
+- **Multi-Select Filters**: Filter by any combination of dimension values
+  - Filters affect both pivot matrix and users table
+  - Debounced for performance (300ms delay)
+  - Automatic pagination reset when filters change
+- **Synced Users Table**: Shows individual user rows matching current filters
+  - Displays: Name, Email, Username, Country, Age Band, Sector, Job Nature, Experience, Reason
+  - Search by name, email, or username (debounced 300ms)
+  - Pagination: 20 rows per page with smart page reset
+  - Export to CSV functionality
 - **Real-Time Refresh**: Reload data without page reload
 - **Bilingual Support**: Full English/Arabic language support with RTL layout
 - **Responsive Design**: Mobile-friendly with breakpoint at 768px
@@ -140,16 +152,23 @@ Dashboard queries `profile_json.intake` fields from the `users` table:
 - `age_band`: Age range (18-24, 25-34, 35-44, 45-54, 55+)
 - `sector`: Industry sector (Technology, Finance, Healthcare, etc.)
 - `job_nature`: Job function (IT/Data, Accounting/Finance, Marketing, etc.)
+- `experience_years_band`: Experience range (0-2, 3-5, 6-10, 11-15, 16+)
+- `learning_reason`: Primary learning motivation
 
 ### API Endpoints
-- `GET /api/admin/counters`: Returns total users and top country with count
-- `GET /api/admin/drilldown`: Returns flat array of aggregated counts for all combinations
+- `GET /api/admin/users/raw`: Returns flat array of user rows with all intake fields (id, email, username, name, country, age_band, sector, job_nature, experience_years_band, learning_reason)
+
+### Technical Implementation
+- **Client-Side Pivot Building**: API returns flat rows; client builds pivot matrix for performance
+- **Pagination Reset Logic**: `currentPage` resets to 1 when filters change or data refreshes to prevent empty table bug
+- **Clamping Guard**: `renderPagination()` clamps `currentPage` to valid range (1 to totalPages)
+- **SQL Verification Queries**: Included in code comments for manual verification of aggregated counts
 
 ### Files
 - `server/middleware/admin.js`: Role-based access control middleware
-- `server/routes/admin.js`: Admin API endpoints
-- `public/admin.html`: Admin dashboard UI
-- `public/js/admin.js`: Interactive drilldown logic with tree building
+- `server/routes/admin.js`: Admin API endpoints (users/raw)
+- `public/admin.html`: Admin dashboard UI with pivot controls
+- `public/js/admin.js`: Pivot matrix logic + users table sync
 - `public/css/admin.css`: Minimal, responsive, RTL-friendly styling
 
 ### Admin User Setup
