@@ -26,6 +26,7 @@ export const users = pgTable('users', {
   email: text('email').unique().notNull(),
   username: text('username').unique(),
   passHash: text('pass_hash'),
+  role: text('role').default('user').notNull(), // 'user' or 'admin'
   profileJson: jsonb('profile_json'), // Contains: name, phone, etc.
   createdAt: timestamp('created_at').defaultNow().notNull(),
   emailVerifiedAt: timestamp('email_verified_at')
