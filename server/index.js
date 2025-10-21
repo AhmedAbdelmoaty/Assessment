@@ -14,6 +14,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
+import adminRoutes from "./routes/admin.js";
+import { requireAdmin, redirectAdmins } from "./middleware/admin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,6 +32,13 @@ app.use(helmet({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // 10 requests per window
+  message: "Too many requests, please try again later"
+});
+
+// Rate limiting for admin endpoints
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per window (higher for data dashboard)
   message: "Too many requests, please try again later"
 });
 
@@ -57,15 +66,18 @@ app.use(session({
 
 app.use(express.json());
 
-// Protect /chat.html and /dashboard.html - redirect to login if not authenticated
-app.get('/chat.html', (req, res, next) => {
+// Protect /admin.html - only admins can access
+app.get('/admin.html', requireAdmin);
+
+// Protect /chat.html and /dashboard.html - redirect to login if not authenticated, redirect admins to /admin.html
+app.get('/chat.html', redirectAdmins, (req, res, next) => {
   if (!req.session.userId) {
     return res.redirect('/login.html');
   }
   next();
 });
 
-app.get('/dashboard.html', (req, res, next) => {
+app.get('/dashboard.html', redirectAdmins, (req, res, next) => {
   if (!req.session.userId) {
     return res.redirect('/login.html');
   }
@@ -78,6 +90,9 @@ app.use(express.static(join(__dirname, "../public")));
 // Mount auth and profile routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api', profileRoutes);
+
+// Mount admin routes (protected with middleware)
+app.use('/api/admin', adminLimiter, requireAdmin, adminRoutes);
 
 // In-memory session store
 const sessions = new Map();
