@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Learning Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <script src="/js/header.js"></script>
+</head>
+<body>
+    <!-- Global Header -->
+    <header class="chat-header" id="globalHeader">
+        <!-- Logo -->
+        <a href="/admin.html" class="brand">
+            <img
+                src="/assets/imp-logo.jpeg"
+                alt="IMP - Institute of Management Professionals"
+                class="brand-logo"
+            />
+        </a>
+
+        <!-- Title -->
+        <h1 class="admin-header-title">
+            <i class="fas fa-chart-bar"></i>
+            <span data-lang-content="en">Admin Dashboard</span>
+            <span class="hidden" data-lang-content="ar">لوحة المدير</span>
+        </h1>
+
+        <!-- Header Actions -->
+        <div class="header-actions">
+            <!-- Logout Button -->
+            <button id="headerLogoutBtn" class="btn-logout" data-testid="button-admin-logout">
+                <i class="fas fa-sign-out-alt"></i>
+                <span data-lang-content="en">Logout</span>
+                <span class="hidden" data-lang-content="ar">خروج</span>
+            </button>
+
+            <!-- Language Toggle -->
+            <div id="lang-switch"></div>
+        </div>
+    </header>
+
+    <!-- Admin Content -->
+    <main class="admin-container">
+        <!-- Top Controls -->
+        <div class="admin-controls">
+            <button id="refreshBtn" class="refresh-btn" data-testid="button-refresh">
+                <i class="fas fa-sync-alt"></i>
+                <span data-lang-content="en">Refresh Data</span>
+                <span class="hidden" data-lang-content="ar">تحديث البيانات</span>
+            </button>
+        </div>
+
+        <!-- Counters Section -->
+        <section class="counters-section">
+            <div class="counter-card" data-testid="counter-total-users">
+                <div class="counter-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="counter-content">
+                    <div class="counter-label">
+                        <span data-lang-content="en">Total Users</span>
+                        <span class="hidden" data-lang-content="ar">إجمالي المستخدمين</span>
+                    </div>
+                    <div class="counter-value" id="totalUsersValue">-</div>
+                </div>
+            </div>
+
+            <div class="counter-card" data-testid="counter-top-country">
+                <div class="counter-icon">
+                    <i class="fas fa-globe"></i>
+                </div>
+                <div class="counter-content">
+                    <div class="counter-label">
+                        <span data-lang-content="en">Top Country</span>
+                        <span class="hidden" data-lang-content="ar">أعلى دولة</span>
+                    </div>
+                    <div class="counter-value" id="topCountryValue">-</div>
+                    <div class="counter-subtext" id="topCountryCount"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Drilldown Section -->
+        <section class="drilldown-section">
+            <h2 class="section-title">
+                <i class="fas fa-sitemap"></i>
+                <span data-lang-content="en">User Distribution Analysis</span>
+                <span class="hidden" data-lang-content="ar">تحليل توزيع المستخدمين</span>
+            </h2>
+
+            <div class="drilldown-help">
+                <i class="fas fa-info-circle"></i>
+                <span data-lang-content="en">Click on any row to expand and view detailed breakdown</span>
+                <span class="hidden" data-lang-content="ar">انقر على أي صف لتوسيعه ومشاهدة التفاصيل</span>
+            </div>
+
+            <div id="drilldownContainer" class="drilldown-container" data-testid="drilldown-table">
+                <div class="loading-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span data-lang-content="en">Loading data...</span>
+                    <span class="hidden" data-lang-content="ar">جاري تحميل البيانات...</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/admin.js"></script>
+    <script>
+        // Initialize language switch
+        document.addEventListener('DOMContentLoaded', () => {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+        });
+
+        // Logout handler
+        document.getElementById('headerLogoutBtn')?.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/auth/logout', { method: 'POST' });
+                if (resp.ok) {
+                    window.location.href = '/';
+                } else {
+                    alert('Logout failed. Please try again.');
+                }
+            } catch (err) {
+                console.error('Logout error:', err);
+                alert('Logout failed. Please try again.');
+            }
+        });
+    </script>
+</body>
+</html>
