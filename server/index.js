@@ -57,38 +57,6 @@ app.use(session({
 
 app.use(express.json());
 
-// No-cache headers for auth pages (prevent back button showing stale pages)
-function noStoreForAuth(req, res, next) {
-  const isAuthPage = req.path === '/login.html' || 
-                     req.path === '/signup.html' || 
-                     req.path === '/' || 
-                     req.path === '/index.html';
-  if (isAuthPage) {
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    res.set('Surrogate-Control', 'no-store');
-  }
-  next();
-}
-
-// Redirect logged-in users away from public auth pages
-function redirectIfLoggedIn(req, res, next) {
-  const isAuth = !!(req.session && req.session.userId);
-  const isPublicAuthPage = req.path === '/' ||
-                           req.path === '/index.html' ||
-                           req.path === '/login.html' ||
-                           req.path === '/signup.html';
-  if (isAuth && isPublicAuthPage) {
-    return res.redirect(302, '/dashboard.html');
-  }
-  return next();
-}
-
-// Apply middleware in correct order
-app.use(noStoreForAuth);
-app.use(redirectIfLoggedIn);
-
 // Protect /chat.html and /dashboard.html - redirect to login if not authenticated
 app.get('/chat.html', (req, res, next) => {
   if (!req.session.userId) {

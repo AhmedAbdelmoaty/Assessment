@@ -334,46 +334,16 @@
   }
 
   /**
-   * Apply auth visibility based on session state
-   * Uses data-logged-in-only and data-logged-out-only attributes
-   */
-  function applyAuthVisibility(state) {
-    document.querySelectorAll('[data-logged-in-only]').forEach(el => {
-      el.style.display = state.loggedIn ? '' : 'none';
-    });
-    document.querySelectorAll('[data-logged-out-only]').forEach(el => {
-      el.style.display = state.loggedIn ? 'none' : '';
-    });
-  }
-
-  /**
-   * Check session state and apply visibility
-   */
-  async function checkSessionAndApplyVisibility() {
-    try {
-      const response = await fetch('/api/session/state', { credentials: 'include' });
-      const state = await response.json();
-      if (state) {
-        applyAuthVisibility(state);
-      }
-    } catch (error) {
-      console.error('Failed to check session state:', error);
-      // Default to logged out state
-      applyAuthVisibility({ loggedIn: false });
-    }
-  }
-
-  /**
    * Handle logout (for both header and drawer)
    */
   async function handleLogout() {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      window.location.replace('/');
+      window.location.href = '/';
     } catch (error) {
       console.error('Logout failed:', error);
       // Still redirect on error
-      window.location.replace('/');
+      window.location.href = '/';
     }
   }
 
@@ -381,41 +351,13 @@
    * Initialize logout buttons (header and drawer)
    */
   function initLogoutButtons() {
-    // Header logout button (new ID: logoutBtn)
-    const headerLogout = document.getElementById('logoutBtn') || document.getElementById('headerLogoutBtn');
+    // Header logout button
+    const headerLogout = document.getElementById('headerLogoutBtn') || document.getElementById('logoutBtn');
     if (headerLogout) {
       headerLogout.addEventListener('click', handleLogout);
     }
 
     // Drawer logout button (handled in initMobileDrawer)
-  }
-
-  /**
-   * Initialize language toggle button (new structure)
-   */
-  function initLanguageToggle() {
-    const langToggle = document.getElementById('langToggle');
-    if (langToggle) {
-      const currentLang = getCurrentLang();
-      const config = LANG_CONFIG[currentLang];
-      
-      // Update button label to show OTHER language
-      const labelSpan = langToggle.querySelector('.lang-label');
-      if (labelSpan) {
-        labelSpan.textContent = config.otherLabel;
-      }
-      
-      // Add click handler
-      langToggle.addEventListener('click', () => {
-        toggleLanguage();
-        // Update button after toggle
-        const newLang = getCurrentLang();
-        const newConfig = LANG_CONFIG[newLang];
-        if (labelSpan) {
-          labelSpan.textContent = newConfig.otherLabel;
-        }
-      });
-    }
   }
 
   // Export to window
@@ -427,9 +369,6 @@
     toggleLanguage,
     initMobileDrawer,
     initLogoutButtons,
-    initLanguageToggle,
-    checkSessionAndApplyVisibility,
-    applyAuthVisibility,
     handleLogout
   };
 
@@ -439,15 +378,11 @@
       initLanguage();
       initMobileDrawer();
       initLogoutButtons();
-      initLanguageToggle();
-      checkSessionAndApplyVisibility();
     });
   } else {
     initLanguage();
     initMobileDrawer();
     initLogoutButtons();
-    initLanguageToggle();
-    checkSessionAndApplyVisibility();
   }
 
 })(window);

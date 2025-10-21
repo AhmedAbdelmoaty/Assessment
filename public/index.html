@@ -11,44 +11,51 @@
     <link rel="stylesheet" href="styles.css">
     <script src="/js/header.js"></script>
 </head>
-<body class="home-page">
+<body>
     <!-- Global Header -->
-    <header class="app-header">
-      <div class="header-inner">
-        <!-- Logo -->
-        <a class="brand" href="/">
-          <img src="/assets/imp-logo.jpeg" alt="IMP" class="brand-logo">
-        </a>
+    <header class="chat-header" id="globalHeader">
+      <!-- Logo -->
+      <a href="/" class="brand">
+        <img
+          src="/assets/imp-logo.jpeg"
+          alt="IMP - Institute of Management Professionals"
+          class="brand-logo"
+        />
+      </a>
 
-        <!-- Right controls -->
-        <div class="header-actions">
-          <!-- Auth buttons (logged out only) -->
-          <div class="auth-buttons" data-logged-out-only="true">
-            <a class="btn btn-outline" href="/login.html" data-testid="link-login">
-              <span data-lang-content="en">Login</span>
-              <span class="hidden" data-lang-content="ar">دخول</span>
-            </a>
-            <a class="btn btn-primary" href="/signup.html" data-testid="link-signup">
-              <span data-lang-content="en">Sign Up</span>
-              <span class="hidden" data-lang-content="ar">تسجيل</span>
-            </a>
-          </div>
+      <!-- Header Actions Container (aligned to far right) -->
+      <div class="header-actions">
+        <!-- Auth Buttons (shown when logged out, hidden on mobile < 768px) -->
+        <div class="header-auth-buttons" id="authButtonsLoggedOut" style="display: flex; gap: 12px;">
+          <a href="/login.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-login">
+            <span data-lang-content="en">Login</span>
+            <span class="hidden" data-lang-content="ar">دخول</span>
+          </a>
+          <a href="/signup.html" class="auth-link-btn" style="padding: 10px 20px; background: var(--primary); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-signup">
+            <span data-lang-content="en">Sign Up</span>
+            <span class="hidden" data-lang-content="ar">تسجيل</span>
+          </a>
+        </div>
 
-          <!-- User session controls (logged in only) -->
-          <div class="auth-session" data-logged-in-only="true">
-            <button id="logoutBtn" class="btn btn-primary --maroon" data-testid="button-logout">
-              <i class="fas fa-sign-out-alt"></i>
-              <span data-lang-content="en">Logout</span>
-              <span class="hidden" data-lang-content="ar">خروج</span>
-            </button>
-          </div>
-
-          <!-- Language button (always visible) -->
-          <button id="langToggle" class="lang-btn" aria-label="Language switch" data-testid="button-language">
-            <i class="fa-solid fa-language"></i>
-            <span class="lang-label"></span>
+        <!-- User Menu (shown when logged in) -->
+        <div class="header-user-menu" id="userMenuLoggedIn" style="display: none; gap: 12px;">
+          <a href="/dashboard.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-dashboard">
+            <i class="fas fa-th-large"></i>
+            <span data-lang-content="en">Dashboard</span>
+            <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
+          </a>
+          <button id="headerLogoutBtn" class="btn-logout" data-testid="button-logout">
+            <i class="fas fa-sign-out-alt"></i>
+            <span data-lang-content="en">Logout</span>
+            <span class="hidden" data-lang-content="ar">خروج</span>
           </button>
         </div>
+
+        <!-- Divider -->
+        <div class="header-divider"></div>
+
+        <!-- Single Language Toggle -->
+        <div id="lang-switch"></div>
       </div>
     </header>
 
@@ -89,20 +96,46 @@
         </div>
     </section>
 
-    <script src="app.js"></script>
-
-    <!-- Client-side guard: redirect logged-in users immediately -->
     <script>
-      (async () => {
-        try {
-          const r = await fetch('/api/session/state', { credentials: 'include' });
-          const s = await r.json();
-          if (s && s.loggedIn) {
-            // Use replace so Back button won't return here
-            window.location.replace('/dashboard.html');
-          }
-        } catch (e) { /* no-op */ }
-      })();
+        // Initialize language switch
+        document.addEventListener('DOMContentLoaded', () => {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+        });
+
+        // Check authentication state on page load
+        async function checkAuthState() {
+            try {
+                const response = await fetch('/api/me');
+                if (response.ok) {
+                    // User is logged in
+                    document.getElementById('authButtonsLoggedOut').style.display = 'none';
+                    document.getElementById('userMenuLoggedIn').style.display = 'flex';
+                } else {
+                    // User is logged out
+                    document.getElementById('authButtonsLoggedOut').style.display = 'flex';
+                    document.getElementById('userMenuLoggedIn').style.display = 'none';
+                }
+            } catch (error) {
+                // Assume logged out on error
+                document.getElementById('authButtonsLoggedOut').style.display = 'flex';
+                document.getElementById('userMenuLoggedIn').style.display = 'none';
+            }
+        }
+
+        // Handle logout
+        document.getElementById('headerLogoutBtn')?.addEventListener('click', async () => {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.reload();
+            } catch (error) {
+                console.error('Logout failed:', error);
+            }
+        });
+
+        // Check auth on page load
+        checkAuthState();
     </script>
+
+    <script src="app.js"></script>
 </body>
 </html>

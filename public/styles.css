@@ -391,135 +391,6 @@ body {
     transform: translateY(-1px);
 }
 
-/* === NEW: App Header Structure === */
-.app-header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: 20px 24px;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
-}
-
-.app-header .header-inner {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-/* Push right controls fully to the right */
-.app-header .header-actions {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-/* Navigation tabs (Dashboard/Chat) */
-.app-header .page-tabs {
-    display: flex;
-    gap: 8px;
-}
-
-.app-header .page-tabs .tab {
-    padding: 10px 20px;
-    border: none;
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 600;
-    cursor: pointer;
-    border-radius: 8px;
-    transition: background 0.2s;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-}
-
-.app-header .page-tabs .tab.active {
-    background: var(--primary);
-    color: var(--primary-foreground);
-}
-
-.app-header .page-tabs .tab:hover:not(.active) {
-    background: var(--muted);
-}
-
-/* Button styles */
-.btn {
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.btn-outline {
-    border: 1px solid var(--primary);
-    color: var(--primary);
-    background: transparent;
-}
-
-.btn-primary {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    border: none;
-}
-
-/* Maroon logout button */
-.btn.--maroon {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    border-color: var(--primary);
-    border-radius: 999px;
-    box-shadow: 0 3px 10px rgba(165, 32, 37, 0.25);
-}
-
-.btn:hover {
-    filter: brightness(0.95);
-    transform: translateY(-1px);
-}
-
-/* Language button */
-.lang-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: #fff;
-    color: var(--foreground);
-    font-weight: 600;
-    font-size: 15px;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    transition: all 0.15s ease;
-}
-
-.lang-btn:hover {
-    filter: brightness(0.97);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-}
-
-.lang-btn:focus-visible {
-    outline: 3px solid var(--primary-15);
-    outline-offset: 2px;
-}
-
-/* Auth groups visibility (managed by JS) */
-.auth-buttons,
-.auth-session {
-    display: flex;
-    gap: 10px;
-}
-
 /* Header actions container (for Home page) */
 .header-actions {
     margin-left: auto;
@@ -1529,11 +1400,6 @@ html.lang-ar body {
         display: none !important;
     }
     
-    /* NEW: Home page - hide only auth buttons, keep language visible */
-    .home-page .header-actions .auth-buttons {
-        display: none;
-    }
-    
     /* Hero buttons remain visible */
     .landing-section .cta-button {
         display: inline-flex;
@@ -1544,8 +1410,7 @@ html.lang-ar body {
         display: inline-flex;
     }
     
-    .header-nav,
-    .app-header .page-tabs {
+    .header-nav {
         display: none;
     }
     
@@ -1554,14 +1419,8 @@ html.lang-ar body {
         display: none;
     }
     
-    /* NEW: Ensure language button remains visible and right aligned */
-    #langToggle {
-        display: inline-flex;
-    }
-    
     /* Adjust header padding for mobile */
-    .chat-header,
-    .app-header {
+    .chat-header {
         padding: 16px;
     }
     
