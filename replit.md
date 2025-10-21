@@ -6,6 +6,8 @@ This is a bilingual (English/Arabic) learning assessment platform designed to ev
 
 The platform uses an adaptive assessment engine that dynamically adjusts question difficulty based on user performance, covering descriptive statistics topics from foundational concepts to professional-level skills.
 
+**New Feature (October 2025)**: Admin-only interactive data dashboard for user distribution analysis with role-based access control.
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
@@ -67,11 +69,19 @@ Preferred communication style: Simple, everyday language.
 - `assessment`: Progress tracking (level, attempts, evidence array, asked clusters)
 - `report`: Final assessment results (message, strengths, gaps, proficiency level)
 
-**Database Configuration (Future-Ready)**
+**Database Configuration**
 - Drizzle ORM configured with PostgreSQL dialect
-- Schema defined in `shared/schema.ts` with Zod validation
-- Neon serverless PostgreSQL driver ready for integration
-- Migration system in place via drizzle-kit
+- Neon serverless PostgreSQL driver for production
+- Migration system via drizzle-kit (use `npm run db:push --force`)
+- Users table includes role-based access control (user/admin roles)
+
+**Database Schema**
+- `users` table: id, email, username, pass_hash, role, profile_json, created_at, email_verified_at
+- `auth_otps` table: OTP verification for email
+- `user_assessments` table: Assessment progress and results
+- `attempts` table: Historical attempt records
+- `teaching_notes` table: User learning notes
+- `session` table: Express session storage
 
 ### External Dependencies
 
@@ -101,3 +111,54 @@ Preferred communication style: Simple, everyday language.
 - clsx + tailwind-merge: Conditional className composition
 - cmdk: Command palette functionality
 - nanoid: Unique ID generation
+
+## Admin Dashboard
+
+### Overview
+Admin-only interactive data dashboard for analyzing user distribution across demographic and professional categories. Provides real-time insights without exposing individual user PII.
+
+### Features
+- **Role-Based Access**: Only users with `role = 'admin'` can access `/admin.html` and `/api/admin/*` endpoints
+- **Key Metrics**: Total users count and top country by user count
+- **Interactive Drilldown**: 4-level hierarchical analysis (Country → Age Band → Sector → Job Nature)
+- **Client-Side Interaction**: Expand/collapse nodes with keyboard support (Enter/Space/ESC)
+- **Real-Time Refresh**: Reload data without page reload
+- **Bilingual Support**: Full English/Arabic language support with RTL layout
+- **Responsive Design**: Mobile-friendly with breakpoint at 768px
+
+### Security
+- Admin middleware (`server/middleware/admin.js`) validates user role on every request
+- Regular users receive 403 (API) or redirect to `/dashboard.html` (HTML)
+- Admins are redirected from regular user pages to `/admin.html`
+- Protected routes mounted before static file serving (prevents SPA fallback exposure)
+- Rate limiting: 100 requests per 15 minutes for admin endpoints
+- No PII exposed - only aggregated counts displayed
+
+### Data Source
+Dashboard queries `profile_json.intake` fields from the `users` table:
+- `country`: User's country
+- `age_band`: Age range (18-24, 25-34, 35-44, 45-54, 55+)
+- `sector`: Industry sector (Technology, Finance, Healthcare, etc.)
+- `job_nature`: Job function (IT/Data, Accounting/Finance, Marketing, etc.)
+
+### API Endpoints
+- `GET /api/admin/counters`: Returns total users and top country with count
+- `GET /api/admin/drilldown`: Returns flat array of aggregated counts for all combinations
+
+### Files
+- `server/middleware/admin.js`: Role-based access control middleware
+- `server/routes/admin.js`: Admin API endpoints
+- `public/admin.html`: Admin dashboard UI
+- `public/js/admin.js`: Interactive drilldown logic with tree building
+- `public/css/admin.css`: Minimal, responsive, RTL-friendly styling
+
+### Admin User Setup
+To create an admin user:
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'user@example.com';
+```
+
+**Test Admin Account**:
+- Email: admin@example.com
+- Password: admin123
+- Role: admin
