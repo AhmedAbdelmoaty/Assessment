@@ -489,6 +489,8 @@
             ) {
                 addSystemMessage(report.message.trim());
                 addStartTeachingCTA();
+                // Show floating button after report is displayed
+                showFloatingButton();
             }
 
             const strengthsToShow =
@@ -820,10 +822,12 @@ ${mcq.choices
                 });
                 const data = await resp.json();
                 hideTypingIndicator();
-                explainBtn.disabled = false;
 
                 teachingActive = true;
                 currentStep = "teaching";
+
+                // Remove the CTA buttons after starting (can only start once)
+                wrap.remove();
 
                 if (data && data.message) {
                     addSystemMessage(data.message);
@@ -845,33 +849,8 @@ ${mcq.choices
             }
         });
 
-        // Start New Assessment button
-        const newAssessBtn = document.createElement("button");
-        newAssessBtn.className = "teach-cta-btn secondary";
-        newAssessBtn.textContent =
-            currentLang === "ar" ? "ابدأ تقييم جديد" : "Start New Assessment";
-
-        newAssessBtn.addEventListener("click", async () => {
-            // Clear chat UI
-            chatMessages.innerHTML = "";
-            
-            // Reset state (keep session ID to reuse session)
-            currentStep = "assessment";
-            teachingActive = false;
-            
-            // Show starting message
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "هنبدأ تقييم جديد دلوقتي..."
-                    : "Starting a new assessment now..."
-            );
-            
-            // Start assessment directly (no intake needed - already completed)
-            setTimeout(() => startAssessment(), 800);
-        });
-
+        // Only add the "Start Explanation" button (removed "Start New Assessment")
         wrap.appendChild(explainBtn);
-        wrap.appendChild(newAssessBtn);
         content.appendChild(wrap);
     }
 
@@ -935,5 +914,67 @@ ${mcq.choices
         const div = document.createElement("div");
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // ==========================================
+    // Floating New Assessment Button Logic
+    // ==========================================
+    
+    const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
+    
+    function showFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "inline-flex";
+        }
+    }
+    
+    function hideFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "none";
+        }
+    }
+    
+    if (floatingBtn) {
+        floatingBtn.addEventListener("click", async () => {
+            // Confirm action if teaching is active
+            if (teachingActive) {
+                const confirmMsg = currentLang === "ar"
+                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
+                    : "The current explanation will be saved. Start a new assessment?";
+                
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                
+                // Save current teaching before starting new assessment
+                try {
+                    await fetch("/api/teach/save", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sessionId, autoSave: true }),
+                    });
+                } catch (e) {
+                    console.error("Error auto-saving teaching:", e);
+                }
+            }
+            
+            // Clear chat UI
+            chatMessages.innerHTML = "";
+            
+            // Reset state
+            currentStep = "assessment";
+            teachingActive = false;
+            hideFloatingButton();
+            
+            // Show starting message
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "جاري بدء تقييم جديد..."
+                    : "Starting a new assessment..."
+            );
+            
+            // Start new assessment
+            setTimeout(() => startAssessment(), 800);
+        });
     }
 })();
