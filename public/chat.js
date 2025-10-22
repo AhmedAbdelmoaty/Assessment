@@ -53,95 +53,35 @@
 
     async function checkSessionState() {
         try {
-            const response = await fetch("/api/chat/restore-state");
-            if (!response.ok) {
-                console.log("[RESTORE] No saved state, starting fresh");
-                startIntakeFlow();
-                return;
-            }
-            
+            const response = await fetch("/api/session/state");
             const data = await response.json();
-            
-            if (!data.hasState || !data.chatState) {
-                console.log("[RESTORE] No saved state, starting fresh");
-                startIntakeFlow();
-                return;
+
+            if (data.sessionId) {
+                sessionId = data.sessionId;
             }
-            
-            const state = data.chatState;
-            console.log("[RESTORE] Restoring saved chat state", state);
-            
-            // Restore session variables
-            sessionId = state.sessionId || null;
-            currentStep = state.currentStep || "intake";
-            
-            // Restore full assessment progress if available
-            if (state.assessmentProgress) {
-                currentMCQ = state.assessmentProgress.currentMCQ || null;
-            }
-            
-            // Restore full teaching state if available
-            if (state.teachingState) {
-                teachingActive = state.teachingState.active || false;
-                // Additional teaching state can be restored here if needed
-            } else {
-                teachingActive = false;
-            }
-            
-            // Clear and rebuild chat messages
-            chatMessages.innerHTML = "";
-            
-            let hasActiveQuestion = false;
-            
-            if (state.messages && state.messages.length > 0) {
-                state.messages.forEach(msg => {
-                    if (msg.type === "system") {
-                        addSystemMessage(msg.text);
-                    } else if (msg.type === "user") {
-                        addUserMessage(msg.text);
-                    } else if (msg.type === "question") {
-                        if (msg.data) {
-                            displayQuestion(msg.data);
-                            currentMCQ = msg.data;
-                            hasActiveQuestion = true;
-                        }
-                    } else if (msg.type === "report") {
-                        // Rebuild report display
-                        addSystemMessage(msg.text);
-                        if (msg.data) {
-                            addStartTeachingCTA();
-                        }
-                    }
-                });
+
+            // Determine what to display based on session state
+            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
+                // Resume existing session
+                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
+                teachingActive = data.stage === "teaching";
                 
-                // Show resumption message
+                // Show welcome message for resuming
                 addSystemMessage(
                     currentLang === "ar"
-                        ? "تم استعادة المحادثة. دعنا نكمل من حيث توقفنا."
-                        : "Chat restored. Let's continue where we left off."
+                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
+                        : "Welcome back! Let's continue where we left off."
                 );
-            }
-            
-            // Continue based on current step
-            // DON'T call startAssessment() if there's already an active question
-            if (currentStep === "assessment" && !teachingActive && !hasActiveQuestion) {
-                // Only start new assessment if no question is displayed
-                setTimeout(() => startAssessment(), 1000);
-            } else if (currentStep === "teaching" || teachingActive) {
-                // Resume teaching - just wait for user input
-                // Teaching state is already active, user can continue chatting
-                teachingActive = true;
-            } else if (currentStep === "report") {
-                // Report is already displayed, wait for user action
-            } else if (!hasActiveQuestion && currentStep !== "teaching") {
-                // Unknown state or no content, start fresh
+                
+                if (currentStep === "assessment") {
+                    setTimeout(() => startAssessment(), 1000);
+                }
+            } else {
+                // Start new intake flow
                 startIntakeFlow();
             }
-            // If hasActiveQuestion is true, the question is already displayed
-            // and user can interact with it normally
-            
         } catch (error) {
-            console.error("[RESTORE] Error checking session state:", error);
+            console.error("Error checking session state:", error);
             // If error, start fresh intake
             startIntakeFlow();
         }
@@ -549,6 +489,8 @@
             ) {
                 addSystemMessage(report.message.trim());
                 addStartTeachingCTA();
+                // Show floating button after report is displayed
+                showFloatingButton();
             }
 
             const strengthsToShow =
@@ -975,108 +917,54 @@ ${mcq.choices
     }
 
     // ==========================================
-    // Chat State Persistence Helper
-    // ==========================================
-    
-    async function saveChatState() {
-        try {
-            // Collect all chat messages
-            const messages = [];
-            const messageBubbles = chatMessages.querySelectorAll(".message-bubble");
-            
-            messageBubbles.forEach(bubble => {
-                const isUser = bubble.classList.contains("user");
-                const isSystem = bubble.classList.contains("system");
-                const textEl = bubble.querySelector(".message-text, .message-content");
-                
-                if (textEl && textEl.textContent.trim()) {
-                    messages.push({
-                        type: isUser ? "user" : "system",
-                        text: textEl.textContent.trim()
-                    });
-                }
-                
-                // Special handling for questions
-                const questionData = bubble.querySelector("[data-question-id]");
-                if (questionData) {
-                    messages.push({
-                        type: "question",
-                        data: currentMCQ
-                    });
-                }
-            });
-            
-            const stateData = {
-                messages: messages,
-                currentStep: currentStep,
-                assessmentProgress: currentMCQ ? { currentMCQ: currentMCQ } : null,
-                teachingState: teachingActive ? { active: true } : null,
-                sessionId: sessionId
-            };
-            
-            await fetch("/api/chat/save-state", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(stateData)
-            });
-            
-            console.log("[SAVE] Chat state saved successfully");
-        } catch (error) {
-            console.error("[SAVE] Failed to save chat state:", error);
-        }
-    }
-    
-    // Save state before page unload
-    window.addEventListener("beforeunload", () => {
-        saveChatState();
-    });
-    
-    // Auto-save periodically during long sessions (every 30 seconds)
-    setInterval(() => {
-        if (chatMessages.children.length > 0) {
-            saveChatState();
-        }
-    }, 30000);
-
-    // ==========================================
     // Floating New Assessment Button Logic
-    // Always visible, no confirmations, smart behavior
     // ==========================================
     
     const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
     
+    function showFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "inline-flex";
+        }
+    }
+    
+    function hideFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "none";
+        }
+    }
+    
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
-            // Smart behavior based on current state
-            
-            // 1. If teaching is active → save explanation silently
+            // Confirm action if teaching is active
             if (teachingActive) {
+                const confirmMsg = currentLang === "ar"
+                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
+                    : "The current explanation will be saved. Start a new assessment?";
+                
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                
+                // Save current teaching before starting new assessment
                 try {
                     await fetch("/api/teach/save", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ sessionId, autoSave: true }),
                     });
-                    console.log("[NEW-ASSESSMENT] Explanation saved before starting new assessment");
                 } catch (e) {
-                    console.error("[NEW-ASSESSMENT] Failed to save explanation:", e);
+                    console.error("Error auto-saving teaching:", e);
                 }
             }
             
-            // 2. If assessment is ongoing → discard it (not saved)
-            // Assessment only saves when completed, so we just reset
-            
-            // 3. If report is shown but no teaching → just start new assessment
-            
-            // Clear all UI state
+            // Clear chat UI
             chatMessages.innerHTML = "";
             
-            // Reset all state variables
-            currentStep = "intake"; // Start fresh
+            // Reset state
+            currentStep = "assessment";
             teachingActive = false;
-            
-            // Reset progress bar
-            updateProgress(0, false);
+            hideFloatingButton();
             
             // Show starting message
             addSystemMessage(
@@ -1085,32 +973,8 @@ ${mcq.choices
                     : "Starting a new assessment..."
             );
             
-            // Start new assessment with completely fresh state
-            // This will create a new sessionId and threadId
-            setTimeout(async () => {
-                try {
-                    // Request new assessment - backend will create new session/thread
-                    const response = await fetch("/api/assess/next", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId }), // Backend will reset or create new
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.question) {
-                            displayQuestion(data.question);
-                        }
-                    }
-                } catch (error) {
-                    console.error("[NEW-ASSESSMENT] Error starting new assessment:", error);
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "حدث خطأ. يرجى تحديث الصفحة."
-                            : "An error occurred. Please refresh the page."
-                    );
-                }
-            }, 500);
+            // Start new assessment
+            setTimeout(() => startAssessment(), 800);
         });
     }
 })();
