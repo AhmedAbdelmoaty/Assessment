@@ -1143,6 +1143,115 @@ app.post("/api/report", async (req, res) => {
   }
 });
 
+/* ===================================================
+   Teaching Notes Database Helpers (Independent Threads)
+   =================================================== */
+
+// Get or create teaching note for current assessment
+async function getOrCreateTeachingNote(userId, sessionId) {
+  const { db, teachingNotes, attempts } = await import('./db.js');
+  const { eq, desc, and } = await import('drizzle-orm');
+  
+  // Get the most recent completed assessment for this user
+  const latestAttempt = await db
+    .select()
+    .from(attempts)
+    .where(and(
+      eq(attempts.userId, userId),
+      eq(attempts.currentStep, 'completed')
+    ))
+    .orderBy(desc(attempts.finishedAt))
+    .limit(1);
+  
+  if (!latestAttempt || latestAttempt.length === 0) {
+    return null; // No completed assessment found
+  }
+  
+  const assessmentId = latestAttempt[0].id;
+  
+  // Check if there's an in-progress teaching note for this assessment
+  const existingNote = await db
+    .select()
+    .from(teachingNotes)
+    .where(and(
+      eq(teachingNotes.userId, userId),
+      eq(teachingNotes.assessmentId, assessmentId),
+      eq(teachingNotes.inProgress, true)
+    ))
+    .limit(1);
+  
+  if (existingNote && existingNote.length > 0) {
+    // Resume existing teaching
+    return {
+      id: existingNote[0].id,
+      assessmentId: existingNote[0].assessmentId,
+      threadId: existingNote[0].threadId,
+      transcript: existingNote[0].transcript || [],
+      isResume: true
+    };
+  }
+  
+  // Create new teaching note
+  const newNote = await db
+    .insert(teachingNotes)
+    .values({
+      userId: userId,
+      assessmentId: assessmentId,
+      threadId: null, // Will be set when thread is created
+      inProgress: true,
+      topicDisplay: 'Teaching Session',
+      text: '', // Will be updated when saved
+      transcript: []
+    })
+    .returning();
+  
+  return {
+    id: newNote[0].id,
+    assessmentId: assessmentId,
+    threadId: null,
+    transcript: [],
+    isResume: false
+  };
+}
+
+// Update teaching note with threadId and transcript
+async function updateTeachingNote(noteId, data) {
+  const { db, teachingNotes } = await import('./db.js');
+  const { eq } = await import('drizzle-orm');
+  
+  await db
+    .update(teachingNotes)
+    .set(data)
+    .where(eq(teachingNotes.id, noteId));
+}
+
+// Save and finalize teaching note
+async function finalizeTeachingNote(noteId, transcript, lang) {
+  const { db, teachingNotes } = await import('./db.js');
+  const { eq } = await import('drizzle-orm');
+  
+  // Format transcript as text
+  const formattedText = transcript.map((entry, idx) => {
+    const from = entry.from === 'user' ? (lang === 'ar' ? 'المتعلم' : 'Learner') : (lang === 'ar' ? 'المدرّس' : 'Tutor');
+    return `[${from}]: ${entry.text}`;
+  }).join('\n\n');
+  
+  // Generate topic display
+  const topicDisplay = lang === 'ar' 
+    ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
+    : `Explanation ${new Date().toLocaleDateString('en-US')}`;
+  
+  await db
+    .update(teachingNotes)
+    .set({
+      text: formattedText,
+      topicDisplay: topicDisplay,
+      transcript: transcript,
+      inProgress: false
+    })
+    .where(eq(teachingNotes.id, noteId));
+}
+
 /* =========================
    Teaching: start (data-only)
    ========================= */
