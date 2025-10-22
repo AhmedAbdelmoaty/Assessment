@@ -74,10 +74,24 @@
             // Restore session variables
             sessionId = state.sessionId || null;
             currentStep = state.currentStep || "intake";
-            teachingActive = state.teachingState?.active || false;
+            
+            // Restore full assessment progress if available
+            if (state.assessmentProgress) {
+                currentMCQ = state.assessmentProgress.currentMCQ || null;
+            }
+            
+            // Restore full teaching state if available
+            if (state.teachingState) {
+                teachingActive = state.teachingState.active || false;
+                // Additional teaching state can be restored here if needed
+            } else {
+                teachingActive = false;
+            }
             
             // Clear and rebuild chat messages
             chatMessages.innerHTML = "";
+            
+            let hasActiveQuestion = false;
             
             if (state.messages && state.messages.length > 0) {
                 state.messages.forEach(msg => {
@@ -86,7 +100,11 @@
                     } else if (msg.type === "user") {
                         addUserMessage(msg.text);
                     } else if (msg.type === "question") {
-                        displayQuestion(msg.data);
+                        if (msg.data) {
+                            displayQuestion(msg.data);
+                            currentMCQ = msg.data;
+                            hasActiveQuestion = true;
+                        }
                     } else if (msg.type === "report") {
                         // Rebuild report display
                         addSystemMessage(msg.text);
@@ -105,18 +123,22 @@
             }
             
             // Continue based on current step
-            if (currentStep === "assessment" && !teachingActive) {
-                // Resume assessment - fetch next question
+            // DON'T call startAssessment() if there's already an active question
+            if (currentStep === "assessment" && !teachingActive && !hasActiveQuestion) {
+                // Only start new assessment if no question is displayed
                 setTimeout(() => startAssessment(), 1000);
             } else if (currentStep === "teaching" || teachingActive) {
                 // Resume teaching - just wait for user input
+                // Teaching state is already active, user can continue chatting
                 teachingActive = true;
             } else if (currentStep === "report") {
                 // Report is already displayed, wait for user action
-            } else {
-                // Unknown state, start fresh
+            } else if (!hasActiveQuestion && currentStep !== "teaching") {
+                // Unknown state or no content, start fresh
                 startIntakeFlow();
             }
+            // If hasActiveQuestion is true, the question is already displayed
+            // and user can interact with it normally
             
         } catch (error) {
             console.error("[RESTORE] Error checking session state:", error);
@@ -987,7 +1009,7 @@ ${mcq.choices
             const stateData = {
                 messages: messages,
                 currentStep: currentStep,
-                assessmentProgress: null, // Can be extended to save more details
+                assessmentProgress: currentMCQ ? { currentMCQ: currentMCQ } : null,
                 teachingState: teachingActive ? { active: true } : null,
                 sessionId: sessionId
             };
