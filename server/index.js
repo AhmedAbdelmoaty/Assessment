@@ -453,6 +453,17 @@ app.post("/api/intake/next", async (req, res) => {
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
       
+      // Initialize assessment state
+      session.assessment = session.assessment || {
+        currentLevel: "L1",
+        attempts: 0,
+        evidence: [],
+        questionIndexInAttempt: 1,
+        usedClustersCurrentAttempt: [],
+        stemsCurrentAttempt: [],
+        lastAttemptStems: {}
+      };
+      
       // Save intake data to database for logged-in users
       if (req.session.userId) {
         try {
@@ -531,13 +542,114 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
+// Fallback MCQs when OpenAI fails
+function getFallbackMCQ(level, lang) {
+  const fallbacks = {
+    L1: {
+      en: {
+        kind: "question",
+        level: "L1",
+        cluster: "central_tendency_foundations",
+        prompt: "What is the mean of the following dataset: 2, 4, 6, 8, 10?",
+        choices: ["5", "6", "7", "8"],
+        correct_index: 1,
+        difficulty: "easy"
+      },
+      ar: {
+        kind: "question",
+        level: "L1",
+        cluster: "central_tendency_foundations",
+        prompt: "ما هو المتوسط الحسابي للبيانات التالية: 2، 4، 6، 8، 10؟",
+        choices: ["5", "6", "7", "8"],
+        correct_index: 1,
+        difficulty: "easy"
+      }
+    },
+    L2: {
+      en: {
+        kind: "question",
+        level: "L2",
+        cluster: "distribution_analysis",
+        prompt: "Which measure is most affected by outliers in a dataset?",
+        choices: ["Mean", "Median", "Mode", "Range"],
+        correct_index: 0,
+        difficulty: "medium"
+      },
+      ar: {
+        kind: "question",
+        level: "L2",
+        cluster: "distribution_analysis",
+        prompt: "أي من المقاييس التالية يتأثر بشكل أكبر بالقيم المتطرفة في البيانات؟",
+        choices: ["المتوسط الحسابي", "الوسيط", "المنوال", "المدى"],
+        correct_index: 0,
+        difficulty: "medium"
+      }
+    },
+    L3: {
+      en: {
+        kind: "question",
+        level: "L3",
+        cluster: "statistical_inference",
+        prompt: "What is the standard error of the mean used for in statistical analysis?",
+        choices: [
+          "Measuring the spread of individual data points",
+          "Estimating the precision of the sample mean",
+          "Calculating the range of the dataset",
+          "Determining the mode of the distribution"
+        ],
+        correct_index: 1,
+        difficulty: "hard"
+      },
+      ar: {
+        kind: "question",
+        level: "L3",
+        cluster: "statistical_inference",
+        prompt: "ما هو الغرض من الخطأ المعياري للمتوسط في التحليل الإحصائي؟",
+        choices: [
+          "قياس انتشار نقاط البيانات الفردية",
+          "تقدير دقة المتوسط العيني",
+          "حساب المدى للبيانات",
+          "تحديد المنوال للتوزيع"
+        ],
+        correct_index: 1,
+        difficulty: "hard"
+      }
+    }
+  };
+  
+  return fallbacks[level]?.[lang] || fallbacks.L1.en;
+}
+
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
+  const isDev = process.env.NODE_ENV !== 'production';
+  
   try {
-      const { sessionId } = req.body;
+    const { sessionId } = req.body;
     const session = getSession(sessionId);
-    if (session.currentStep !== "assessment") {
-      return res.status(400).json({ error: "Not in assessment phase" });
+    
+    // Dev logging
+    if (isDev) {
+      console.log(`[ASSESS-NEXT] SessionID: ${sessionId}, Step: ${session?.currentStep}, Assessment state:`, {
+        currentLevel: session?.assessment?.currentLevel,
+        attempts: session?.assessment?.attempts,
+        evidenceCount: session?.assessment?.evidence?.length
+      });
+    }
+    
+    // Initialize assessment state if needed
+    if (session.currentStep !== "assessment" || !session.assessment) {
+      if (isDev) console.log(`[ASSESS-NEXT] Initializing assessment state`);
+      session.currentStep = "assessment";
+      session.assessment = {
+        currentLevel: "L1",
+        attempts: 0,
+        evidence: [],
+        questionIndexInAttempt: 1,
+        usedClustersCurrentAttempt: [],
+        stemsCurrentAttempt: [],
+        lastAttemptStems: {}
+      };
     }
 
     const A = session.assessment;
@@ -548,11 +660,11 @@ app.post("/api/assess/next", async (req, res) => {
     }
 
     const profile = {
-      job_nature: session.intake.job_nature || "",
-      experience_years_band: session.intake.experience_years_band || "",
-      job_title_exact: session.intake.job_title_exact || "",
-      sector: session.intake.sector || "",
-      learning_reason: session.intake.learning_reason || "",
+      job_nature: session.intake?.job_nature || "",
+      experience_years_band: session.intake?.experience_years_band || "",
+      job_title_exact: session.intake?.job_title_exact || "",
+      sector: session.intake?.sector || "",
+      learning_reason: session.intake?.learning_reason || "",
     };
 
     const attempt_type = A.attempts === 0 ? "first" : "retry";
@@ -560,30 +672,63 @@ app.post("/api/assess/next", async (req, res) => {
     const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
     const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems[A.currentLevel] || []) : [];
 
-    const systemPrompt = getQuestionPromptSingle({
-      lang: session.lang,
-      level: A.currentLevel,
-      profile,
-      attempt_type,
-      question_index,
-      used_clusters_current_attempt,
-      avoid_stems,
-    });
+    let q = null;
+    let usedFallback = false;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "system", content: systemPrompt }],
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 2048,
-    });
+    // Check if OpenAI API key exists
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('[ASSESS-NEXT] ⚠️  OPENAI_API_KEY not found, using fallback MCQ');
+      q = getFallbackMCQ(A.currentLevel, session.lang || 'en');
+      usedFallback = true;
+    } else {
+      try {
+        const systemPrompt = getQuestionPromptSingle({
+          lang: session.lang,
+          level: A.currentLevel,
+          profile,
+          attempt_type,
+          question_index,
+          used_clusters_current_attempt,
+          avoid_stems,
+        });
 
-    const q = JSON.parse(response.choices[0].message.content);
+        if (isDev) {
+          console.log(`[ASSESS-NEXT] OpenAI prompt (first 200 chars): ${systemPrompt.substring(0, 200)}...`);
+        }
 
-    if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
-      console.error("Invalid question schema from model:", q);
-      return res.status(500).json({ error: "Invalid question format from model" });
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "system", content: systemPrompt }],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+          top_p: 1,
+          max_completion_tokens: 2048,
+        });
+
+        q = JSON.parse(response.choices[0].message.content);
+
+        // Validate schema
+        if (!q || q.kind !== "question" || !Array.isArray(q.choices) || q.choices.length < 3 || 
+            typeof q.correct_index !== "number" || q.correct_index < 0 || q.correct_index >= q.choices.length) {
+          console.error("[ASSESS-NEXT] Invalid question schema from OpenAI:", q);
+          throw new Error("Invalid question schema");
+        }
+
+        if (isDev) {
+          console.log(`[ASSESS-NEXT] ✅ OpenAI success - Level: ${q.level}, Cluster: ${q.cluster}`);
+        }
+
+      } catch (openaiErr) {
+        console.error('[ASSESS-NEXT] ⚠️  OpenAI call failed:', {
+          status: openaiErr?.status || openaiErr?.response?.status,
+          code: openaiErr?.code,
+          message: openaiErr?.message,
+          errorBody: openaiErr?.response?.data
+        });
+        console.log('[ASSESS-NEXT] Using fallback MCQ');
+        q = getFallbackMCQ(A.currentLevel, session.lang || 'en');
+        usedFallback = true;
+      }
     }
 
     const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
@@ -620,12 +765,23 @@ app.post("/api/assess/next", async (req, res) => {
       rationale: "",
       questionNumber: question_index,
       totalQuestions: 2,
+      ...(isDev && usedFallback ? { _dev_fallback: true } : {})
     };
 
     return res.json(mcqPayload);
+    
   } catch (err) {
-    console.error("Assessment next error:", err);
-    res.status(500).json({ error: "Server error during assessment" });
+    console.error("[ASSESS-NEXT] Fatal error:", {
+      message: err?.message,
+      stack: isDev ? err?.stack : undefined
+    });
+    
+    return res.status(500).json({ 
+      error: true,
+      stage: "assess-next",
+      reason: isDev ? err?.message || "Unknown error" : "Server error",
+      detail: isDev ? err?.code || err?.name : undefined
+    });
   }
 });
 
