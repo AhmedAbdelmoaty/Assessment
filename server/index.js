@@ -542,82 +542,169 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
-// Fallback MCQs when OpenAI fails
-function getFallbackMCQ(level, lang) {
+// Fallback MCQs when OpenAI fails (2 questions per level, 3 levels = 6 total)
+function getFallbackMCQ(level, lang, questionIndex) {
   const fallbacks = {
     L1: {
-      en: {
-        kind: "question",
-        level: "L1",
-        cluster: "central_tendency_foundations",
-        prompt: "What is the mean of the following dataset: 2, 4, 6, 8, 10?",
-        choices: ["5", "6", "7", "8"],
-        correct_index: 1,
-        difficulty: "easy"
+      q1: {
+        en: {
+          kind: "question",
+          level: "L1",
+          cluster: "central_tendency_foundations",
+          prompt: "What is the mean of the following dataset: 2, 4, 6, 8, 10?",
+          choices: ["5", "6", "7", "8"],
+          correct_index: 1,
+          difficulty: "easy"
+        },
+        ar: {
+          kind: "question",
+          level: "L1",
+          cluster: "central_tendency_foundations",
+          prompt: "ما هو المتوسط الحسابي للبيانات التالية: 2، 4، 6، 8، 10؟",
+          choices: ["5", "6", "7", "8"],
+          correct_index: 1,
+          difficulty: "easy"
+        }
       },
-      ar: {
-        kind: "question",
-        level: "L1",
-        cluster: "central_tendency_foundations",
-        prompt: "ما هو المتوسط الحسابي للبيانات التالية: 2، 4، 6، 8، 10؟",
-        choices: ["5", "6", "7", "8"],
-        correct_index: 1,
-        difficulty: "easy"
+      q2: {
+        en: {
+          kind: "question",
+          level: "L1",
+          cluster: "central_tendency_foundations",
+          prompt: "In the dataset [3, 7, 7, 10, 13], what is the median?",
+          choices: ["7", "8", "10", "6.5"],
+          correct_index: 0,
+          difficulty: "easy"
+        },
+        ar: {
+          kind: "question",
+          level: "L1",
+          cluster: "central_tendency_foundations",
+          prompt: "في البيانات [3، 7، 7، 10، 13]، ما هو الوسيط؟",
+          choices: ["7", "8", "10", "6.5"],
+          correct_index: 0,
+          difficulty: "easy"
+        }
       }
     },
     L2: {
-      en: {
-        kind: "question",
-        level: "L2",
-        cluster: "distribution_analysis",
-        prompt: "Which measure is most affected by outliers in a dataset?",
-        choices: ["Mean", "Median", "Mode", "Range"],
-        correct_index: 0,
-        difficulty: "medium"
+      q1: {
+        en: {
+          kind: "question",
+          level: "L2",
+          cluster: "distribution_analysis",
+          prompt: "Which measure is most affected by outliers in a dataset?",
+          choices: ["Mean", "Median", "Mode", "Range"],
+          correct_index: 0,
+          difficulty: "medium"
+        },
+        ar: {
+          kind: "question",
+          level: "L2",
+          cluster: "distribution_analysis",
+          prompt: "أي من المقاييس التالية يتأثر بشكل أكبر بالقيم المتطرفة في البيانات؟",
+          choices: ["المتوسط الحسابي", "الوسيط", "المنوال", "المدى"],
+          correct_index: 0,
+          difficulty: "medium"
+        }
       },
-      ar: {
-        kind: "question",
-        level: "L2",
-        cluster: "distribution_analysis",
-        prompt: "أي من المقاييس التالية يتأثر بشكل أكبر بالقيم المتطرفة في البيانات؟",
-        choices: ["المتوسط الحسابي", "الوسيط", "المنوال", "المدى"],
-        correct_index: 0,
-        difficulty: "medium"
+      q2: {
+        en: {
+          kind: "question",
+          level: "L2",
+          cluster: "distribution_analysis",
+          prompt: "What does a standard deviation of zero indicate about a dataset?",
+          choices: [
+            "All values are the same",
+            "The data is normally distributed",
+            "There are no outliers",
+            "The mean equals the median"
+          ],
+          correct_index: 0,
+          difficulty: "medium"
+        },
+        ar: {
+          kind: "question",
+          level: "L2",
+          cluster: "distribution_analysis",
+          prompt: "ماذا يعني الانحراف المعياري الصفري في مجموعة بيانات؟",
+          choices: [
+            "جميع القيم متطابقة",
+            "البيانات موزعة طبيعياً",
+            "لا توجد قيم متطرفة",
+            "المتوسط يساوي الوسيط"
+          ],
+          correct_index: 0,
+          difficulty: "medium"
+        }
       }
     },
     L3: {
-      en: {
-        kind: "question",
-        level: "L3",
-        cluster: "statistical_inference",
-        prompt: "What is the standard error of the mean used for in statistical analysis?",
-        choices: [
-          "Measuring the spread of individual data points",
-          "Estimating the precision of the sample mean",
-          "Calculating the range of the dataset",
-          "Determining the mode of the distribution"
-        ],
-        correct_index: 1,
-        difficulty: "hard"
+      q1: {
+        en: {
+          kind: "question",
+          level: "L3",
+          cluster: "statistical_inference",
+          prompt: "What is the standard error of the mean used for in statistical analysis?",
+          choices: [
+            "Measuring the spread of individual data points",
+            "Estimating the precision of the sample mean",
+            "Calculating the range of the dataset",
+            "Determining the mode of the distribution"
+          ],
+          correct_index: 1,
+          difficulty: "hard"
+        },
+        ar: {
+          kind: "question",
+          level: "L3",
+          cluster: "statistical_inference",
+          prompt: "ما هو الغرض من الخطأ المعياري للمتوسط في التحليل الإحصائي؟",
+          choices: [
+            "قياس انتشار نقاط البيانات الفردية",
+            "تقدير دقة المتوسط العيني",
+            "حساب المدى للبيانات",
+            "تحديد المنوال للتوزيع"
+          ],
+          correct_index: 1,
+          difficulty: "hard"
+        }
       },
-      ar: {
-        kind: "question",
-        level: "L3",
-        cluster: "statistical_inference",
-        prompt: "ما هو الغرض من الخطأ المعياري للمتوسط في التحليل الإحصائي؟",
-        choices: [
-          "قياس انتشار نقاط البيانات الفردية",
-          "تقدير دقة المتوسط العيني",
-          "حساب المدى للبيانات",
-          "تحديد المنوال للتوزيع"
-        ],
-        correct_index: 1,
-        difficulty: "hard"
+      q2: {
+        en: {
+          kind: "question",
+          level: "L3",
+          cluster: "statistical_inference",
+          prompt: "In hypothesis testing, what does a p-value less than 0.05 typically indicate?",
+          choices: [
+            "The null hypothesis is proven true",
+            "There is strong evidence against the null hypothesis",
+            "The sample size is too small",
+            "The data follows a normal distribution"
+          ],
+          correct_index: 1,
+          difficulty: "hard"
+        },
+        ar: {
+          kind: "question",
+          level: "L3",
+          cluster: "statistical_inference",
+          prompt: "في اختبار الفرضيات، ماذا تعني قيمة p أقل من 0.05 عادةً؟",
+          choices: [
+            "تم إثبات صحة الفرضية الصفرية",
+            "هناك دليل قوي ضد الفرضية الصفرية",
+            "حجم العينة صغير جداً",
+            "البيانات تتبع التوزيع الطبيعي"
+          ],
+          correct_index: 1,
+          difficulty: "hard"
+        }
       }
     }
   };
   
-  return fallbacks[level]?.[lang] || fallbacks.L1.en;
+  const qKey = questionIndex === 1 ? 'q1' : 'q2';
+  return fallbacks[level]?.[qKey]?.[lang] || fallbacks.L1.q1.en;
 }
 
 // -------- Assessment: get ONE MCQ --------
@@ -678,7 +765,7 @@ app.post("/api/assess/next", async (req, res) => {
     // Check if OpenAI API key exists
     if (!process.env.OPENAI_API_KEY) {
       console.warn('[ASSESS-NEXT] ⚠️  OPENAI_API_KEY not found, using fallback MCQ');
-      q = getFallbackMCQ(A.currentLevel, session.lang || 'en');
+      q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
       usedFallback = true;
     } else {
       try {
@@ -726,7 +813,7 @@ app.post("/api/assess/next", async (req, res) => {
           errorBody: openaiErr?.response?.data
         });
         console.log('[ASSESS-NEXT] Using fallback MCQ');
-        q = getFallbackMCQ(A.currentLevel, session.lang || 'en');
+        q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
         usedFallback = true;
       }
     }
