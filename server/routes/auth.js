@@ -285,24 +285,9 @@ router.get('/session/state', async (req, res) => {
       stage = 'intake-pending';
     }
 
-    // Check for assessment in progress
-    const { userAssessments } = await import('../db.js');
-    const inProgressAssessments = await db
-      .select()
-      .from(userAssessments)
-      .where(
-        and(
-          eq(userAssessments.userId, userId),
-          isNull(userAssessments.finishedAt)
-        )
-      )
-      .limit(1);
-
-    if (inProgressAssessments.length > 0) {
-      stage = 'assessment-in-progress';
-    } else if (stage === 'idle' && !profile.hasStartedAssessment) {
-      stage = 'assessment-cta';
-    }
+    // Note: We don't check for in-progress assessments because incomplete assessments 
+    // are never saved to DB. Assessments only persist when completed.
+    // If user exits mid-assessment, they restart from the beginning on return.
 
     res.json({
       loggedIn: true,

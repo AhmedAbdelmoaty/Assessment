@@ -398,8 +398,8 @@ app.post("/api/intake/next", async (req, res) => {
     const session = getSession(sessionId);
     session.lang = lang;
 
-    // Auto-populate name/email/phone for logged-in users
-    if (req.session.userId && session.intakeStepIndex === 0 && !session.authDataLoaded) {
+    // Check if logged-in user has already completed intake - skip it entirely
+    if (req.session.userId && session.intakeStepIndex === 0 && !session.intakeChecked) {
       try {
         const { db, users } = await import('./db.js');
         const { eq } = await import('drizzle-orm');
@@ -407,11 +407,30 @@ app.post("/api/intake/next", async (req, res) => {
         
         if (user) {
           const profile = user.profileJson || {};
+          
+          // If intake already completed, skip to assessment
+          if (profile.intakeCompleted && profile.intake) {
+            session.intake = { ...profile.intake };
+            session.intakeStepIndex = INTAKE_ORDER.length; // Mark as completed
+            session.currentStep = "assessment";
+            session.intakeChecked = true;
+            
+            return res.json({
+              done: true,
+              skipIntake: true,
+              message:
+                lang === "ar"
+                  ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
+                  : "Welcome back! We'll start the assessment directly.",
+            });
+          }
+          
+          // Otherwise auto-populate basic info
           session.intake.name_full = profile.name || user.username;
           session.intake.email = user.email;
           session.intake.phone_number = profile.phone || '';
           session.intakeStepIndex = 3; // Skip to country (index 3)
-          session.authDataLoaded = true;
+          session.intakeChecked = true;
         }
       } catch (err) {
         console.error('Failed to load user data:', err);
@@ -439,8 +458,23 @@ app.post("/api/intake/next", async (req, res) => {
         try {
           const { db, users } = await import('./db.js');
           const { eq } = await import('drizzle-orm');
+          
+          // Get existing profile to preserve other data
+          const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
+          const existingProfile = user?.profileJson || {};
+          
+          // Save intake under profileJson.intake
           await db.update(users).set({ 
-            profileJson: { ...session.intake, intakeCompleted: true, intakeCompletedAt: new Date().toISOString() }
+            profileJson: {
+              ...existingProfile,
+              name: session.intake.name_full,
+              phone: session.intake.phone_number,
+              intake: {
+                ...session.intake
+              },
+              intakeCompleted: true,
+              intakeCompletedAt: new Date().toISOString()
+            }
           }).where(eq(users.id, req.session.userId));
           console.log(`[INTAKE] Saved intake data for user ${req.session.userId}`);
         } catch (err) {
@@ -507,6 +541,11 @@ app.post("/api/assess/next", async (req, res) => {
     }
 
     const A = session.assessment;
+    
+    // Track assessment start time (only on first question of first level)
+    if (!A.startedAt && A.currentLevel === "L1" && A.attempts === 0 && A.evidence.length === 0) {
+      A.startedAt = new Date();
+    }
 
     const profile = {
       job_nature: session.intake.job_nature || "",
@@ -695,6 +734,35 @@ app.post("/api/report", async (req, res) => {
     const strengths_display = strengths.map(c => humanizeCluster(c, lang));
     const gaps_display = gaps.map(c => humanizeCluster(c, lang));
 
+    // Calculate score using 6-question rule:
+    // - Each level (L1, L2, L3) = 2 questions
+    // - If retry, only count latest 2 questions for that level
+    // - Levels not reached = 2 incorrect
+    function calculateScore(evidence, highestReached) {
+      const levels = ['L1', 'L2', 'L3'];
+      let correctCount = 0;
+      
+      for (const level of levels) {
+        const levelEvidence = evidence.filter(e => e.level === level);
+        
+        if (levelEvidence.length === 0) {
+          // Level not reached = 2 incorrect (add 0 to correctCount)
+          continue;
+        }
+        
+        // Only count the latest 2 questions for this level (handles retries)
+        const latest2 = levelEvidence.slice(-2);
+        correctCount += latest2.filter(e => e.correct).length;
+      }
+      
+      // Total is always out of 6 (2 questions × 3 levels)
+      const scorePercent = Math.round((correctCount / 6) * 100);
+      return { correctCount, totalQuestions: 6, scorePercent };
+    }
+    
+    const { correctCount, totalQuestions, scorePercent } = calculateScore(evidence, highestReached);
+    
+    // Keep legacy counts for display purposes
     const total_questions = evidence.length;
     const total_correct = evidence.filter(e => e.correct).length;
     const summary_counts = {
@@ -786,22 +854,26 @@ app.post("/api/report", async (req, res) => {
     session.finished = true;
     session.currentStep = "report";
 
-    // Save assessment results to database for logged-in users
+    // Save assessment results to database for logged-in users (only completed assessments)
     if (req.session.userId) {
       try {
         const { db, userAssessments } = await import('./db.js');
+        
+        // Use tracked start time or current time as fallback
+        const startedAt = session.assessment?.startedAt || new Date();
+        
         await db.insert(userAssessments).values({
           userId: req.session.userId,
-          startedAt: new Date(),
+          startedAt: startedAt,
           finishedAt: new Date(),
-          totalQuestions: total_questions,
-          correctAnswers: total_correct,
-          scorePercent: total_questions > 0 ? Math.round((total_correct / total_questions) * 100) : 0,
+          totalQuestions: totalQuestions, // Always 6
+          correctAnswers: correctCount, // Out of 6, with retry handling
+          scorePercent: scorePercent, // Using 6-question rule
           currentLevel: highestReached,
           assessmentState: { evidence, strengths, gaps },
           reportData: report
         });
-        console.log(`[REPORT] Saved assessment results for user ${req.session.userId}`);
+        console.log(`[REPORT] Saved assessment (score: ${correctCount}/6 = ${scorePercent}%) for user ${req.session.userId}`);
       } catch (err) {
         console.error('[REPORT] Failed to save assessment to database:', err);
       }
@@ -1106,6 +1178,89 @@ app.post("/api/teach/message", async (req, res) => {
   } catch (err) {
     console.error("/api/teach/message error:", err?.message || err, err?.stack);
     return res.status(500).json({ error: true, message: "Teaching message failed." });
+  }
+});
+
+/* =================================
+   Teaching: save transcript to database
+   ================================= */
+app.post("/api/teach/save", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = getSession(sessionId);
+    const teaching = ensureTeachingState(session);
+    const lang = session.lang || "en";
+
+    // Must be logged in to save
+    if (!req.session.userId) {
+      return res.status(401).json({
+        error: true,
+        message: lang === "ar" ? "يجب تسجيل الدخول لحفظ الشرح" : "Must be logged in to save explanation"
+      });
+    }
+
+    // Must have a transcript to save
+    if (!Array.isArray(teaching.transcript) || teaching.transcript.length === 0) {
+      return res.status(400).json({
+        error: true,
+        message: lang === "ar" ? "لا يوجد محتوى للحفظ" : "No content to save"
+      });
+    }
+
+    // Format transcript as readable text
+    const transcriptText = teaching.transcript
+      .map(entry => {
+        const label = entry.from === "user" 
+          ? (lang === "ar" ? "أنا" : "Me") 
+          : (lang === "ar" ? "المعلم" : "Tutor");
+        return `${label}: ${entry.text}`;
+      })
+      .join("\n\n");
+
+    // Count existing explanations for this user to generate title
+    const { db, teachingNotes } = await import('./db.js');
+    const { eq, count } = await import('drizzle-orm');
+    
+    const countResult = await db
+      .select({ count: count() })
+      .from(teachingNotes)
+      .where(eq(teachingNotes.userId, req.session.userId));
+    
+    const explanationNumber = (countResult[0]?.count || 0) + 1;
+    const title = lang === "ar" 
+      ? `الشرح ${explanationNumber}` 
+      : `Explanation ${explanationNumber}`;
+
+    // Save to database
+    await db.insert(teachingNotes).values({
+      userId: req.session.userId,
+      topicDisplay: title,
+      text: transcriptText,
+    });
+
+    // Clear the transcript and reset teaching state
+    teaching.transcript = [];
+    teaching.mode = "idle";
+    teaching.current_topic_index = 0;
+
+    console.log(`[TEACH] Saved explanation "${title}" for user ${req.session.userId}`);
+
+    return res.json({
+      ok: true,
+      message: lang === "ar" 
+        ? `تم حفظ "${title}" بنجاح!` 
+        : `"${title}" saved successfully!`,
+      title
+    });
+
+  } catch (err) {
+    console.error("/api/teach/save error:", err);
+    return res.status(500).json({
+      error: true,
+      message: (req.body.lang || "en") === "ar" 
+        ? "فشل حفظ الشرح" 
+        : "Failed to save explanation"
+    });
   }
 });
 
