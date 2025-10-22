@@ -1599,3 +1599,83 @@ html.lang-ar body {
   .form-row { grid-template-columns: 1fr; gap: 12px; }
   :root { --form-h: 46px; }
 }
+
+/* ==========================================
+   Floating New Assessment Button
+   ========================================== */
+.floating-new-assessment-btn {
+  position: fixed;
+  top: 80px; /* Below header */
+  right: 24px;
+  z-index: 900;
+  
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 9999px; /* Pill shape */
+  
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+  
+  box-shadow: 0 4px 12px rgba(165, 32, 37, 0.25);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.floating-new-assessment-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(165, 32, 37, 0.35);
+  filter: brightness(0.95);
+}
+
+.floating-new-assessment-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(165, 32, 37, 0.2);
+}
+
+.floating-new-assessment-btn i {
+  font-size: 13px;
+}
+
+/* RTL adjustments */
+[dir="rtl"] .floating-new-assessment-btn {
+  right: auto;
+  left: 24px;
+}
+
+/* Mobile: Compact pill design */
+@media (max-width: 768px) {
+  .floating-new-assessment-btn {
+    top: 70px;
+    right: 16px;
+    padding: 8px 16px;
+    font-size: 13px;
+    max-width: 140px;
+    box-shadow: 0 3px 10px rgba(165, 32, 37, 0.2);
+  }
+  
+  [dir="rtl"] .floating-new-assessment-btn {
+    right: auto;
+    left: 16px;
+  }
+}
+
+/* Extra small mobile */
+@media (max-width: 480px) {
+  .floating-new-assessment-btn {
+    padding: 7px 14px;
+    font-size: 12px;
+    gap: 6px;
+  }
+  
+  .floating-new-assessment-btn i {
+    font-size: 11px;
+  }
+}

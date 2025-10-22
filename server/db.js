@@ -70,12 +70,16 @@ export const attempts = pgTable('attempts', {
   reportData: jsonb('report_data')
 });
 
-// Teaching notes table (existing)
+// Teaching notes table (enhanced for independent threads)
 export const teachingNotes = pgTable('teaching_notes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
-  topicDisplay: text('topic_display'),
-  text: text('text').notNull(),
+  assessmentId: uuid('assessment_id').references(() => attempts.id), // Links to specific assessment
+  threadId: text('thread_id'), // OpenAI thread ID for this explanation
+  inProgress: boolean('in_progress').default(false).notNull(), // Is this teaching session active?
+  topicDisplay: text('topic_display').notNull(),
+  text: text('text').notNull(), // Formatted transcript for display
+  transcript: jsonb('transcript'), // Raw conversation array: [{from: 'user'|'assistant', text: '...'}]
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
