@@ -120,10 +120,14 @@ router.get('/me/assessments', requireAuth, async (req, res) => {
     const formattedAssessments = assessments.map(a => ({
       id: a.id,
       startedAt: a.startedAt,
-      completedAt: a.completedAt,
-      difficulty: a.difficulty,
+      finishedAt: a.finishedAt,
+      completedAt: a.finishedAt, // Alias for backward compatibility
+      difficulty: a.difficultyTier || a.difficulty,
       scorePercent: a.scorePercent || 0,
-      status: a.completedAt ? 'complete' : 'in-progress'
+      totalQuestions: a.totalQuestions || 0,
+      correctAnswers: a.correctAnswers || 0,
+      currentLevel: a.currentLevel,
+      status: a.finishedAt ? 'complete' : 'in-progress'
     }));
 
     res.json(formattedAssessments);

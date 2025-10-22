@@ -42,8 +42,19 @@ export const authOtps = pgTable('auth_otps', {
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
-// User assessments table (existing)
+// User assessments table - simple structure for quick saves
 export const userAssessments = pgTable('user_assessments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+  difficulty: text('difficulty'),
+  scorePercent: integer('score_percent'),
+  evidence: jsonb('evidence')
+});
+
+// Attempts table - full assessment structure with all details
+export const attempts = pgTable('attempts', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
@@ -57,17 +68,6 @@ export const userAssessments = pgTable('user_assessments', {
   intakeStepIndex: integer('intake_step_index'),
   assessmentState: jsonb('assessment_state'),
   reportData: jsonb('report_data')
-});
-
-// Attempts table (existing)
-export const attempts = pgTable('attempts', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  startedAt: timestamp('started_at').defaultNow().notNull(),
-  completedAt: timestamp('completed_at'),
-  difficulty: text('difficulty'),
-  scorePercent: integer('score_percent'),
-  evidence: jsonb('evidence')
 });
 
 // Teaching notes table (existing)

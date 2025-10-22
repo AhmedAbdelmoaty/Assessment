@@ -1,0 +1,111 @@
+Fix the chat crash shown in console: error: column "completed_at" does not exist (appears while starting assessment).
+
+Finish Tasks 7 & 8: update the user and admin dashboards’ frontend to render the persisted, real data (intake, assessments, explanations).
+
+Proactively audit & reconcile schema ↔ code ↔ queries so no more column/key mismatches (not just the one error I saw). If you find inconsistencies, fix them end-to-end.
+
+What to inspect and reconcile
+
+Source of truth for tables is server/db.js (Drizzle table defs). Compare them with the actual Neon schema.
+
+Tables to verify in detail: users, auth_otps, attempts, user_assessments, teaching_notes, session.
+
+Typical snake_case column names that must exist:
+
+attempts: id, user_id, started_at, completed_at (nullable), difficulty, score_percent, evidence.
+
+user_assessments: id, user_id, started_at, finished_at (nullable), difficulty_tier, total_questions, correct_answers, score_percent, current_level, current_step, intake_step_index, assessment_state, report_data.
+
+teaching_notes: id, user_id, topic_display, text, created_at.
+
+session: sid, sess, expire.
+
+Ensure field names used in queries/serializers match the actual columns: watch for completed_at vs finished_at, and JSON paths like users.profileJson.intake.
+
+DB migration & verification (must do)
+
+Introspect current schema and print it in the console:
+
+SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('attempts','user_assessments','teaching_notes','session') ORDER BY table_name, ordinal_position;
+
+Create safe ALTER TABLE statements (no data loss) to add any missing columns (e.g., completed_at), adjust types, add defaults if needed. Apply them.
+
+Re-run the introspection query and paste results in the log so I can see the final schema.
+
+Backend hardening
+
+Recheck endpoints involved in chat start/assessment/resume and dashboards:
+
+/api/intake/next, /api/assess/next, /api/assess/answer, /api/report, /api/teach/save
+
+/api/me, /api/me/assessments, /api/me/explanations
+
+/api/admin/users/raw, /api/admin/summary
+
+Make sure they never reference non-existent columns. Add defensive guards where nullable fields may be NULL. Log structured errors (tag each with route name).
+
+Confirm the 6-question scoring rule (2 per level; only latest retry counts; incomplete assessments are not saved) is persisted into user_assessments.score_percent or attempts.score_percent as used by dashboards.
+
+Frontend (Tasks 7 & 8)
+
+Update user dashboard to read:
+
+Profile/Intake from users.profileJson.intake (country, age_band, sector, job_nature, experience_years_band, learning_reason).
+
+Last completed assessment (score %, started_at, finished_at).
+
+Explanations list as “Explanation 1/2/3...” from teaching_notes (show created_at in list; open to view full text).
+
+Update admin dashboard to read live data (no placeholders):
+
+Total users (count).
+
+Pivot-like distribution widgets sourced directly from intake fields (country, sector, job_nature, age_band, experience_years_band, learning_reason) with filters.
+
+User table: name/email/username + intake columns (if set).
+
+Make sure dashboards gracefully render when intake is empty (new users).
+
+Session & chat flow sanity
+
+With a verified user who already completed intake:
+
+Opening chat must start assessment immediately (no “start assessment” button).
+
+If user left mid-assessment earlier, they restart from the beginning (per our rule).
+
+Incomplete assessments are not saved; completed ones are saved and visible on dashboards.
+
+Teaching transcripts are only saved when explicitly posted to /api/teach/save. Otherwise they’re discarded on exit.
+
+Acceptance tests (run and show evidence)
+
+Log in as a normal user who has completed intake. Open /chat.html.
+
+No server error; first MCQ appears.
+
+Finish a full assessment → score persisted.
+
+Open /dashboard.html (user): score shows; intake shows; explanations list is empty (until saved).
+
+Start an explanation, then save it via the UI (calls /api/teach/save) → entry appears as “Explanation N” in user dashboard’s explanations.
+
+Open /admin.html: counts and distributions reflect the same real data (country/sector/etc.).
+
+Reload chat mid-assessment to confirm it restarts from the beginning (and incomplete data is not saved).
+
+Deliverables
+
+The SQL/alter steps you executed (or migration file) + final schema printout.
+
+Notes of any code files updated and why.
+
+Short confirmation that the above four acceptance tests passed (with brief logs/screengrabs).
+
+Constraints
+
+Don’t remove any existing data.
+
+Keep role-based access intact (admins only see admin pages, users can’t access them).
+
+Prefer minimal UI changes—just wire to real data and fix the crash.

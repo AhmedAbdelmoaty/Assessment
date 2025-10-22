@@ -857,19 +857,22 @@ app.post("/api/report", async (req, res) => {
     // Save assessment results to database for logged-in users (only completed assessments)
     if (req.session.userId) {
       try {
-        const { db, userAssessments } = await import('./db.js');
+        const { db, attempts } = await import('./db.js');
         
         // Use tracked start time or current time as fallback
         const startedAt = session.assessment?.startedAt || new Date();
         
-        await db.insert(userAssessments).values({
+        await db.insert(attempts).values({
           userId: req.session.userId,
           startedAt: startedAt,
           finishedAt: new Date(),
+          difficultyTier: 'adaptive',
           totalQuestions: totalQuestions, // Always 6
           correctAnswers: correctCount, // Out of 6, with retry handling
           scorePercent: scorePercent, // Using 6-question rule
           currentLevel: highestReached,
+          currentStep: 'completed',
+          intakeStepIndex: null,
           assessmentState: { evidence, strengths, gaps },
           reportData: report
         });
