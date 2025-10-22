@@ -489,8 +489,6 @@
             ) {
                 addSystemMessage(report.message.trim());
                 addStartTeachingCTA();
-                // Show floating button after report is displayed
-                showFloatingButton();
             }
 
             const strengthsToShow =
@@ -918,53 +916,43 @@ ${mcq.choices
 
     // ==========================================
     // Floating New Assessment Button Logic
+    // Always visible, no confirmations, smart behavior
     // ==========================================
     
     const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
     
-    function showFloatingButton() {
-        if (floatingBtn) {
-            floatingBtn.style.display = "inline-flex";
-        }
-    }
-    
-    function hideFloatingButton() {
-        if (floatingBtn) {
-            floatingBtn.style.display = "none";
-        }
-    }
-    
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
-            // Confirm action if teaching is active
+            // Smart behavior based on current state
+            
+            // 1. If teaching is active → save explanation silently
             if (teachingActive) {
-                const confirmMsg = currentLang === "ar"
-                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
-                    : "The current explanation will be saved. Start a new assessment?";
-                
-                if (!confirm(confirmMsg)) {
-                    return;
-                }
-                
-                // Save current teaching before starting new assessment
                 try {
                     await fetch("/api/teach/save", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ sessionId, autoSave: true }),
                     });
+                    console.log("[NEW-ASSESSMENT] Explanation saved before starting new assessment");
                 } catch (e) {
-                    console.error("Error auto-saving teaching:", e);
+                    console.error("[NEW-ASSESSMENT] Failed to save explanation:", e);
                 }
             }
             
-            // Clear chat UI
+            // 2. If assessment is ongoing → discard it (not saved)
+            // Assessment only saves when completed, so we just reset
+            
+            // 3. If report is shown but no teaching → just start new assessment
+            
+            // Clear all UI state
             chatMessages.innerHTML = "";
             
-            // Reset state
-            currentStep = "assessment";
+            // Reset all state variables
+            currentStep = "intake"; // Start fresh
             teachingActive = false;
-            hideFloatingButton();
+            
+            // Reset progress bar
+            updateProgress(0, false);
             
             // Show starting message
             addSystemMessage(
@@ -973,8 +961,32 @@ ${mcq.choices
                     : "Starting a new assessment..."
             );
             
-            // Start new assessment
-            setTimeout(() => startAssessment(), 800);
+            // Start new assessment with completely fresh state
+            // This will create a new sessionId and threadId
+            setTimeout(async () => {
+                try {
+                    // Request new assessment - backend will create new session/thread
+                    const response = await fetch("/api/assess/next", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sessionId }), // Backend will reset or create new
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.question) {
+                            displayQuestion(data.question);
+                        }
+                    }
+                } catch (error) {
+                    console.error("[NEW-ASSESSMENT] Error starting new assessment:", error);
+                    addSystemMessage(
+                        currentLang === "ar"
+                            ? "حدث خطأ. يرجى تحديث الصفحة."
+                            : "An error occurred. Please refresh the page."
+                    );
+                }
+            }, 500);
         });
     }
 })();

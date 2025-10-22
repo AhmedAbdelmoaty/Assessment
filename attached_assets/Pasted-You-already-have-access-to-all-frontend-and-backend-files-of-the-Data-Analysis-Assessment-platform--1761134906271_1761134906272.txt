@@ -1,0 +1,82 @@
+You already have access to all frontend and backend files of the Data Analysis Assessment platform.
+Please carefully apply the following behavior updates without breaking any existing flow, data saving, or logic.
+
+🎯 Goal
+
+Fix and refine session persistence and chat control behavior so that the user experience is seamless, resilient, and fully isolated between assessments.
+
+✅ Required Behavior
+1. Floating New Assessment Button
+
+Always visible from the very start of the chat (not only after completing the assessment).
+
+Positioned just below the header, not overlapping it — visible and styled like a small maroon pill with a light shadow (works on both desktop and mobile).
+
+No confirmation dialogs — when clicked, it immediately starts a completely new chat.
+
+Behavior by state:
+
+If clicked during an ongoing assessment → stop current assessment, discard it (not saved), and start a new one.
+
+If clicked during an ongoing explanation → save current explanation as a completed “teaching_note”, then start a new assessment.
+
+If clicked after finishing a report (but before starting an explanation) → just start a new assessment (nothing to save).
+
+Each time it’s clicked:
+
+The chat clears completely.
+
+A new independent threadId is created.
+
+No memory or context from previous assessments carries over.
+
+2. Session Persistence
+
+Ensure the chat state (messages, progress, threadId) is fully persistent across reloads, logouts, or disconnections.
+
+If the user leaves during assessment →
+When they return, they must see the exact same chat with all previous messages, continuing from the last question (not restarted, not blank).
+Assessment only saves to DB when finished.
+
+If the user leaves during explanation →
+When they return, they must see the same conversation, continuing exactly from the last message.
+The explanation is not saved to dashboard yet — only resumes in-memory until the user starts a new assessment.
+
+Nothing should be deleted or lost on reload —
+the chat must always resume exactly where it was left.
+
+3. Isolation Between Chats
+
+Each assessment and explanation must use a unique threadId.
+
+New assessments must not recall or reference anything from previous ones (e.g., “we explained this before”).
+
+Pressing New Assessment wipes all previous state and starts a completely clean thread.
+
+4. Safety & Validation
+
+Before pushing changes:
+
+Verify all current data-saving flows (intake, assessment, explanations) remain intact.
+
+Ensure no crashes, duplicate saves, or context leaks between threads.
+
+Test all cases:
+
+New user → intake → assessment → report → explanation → new assessment.
+
+Return mid-assessment → resume properly.
+
+Return mid-explanation → resume properly.
+
+Start new assessment anytime → clean, isolated thread.
+
+✅ Expected Outcome
+
+The floating New Assessment button works at all times and starts clean sessions instantly.
+
+The chat state is always preserved on reload or reconnect.
+
+Each conversation is independent and safely saved.
+
+No confirmations, no broken flows, no lost data.
