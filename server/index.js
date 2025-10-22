@@ -143,9 +143,7 @@ function pushTranscript(session, item) {
     from: item.from, // "user" | "tutor"
     text: String(item.text || "").slice(0, 4000)
   });
-  if (session.teaching.transcript.length > 8) {
-    session.teaching.transcript = session.teaching.transcript.slice(-8);
-  }
+  // Full transcript is now preserved for database persistence and thread resumption
 }
 
 // محتفظين بيها كما هي (حتى لو مش مستخدمة حاليًا) لضمان عدم كسر أي تكامل لاحق
@@ -1332,14 +1330,48 @@ app.post("/api/teach/start", async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
+    // Database persistence for logged-in users
+    if (req.session.userId) {
+      try {
+        const noteData = await getOrCreateTeachingNote(req.session.userId, sessionId);
+        if (noteData) {
+          teaching.dbNoteId = noteData.id;
+          teaching.dbAssessmentId = noteData.assessmentId;
+          
+          // If resuming, load the existing threadId and transcript
+          if (noteData.isResume && noteData.threadId) {
+            teaching.assistant = teaching.assistant || {};
+            teaching.assistant.threadId = noteData.threadId;
+            teaching.transcript = noteData.transcript || [];
+            logTeach("teaching.resume", { noteId: noteData.id, threadId: noteData.threadId, transcriptLen: teaching.transcript.length });
+          } else {
+            logTeach("teaching.new", { noteId: noteData.id, assessmentId: noteData.assessmentId });
+          }
+        }
+      } catch (dbErr) {
+        console.error("[TEACH-START] Database error:", dbErr);
+        // Continue without DB persistence
+      }
+    }
+
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // إنشاء Thread مرة واحدة
+      // إنشاء Thread مرة واحدة (or use existing from DB)
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
         const threadId = createdThread?.id;
         if (!threadId) throw new Error("Failed to create thread");
         teaching.assistant.threadId = threadId;
         logTeach("thread.created", { threadId });
+        
+        // Save threadId to database for logged-in users
+        if (req.session.userId && teaching.dbNoteId) {
+          try {
+            await updateTeachingNote(teaching.dbNoteId, { threadId: threadId });
+            logTeach("thread.saved_to_db", { noteId: teaching.dbNoteId, threadId });
+          } catch (dbErr) {
+            console.error("[TEACH-START] Failed to save threadId:", dbErr);
+          }
+        }
       }
       const threadId = teaching.assistant.threadId;
 
@@ -1490,6 +1522,16 @@ app.post("/api/teach/message", async (req, res) => {
         const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (reply) {
           try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+          
+          // Save transcript to database for logged-in users
+          if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
+            try {
+              await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
+            } catch (dbErr) {
+              console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
+            }
+          }
+          
           return res.json({ message: reply });
         }
       }
@@ -1498,6 +1540,16 @@ app.post("/api/teach/message", async (req, res) => {
         ? "تمام، خلّيني أوضّحها خطوة خطوة."
         : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
+      
+      // Save transcript to database for logged-in users
+      if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
+        try {
+          await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
+        } catch (dbErr) {
+          console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
+        }
+      }
+      
       return res.json({ message: fb });
     }
 
@@ -1528,6 +1580,16 @@ app.post("/api/teach/message", async (req, res) => {
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+    
+    // Save transcript to database for logged-in users
+    if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
+      try {
+        await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
+      } catch (dbErr) {
+        console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
+      }
+    }
+    
     return res.json({ message: reply });
 
   } catch (err) {
@@ -1541,7 +1603,7 @@ app.post("/api/teach/message", async (req, res) => {
    ================================= */
 app.post("/api/teach/save", async (req, res) => {
   try {
-    const { sessionId } = req.body || {};
+    const { sessionId, autoSave } = req.body || {};
     const session = getSession(sessionId);
     const teaching = ensureTeachingState(session);
     const lang = session.lang || "en";
@@ -1562,17 +1624,38 @@ app.post("/api/teach/save", async (req, res) => {
       });
     }
 
-    // Format transcript as readable text
-    const transcriptText = teaching.transcript
-      .map(entry => {
-        const label = entry.from === "user" 
-          ? (lang === "ar" ? "أنا" : "Me") 
-          : (lang === "ar" ? "المعلم" : "Tutor");
-        return `${label}: ${entry.text}`;
-      })
-      .join("\n\n");
+    // Finalize the teaching note in database (marks inProgress = false)
+    if (teaching.dbNoteId) {
+      try {
+        await finalizeTeachingNote(teaching.dbNoteId, teaching.transcript, lang);
+        
+        const title = lang === "ar" 
+          ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
+          : `Explanation ${new Date().toLocaleDateString('en-US')}`;
+        
+        console.log(`[TEACH] Finalized teaching note ${teaching.dbNoteId} for user ${req.session.userId}`);
+        
+        // Clear the transcript and reset teaching state
+        teaching.transcript = [];
+        teaching.mode = "idle";
+        teaching.current_topic_index = 0;
+        teaching.dbNoteId = null;
+        teaching.dbAssessmentId = null;
+        
+        return res.json({
+          ok: true,
+          message: autoSave 
+            ? (lang === "ar" ? "تم حفظ الشرح تلقائيًا" : "Explanation auto-saved")
+            : (lang === "ar" ? `تم حفظ "${title}" بنجاح!` : `"${title}" saved successfully!`),
+          title
+        });
+      } catch (dbErr) {
+        console.error("[TEACH-SAVE] Failed to finalize teaching note:", dbErr);
+        // Fall through to create new note
+      }
+    }
 
-    // Count existing explanations for this user to generate title
+    // Fallback: Create new teaching note if no dbNoteId exists
     const { db, teachingNotes } = await import('./db.js');
     const { eq, count } = await import('drizzle-orm');
     
@@ -1586,11 +1669,25 @@ app.post("/api/teach/save", async (req, res) => {
       ? `الشرح ${explanationNumber}` 
       : `Explanation ${explanationNumber}`;
 
-    // Save to database
+    // Format transcript as readable text
+    const transcriptText = teaching.transcript
+      .map(entry => {
+        const label = entry.from === "user" 
+          ? (lang === "ar" ? "أنا" : "Me") 
+          : (lang === "ar" ? "المعلم" : "Tutor");
+        return `${label}: ${entry.text}`;
+      })
+      .join("\n\n");
+
+    // Save to database (fallback path for legacy sessions)
     await db.insert(teachingNotes).values({
       userId: req.session.userId,
       topicDisplay: title,
       text: transcriptText,
+      transcript: teaching.transcript,
+      inProgress: false,
+      threadId: teaching.assistant?.threadId || null,
+      assessmentId: null
     });
 
     // Clear the transcript and reset teaching state
