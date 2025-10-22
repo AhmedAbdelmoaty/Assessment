@@ -1716,6 +1716,87 @@ app.post("/api/teach/save", async (req, res) => {
   }
 });
 
+/* ===================================================
+   Chat State Persistence (for reload/reconnect)
+   =================================================== */
+
+// Save current chat state to database
+app.post("/api/chat/save-state", async (req, res) => {
+  try {
+    if (!req.session.userId) {
+      return res.status(401).json({ error: true, message: "Not logged in" });
+    }
+
+    const { messages, currentStep, assessmentProgress, teachingState, sessionId } = req.body;
+    
+    const { db, users } = await import('./db.js');
+    const { eq } = await import('drizzle-orm');
+    
+    // Get current profile
+    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
+    if (!user || user.length === 0) {
+      return res.status(404).json({ error: true, message: "User not found" });
+    }
+    
+    const profileJson = user[0].profileJson || {};
+    
+    // Update chat state
+    profileJson.currentChatState = {
+      messages: messages || [],
+      currentStep: currentStep || 'intake',
+      assessmentProgress: assessmentProgress || null,
+      teachingState: teachingState || null,
+      sessionId: sessionId,
+      savedAt: new Date().toISOString()
+    };
+    
+    await db.update(users)
+      .set({ profileJson: profileJson })
+      .where(eq(users.id, req.session.userId));
+    
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[CHAT-STATE] Save error:", err);
+    return res.status(500).json({ error: true, message: "Failed to save state" });
+  }
+});
+
+// Restore chat state from database
+app.get("/api/chat/restore-state", async (req, res) => {
+  try {
+    if (!req.session.userId) {
+      return res.status(401).json({ error: true, message: "Not logged in" });
+    }
+    
+    const { db, users } = await import('./db.js');
+    const { eq } = await import('drizzle-orm');
+    
+    const user = await db.select().from(users).where(eq(users.id, req.session.userId)).limit(1);
+    if (!user || user.length === 0) {
+      return res.status(404).json({ error: true, message: "User not found" });
+    }
+    
+    const profileJson = user[0].profileJson || {};
+    const chatState = profileJson.currentChatState || null;
+    
+    // Clear the saved state after restoring (single-use)
+    if (chatState) {
+      delete profileJson.currentChatState;
+      await db.update(users)
+        .set({ profileJson: profileJson })
+        .where(eq(users.id, req.session.userId));
+    }
+    
+    return res.json({
+      chatState: chatState,
+      hasState: !!chatState
+    });
+  } catch (err) {
+    console.error("[CHAT-STATE] Restore error:", err);
+    return res.status(500).json({ error: true, message: "Failed to restore state" });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", sessions: sessions.size });

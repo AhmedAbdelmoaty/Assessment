@@ -53,35 +53,73 @@
 
     async function checkSessionState() {
         try {
-            const response = await fetch("/api/session/state");
-            const data = await response.json();
-
-            if (data.sessionId) {
-                sessionId = data.sessionId;
+            const response = await fetch("/api/chat/restore-state");
+            if (!response.ok) {
+                console.log("[RESTORE] No saved state, starting fresh");
+                startIntakeFlow();
+                return;
             }
-
-            // Determine what to display based on session state
-            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
-                // Resume existing session
-                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
-                teachingActive = data.stage === "teaching";
+            
+            const data = await response.json();
+            
+            if (!data.hasState || !data.chatState) {
+                console.log("[RESTORE] No saved state, starting fresh");
+                startIntakeFlow();
+                return;
+            }
+            
+            const state = data.chatState;
+            console.log("[RESTORE] Restoring saved chat state", state);
+            
+            // Restore session variables
+            sessionId = state.sessionId || null;
+            currentStep = state.currentStep || "intake";
+            teachingActive = state.teachingState?.active || false;
+            
+            // Clear and rebuild chat messages
+            chatMessages.innerHTML = "";
+            
+            if (state.messages && state.messages.length > 0) {
+                state.messages.forEach(msg => {
+                    if (msg.type === "system") {
+                        addSystemMessage(msg.text);
+                    } else if (msg.type === "user") {
+                        addUserMessage(msg.text);
+                    } else if (msg.type === "question") {
+                        displayQuestion(msg.data);
+                    } else if (msg.type === "report") {
+                        // Rebuild report display
+                        addSystemMessage(msg.text);
+                        if (msg.data) {
+                            addStartTeachingCTA();
+                        }
+                    }
+                });
                 
-                // Show welcome message for resuming
+                // Show resumption message
                 addSystemMessage(
                     currentLang === "ar"
-                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                        : "Welcome back! Let's continue where we left off."
+                        ? "تم استعادة المحادثة. دعنا نكمل من حيث توقفنا."
+                        : "Chat restored. Let's continue where we left off."
                 );
-                
-                if (currentStep === "assessment") {
-                    setTimeout(() => startAssessment(), 1000);
-                }
+            }
+            
+            // Continue based on current step
+            if (currentStep === "assessment" && !teachingActive) {
+                // Resume assessment - fetch next question
+                setTimeout(() => startAssessment(), 1000);
+            } else if (currentStep === "teaching" || teachingActive) {
+                // Resume teaching - just wait for user input
+                teachingActive = true;
+            } else if (currentStep === "report") {
+                // Report is already displayed, wait for user action
             } else {
-                // Start new intake flow
+                // Unknown state, start fresh
                 startIntakeFlow();
             }
+            
         } catch (error) {
-            console.error("Error checking session state:", error);
+            console.error("[RESTORE] Error checking session state:", error);
             // If error, start fresh intake
             startIntakeFlow();
         }
@@ -913,6 +951,70 @@ ${mcq.choices
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // ==========================================
+    // Chat State Persistence Helper
+    // ==========================================
+    
+    async function saveChatState() {
+        try {
+            // Collect all chat messages
+            const messages = [];
+            const messageBubbles = chatMessages.querySelectorAll(".message-bubble");
+            
+            messageBubbles.forEach(bubble => {
+                const isUser = bubble.classList.contains("user");
+                const isSystem = bubble.classList.contains("system");
+                const textEl = bubble.querySelector(".message-text, .message-content");
+                
+                if (textEl && textEl.textContent.trim()) {
+                    messages.push({
+                        type: isUser ? "user" : "system",
+                        text: textEl.textContent.trim()
+                    });
+                }
+                
+                // Special handling for questions
+                const questionData = bubble.querySelector("[data-question-id]");
+                if (questionData) {
+                    messages.push({
+                        type: "question",
+                        data: currentMCQ
+                    });
+                }
+            });
+            
+            const stateData = {
+                messages: messages,
+                currentStep: currentStep,
+                assessmentProgress: null, // Can be extended to save more details
+                teachingState: teachingActive ? { active: true } : null,
+                sessionId: sessionId
+            };
+            
+            await fetch("/api/chat/save-state", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(stateData)
+            });
+            
+            console.log("[SAVE] Chat state saved successfully");
+        } catch (error) {
+            console.error("[SAVE] Failed to save chat state:", error);
+        }
+    }
+    
+    // Save state before page unload
+    window.addEventListener("beforeunload", () => {
+        saveChatState();
+    });
+    
+    // Auto-save periodically during long sessions (every 30 seconds)
+    setInterval(() => {
+        if (chatMessages.children.length > 0) {
+            saveChatState();
+        }
+    }, 30000);
 
     // ==========================================
     // Floating New Assessment Button Logic
