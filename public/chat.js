@@ -287,13 +287,12 @@
 
             // Check if intake is already completed (skipIntake = true)
             if (data.done && data.skipIntake) {
-                // Intake already completed, show message and start assessment
-                if (data.message) {
-                    addSystemMessage(data.message);
-                }
+                // Intake already completed - set state and start assessment
+                // This only happens on FIRST load, not on reload (reload goes through checkSessionState)
                 currentStep = "assessment";
                 updateProgress(1);
-                setTimeout(() => startAssessment(), 1000);
+                // Start assessment to get first question
+                setTimeout(() => startAssessment(), 500);
                 return;
             }
 
