@@ -1330,28 +1330,12 @@ app.post("/api/teach/start", async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
-    // Database persistence for logged-in users
+    // DO NOT create database entries until teaching is saved (when NEW ASSESSMENT is clicked)
+    // Just track the userId for later save
     if (req.session.userId) {
-      try {
-        const noteData = await getOrCreateTeachingNote(req.session.userId, sessionId);
-        if (noteData) {
-          teaching.dbNoteId = noteData.id;
-          teaching.dbAssessmentId = noteData.assessmentId;
-          
-          // If resuming, load the existing threadId and transcript
-          if (noteData.isResume && noteData.threadId) {
-            teaching.assistant = teaching.assistant || {};
-            teaching.assistant.threadId = noteData.threadId;
-            teaching.transcript = noteData.transcript || [];
-            logTeach("teaching.resume", { noteId: noteData.id, threadId: noteData.threadId, transcriptLen: teaching.transcript.length });
-          } else {
-            logTeach("teaching.new", { noteId: noteData.id, assessmentId: noteData.assessmentId });
-          }
-        }
-      } catch (dbErr) {
-        console.error("[TEACH-START] Database error:", dbErr);
-        // Continue without DB persistence
-      }
+      teaching.userId = req.session.userId;
+      teaching.shouldSaveOnNewAssessment = true;
+      logTeach("teaching.start", { userId: req.session.userId, lang: teaching.lang });
     }
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
@@ -1523,14 +1507,7 @@ app.post("/api/teach/message", async (req, res) => {
         if (reply) {
           try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
           
-          // Save transcript to database for logged-in users
-          if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-            try {
-              await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-            } catch (dbErr) {
-              console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-            }
-          }
+          // DO NOT save to database during conversation - only save when NEW ASSESSMENT is clicked
           
           return res.json({ message: reply });
         }
@@ -1541,14 +1518,7 @@ app.post("/api/teach/message", async (req, res) => {
         : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
       
-      // Save transcript to database for logged-in users
-      if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-        try {
-          await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-        } catch (dbErr) {
-          console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-        }
-      }
+      // DO NOT save to database during conversation - only save when NEW ASSESSMENT is clicked
       
       return res.json({ message: fb });
     }
@@ -1581,14 +1551,7 @@ app.post("/api/teach/message", async (req, res) => {
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
     
-    // Save transcript to database for logged-in users
-    if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-      try {
-        await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-      } catch (dbErr) {
-        console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-      }
-    }
+    // DO NOT save to database during conversation - only save when NEW ASSESSMENT is clicked
     
     return res.json({ message: reply });
 
@@ -1624,50 +1587,34 @@ app.post("/api/teach/save", async (req, res) => {
       });
     }
 
-    // Finalize the teaching note in database (marks inProgress = false)
-    if (teaching.dbNoteId) {
-      try {
-        await finalizeTeachingNote(teaching.dbNoteId, teaching.transcript, lang);
-        
-        const title = lang === "ar" 
-          ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
-          : `Explanation ${new Date().toLocaleDateString('en-US')}`;
-        
-        console.log(`[TEACH] Finalized teaching note ${teaching.dbNoteId} for user ${req.session.userId}`);
-        
-        // Clear the transcript and reset teaching state
-        teaching.transcript = [];
-        teaching.mode = "idle";
-        teaching.current_topic_index = 0;
-        teaching.dbNoteId = null;
-        teaching.dbAssessmentId = null;
-        
-        return res.json({
-          ok: true,
-          message: autoSave 
-            ? (lang === "ar" ? "تم حفظ الشرح تلقائيًا" : "Explanation auto-saved")
-            : (lang === "ar" ? `تم حفظ "${title}" بنجاح!` : `"${title}" saved successfully!`),
-          title
-        });
-      } catch (dbErr) {
-        console.error("[TEACH-SAVE] Failed to finalize teaching note:", dbErr);
-        // Fall through to create new note
+    // NOW we create the teaching note (only when saving, not when starting)
+    const { db, teachingNotes, attempts } = await import('./db.js');
+    const { eq, count, desc, and } = await import('drizzle-orm');
+    
+    // Get the most recent completed assessment for this user to link to
+    let assessmentId = null;
+    try {
+      const latestAttempt = await db
+        .select()
+        .from(attempts)
+        .where(and(
+          eq(attempts.userId, req.session.userId),
+          eq(attempts.currentStep, 'completed')
+        ))
+        .orderBy(desc(attempts.finishedAt))
+        .limit(1);
+      
+      if (latestAttempt && latestAttempt.length > 0) {
+        assessmentId = latestAttempt[0].id;
       }
+    } catch (e) {
+      console.error("[TEACH-SAVE] Could not find linked assessment:", e);
     }
-
-    // Fallback: Create new teaching note if no dbNoteId exists
-    const { db, teachingNotes } = await import('./db.js');
-    const { eq, count } = await import('drizzle-orm');
     
-    const countResult = await db
-      .select({ count: count() })
-      .from(teachingNotes)
-      .where(eq(teachingNotes.userId, req.session.userId));
-    
-    const explanationNumber = (countResult[0]?.count || 0) + 1;
+    // Generate title with date
     const title = lang === "ar" 
-      ? `الشرح ${explanationNumber}` 
-      : `Explanation ${explanationNumber}`;
+      ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
+      : `Explanation ${new Date().toLocaleDateString('en-US')}`;
 
     // Format transcript as readable text
     const transcriptText = teaching.transcript
@@ -1679,7 +1626,7 @@ app.post("/api/teach/save", async (req, res) => {
       })
       .join("\n\n");
 
-    // Save to database (fallback path for legacy sessions)
+    // Create teaching note in database
     await db.insert(teachingNotes).values({
       userId: req.session.userId,
       topicDisplay: title,
@@ -1687,7 +1634,7 @@ app.post("/api/teach/save", async (req, res) => {
       transcript: teaching.transcript,
       inProgress: false,
       threadId: teaching.assistant?.threadId || null,
-      assessmentId: null
+      assessmentId: assessmentId
     });
 
     // Clear the transcript and reset teaching state
@@ -1712,6 +1659,145 @@ app.post("/api/teach/save", async (req, res) => {
       message: (req.body.lang || "en") === "ar" 
         ? "فشل حفظ الشرح" 
         : "Failed to save explanation"
+    });
+  }
+});
+
+/* =================================
+   Chat State: Full session rehydration
+   ================================= */
+app.get("/api/chat/state", (req, res) => {
+  try {
+    // Must have a session ID from cookies/query
+    const sessionId = req.query.sessionId || req.session?.sessionId;
+    
+    if (!sessionId || !sessions.has(sessionId)) {
+      // No active session - fresh start needed
+      return res.json({
+        phase: "idle",
+        sessionId: null,
+        transcript: [],
+        needsIntake: !req.session.userId // If not logged in, needs full intake
+      });
+    }
+
+    const session = sessions.get(sessionId);
+    const phase = session.currentStep || "idle";
+    const lang = session.lang || "en";
+    
+    // Build complete chat transcript based on phase
+    const transcript = [];
+    
+    if (phase === "intake") {
+      // Restore intake conversation
+      if (session.intakeHistory && Array.isArray(session.intakeHistory)) {
+        session.intakeHistory.forEach(entry => {
+          if (entry.question) {
+            transcript.push({ from: "system", text: entry.question });
+          }
+          if (entry.answer !== undefined && entry.answer !== null) {
+            transcript.push({ from: "user", text: String(entry.answer) });
+          }
+        });
+      }
+    } else if (phase === "assessment") {
+      // Restore assessment Q&A history
+      if (session.assessment?.evidence && Array.isArray(session.assessment.evidence)) {
+        session.assessment.evidence.forEach((ev, idx) => {
+          // Add question
+          if (ev.question_text) {
+            const questionMsg = {
+              from: "system",
+              text: ev.question_text,
+              mcq: ev.options ? {
+                options: ev.options,
+                correctIndex: ev.correct_index
+              } : null
+            };
+            transcript.push(questionMsg);
+          }
+          
+          // Add user's answer
+          if (ev.user_choice_index !== undefined && ev.options && ev.options[ev.user_choice_index]) {
+            transcript.push({
+              from: "user",
+              text: ev.options[ev.user_choice_index]
+            });
+          }
+        });
+      }
+      
+      // Add current pending question if exists
+      if (session.assessment?.currentQuestion) {
+        const q = session.assessment.currentQuestion;
+        transcript.push({
+          from: "system",
+          text: q.question_text,
+          mcq: {
+            options: q.options,
+            correctIndex: q.correct_index
+          },
+          pending: true // Mark as unanswered
+        });
+      }
+    } else if (phase === "report") {
+      // Restore report view
+      if (session.report) {
+        transcript.push({
+          from: "system",
+          text: session.report.message || "",
+          isReport: true,
+          reportData: {
+            strengths: session.report.strengths_display || session.report.strengths || [],
+            gaps: session.report.gaps_display || session.report.gaps || [],
+            statsLevel: session.report.stats_level || "Beginner"
+          }
+        });
+      }
+    } else if (phase === "teaching") {
+      // Restore teaching conversation
+      const teaching = session.teaching || {};
+      if (teaching.transcript && Array.isArray(teaching.transcript)) {
+        teaching.transcript.forEach(entry => {
+          transcript.push({
+            from: entry.from === "user" ? "user" : "system",
+            text: entry.text
+          });
+        });
+      }
+    }
+
+    return res.json({
+      phase,
+      sessionId: session.sessionId,
+      lang,
+      transcript,
+      currentState: {
+        // Assessment-specific state
+        ...(phase === "assessment" && {
+          currentLevel: session.assessment?.currentLevel,
+          attempts: session.assessment?.attempts || 0,
+          evidenceCount: session.assessment?.evidence?.length || 0
+        }),
+        // Report-specific state
+        ...(phase === "report" && {
+          reportGenerated: !!session.report,
+          canStartTeaching: !!session.report
+        }),
+        // Teaching-specific state
+        ...(phase === "teaching" && {
+          teachingActive: session.teaching?.mode === "active",
+          threadId: session.teaching?.assistant?.threadId,
+          topicsQueue: session.teaching?.topics_queue || []
+        })
+      }
+    });
+
+  } catch (error) {
+    console.error("[CHAT-STATE] Error:", error);
+    return res.status(500).json({
+      error: true,
+      message: "Failed to retrieve chat state"
     });
   }
 });

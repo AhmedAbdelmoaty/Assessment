@@ -53,36 +53,110 @@
 
     async function checkSessionState() {
         try {
-            const response = await fetch("/api/session/state");
+            // Get sessionId from localStorage if exists
+            const storedSessionId = localStorage.getItem("chatSessionId");
+            const url = storedSessionId ? `/api/chat/state?sessionId=${storedSessionId}` : "/api/chat/state";
+            
+            const response = await fetch(url);
             const data = await response.json();
 
+            // Update session ID and language
             if (data.sessionId) {
                 sessionId = data.sessionId;
+                localStorage.setItem("chatSessionId", sessionId);
+            }
+            
+            if (data.lang) {
+                currentLang = data.lang;
+                if (currentLang === "ar") {
+                    html.setAttribute("lang", "ar");
+                    html.classList.add("lang-ar");
+                    html.classList.remove("lang-en");
+                } else {
+                    html.setAttribute("lang", "en");
+                    html.classList.add("lang-en");
+                    html.classList.remove("lang-ar");
+                }
             }
 
-            // Determine what to display based on session state
-            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
-                // Resume existing session
-                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
-                teachingActive = data.stage === "teaching";
+            const phase = data.phase || "idle";
+            currentStep = phase;
+
+            // Restore full chat transcript WITHOUT any "Welcome" messages
+            if (data.transcript && Array.isArray(data.transcript) && data.transcript.length > 0) {
+                // Clear chat first
+                chatMessages.innerHTML = "";
                 
-                // Show welcome message for resuming
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                        : "Welcome back! Let's continue where we left off."
-                );
+                // Restore all messages exactly as they were
+                data.transcript.forEach(msg => {
+                    if (msg.from === "system") {
+                        // Check if this is a report message
+                        if (msg.isReport && msg.reportData) {
+                            addSystemMessage(msg.text);
+                            addStartTeachingCTA();
+                            showFloatingButton();
+                            return;
+                        }
+                        
+                        // Check if this is an MCQ
+                        if (msg.mcq && msg.mcq.options) {
+                            const mcq = {
+                                question_text: msg.text,
+                                options: msg.mcq.options,
+                                correct_index: msg.mcq.correctIndex
+                            };
+                            
+                            if (msg.pending) {
+                                // This is the current unanswered question
+                                currentMCQ = mcq;
+                                renderMCQ(mcq);
+                            } else {
+                                // Already answered question - just show text
+                                addSystemMessage(msg.text);
+                            }
+                        } else {
+                            // Regular system message
+                            addSystemMessage(msg.text);
+                        }
+                    } else if (msg.from === "user") {
+                        addUserMessage(msg.text);
+                    }
+                });
                 
-                if (currentStep === "assessment") {
-                    setTimeout(() => startAssessment(), 1000);
+                scrollToBottom();
+            } else {
+                // No transcript - start fresh
+                if (phase === "idle") {
+                    startIntakeFlow();
+                }
+            }
+
+            // Set appropriate state based on phase
+            if (phase === "teaching") {
+                teachingActive = true;
+                showFloatingButton();
+            } else if (phase === "report") {
+                currentStep = "report";
+                // Report is already shown in transcript restoration
+            } else if (phase === "assessment") {
+                currentStep = "assessment";
+                // If no pending question, fetch next one
+                if (!currentMCQ) {
+                    setTimeout(() => fetchNextMCQ(), 500);
+                }
+            } else if (phase === "intake") {
+                // Intake in progress - continue if needed
+                if (!data.transcript || data.transcript.length === 0) {
+                    startIntakeFlow();
                 }
             } else {
-                // Start new intake flow
+                // Idle - start intake
                 startIntakeFlow();
             }
+
         } catch (error) {
-            console.error("Error checking session state:", error);
-            // If error, start fresh intake
+            console.error("Error loading chat state:", error);
+            // On error, start fresh intake
             startIntakeFlow();
         }
     }
@@ -202,6 +276,7 @@
             console.log("[CLIENT] Initial intake response:", data);
 
             sessionId = data.sessionId;
+            localStorage.setItem("chatSessionId", sessionId);
             hideTypingIndicator();
 
             // Check if intake is already completed (skipIntake = true)
@@ -535,8 +610,7 @@
 
             if (data && data.message) {
                 addSystemMessage(data.message);
-                // Add save button after each teaching message
-                addSaveTeachingButton();
+                // Teaching saves only when clicking NEW ASSESSMENT (not via explicit button)
             } else {
                 addSystemMessage(
                     currentLang === "ar"
@@ -554,75 +628,7 @@
         }
     }
     
-    function addSaveTeachingButton() {
-        // Remove any existing save buttons
-        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
-        
-        const bubbles = Array.from(
-            document.querySelectorAll(".message-bubble.system"),
-        );
-        const last = bubbles[bubbles.length - 1];
-        if (!last) return;
-        
-        const content = last.querySelector(".message-content");
-        if (!content) return;
-        
-        const container = document.createElement("div");
-        container.className = "save-teaching-btn-container";
-        
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "save-teaching-btn";
-        saveBtn.textContent =
-            currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
-        
-        saveBtn.addEventListener("click", async () => {
-            saveBtn.disabled = true;
-            try {
-                const resp = await fetch("/api/teach/save", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                const data = await resp.json();
-                
-                if (data.ok) {
-                    // Reset teaching state
-                    teachingActive = false;
-                    currentStep = "report";
-                    
-                    // Show success message
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "تم حفظ الدرس بنجاح!"
-                            : "Lesson saved successfully!")
-                    );
-                    
-                    // Remove the save button
-                    container.remove();
-                    
-                    // Show report CTAs again
-                    addStartTeachingCTA();
-                } else {
-                    saveBtn.disabled = false;
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "فشل حفظ الدرس"
-                            : "Failed to save lesson")
-                    );
-                }
-            } catch (e) {
-                saveBtn.disabled = false;
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "حدث خطأ أثناء حفظ الدرس"
-                        : "An error occurred while saving the lesson"
-                );
-            }
-        });
-        
-        container.appendChild(saveBtn);
-        content.appendChild(container);
-    }
+    // REMOVED: addSaveTeachingButton() - Teaching saves only when clicking NEW ASSESSMENT
 
     // UI helper functions
     function normalizeTutorText(raw) {
@@ -946,7 +952,7 @@ ${mcq.choices
                     return;
                 }
                 
-                // Save current teaching before starting new assessment
+                // Save current teaching before starting new assessment (ONLY save point for teaching)
                 try {
                     await fetch("/api/teach/save", {
                         method: "POST",
@@ -958,23 +964,27 @@ ${mcq.choices
                 }
             }
             
+            // COMPLETE state reset - start completely fresh
+            // Clear localStorage to ensure new session
+            localStorage.removeItem("chatSessionId");
+            sessionId = null;
+            
             // Clear chat UI
             chatMessages.innerHTML = "";
             
-            // Reset state
-            currentStep = "assessment";
+            // Reset all state variables
+            currentStep = "intake";
             teachingActive = false;
+            currentMCQ = null;
+            isProcessing = false;
+            awaitingCustomInput = false;
+            
+            // Hide floating button
             hideFloatingButton();
             
-            // Show starting message
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "جاري بدء تقييم جديد..."
-                    : "Starting a new assessment..."
-            );
-            
-            // Start new assessment
-            setTimeout(() => startAssessment(), 800);
+            // Start completely new intake/assessment flow
+            // This will create a NEW session ID, NEW attempt, NEW teaching thread
+            await startIntakeFlow();
         });
     }
 })();
