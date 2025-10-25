@@ -16,6 +16,7 @@ import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import adminRoutes from "./routes/admin.js";
 import { requireAdmin, redirectAdmins } from "./middleware/admin.js";
+import { db, users, chatMessages } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -388,7 +389,31 @@ function validateIntakeInput(stepKey, value) {
   }
   return value && value.trim().length > 0;
 }
+// -------- Save Chat Message --------
+app.post("/api/chat/message", async (req, res) => {
+  try {
+    const { sessionId, role, content, messageType, metadata } = req.body;
 
+    if (!sessionId || !role || !content) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Save message to database
+    const [savedMessage] = await db.insert(chatMessages).values({
+      sessionId,
+      userId: req.session.userId || null,
+      role,
+      content,
+      messageType: messageType || 'text',
+      metadata: metadata || null
+    }).returning();
+
+    res.json({ ok: true, messageId: savedMessage.id });
+  } catch (error) {
+    console.error("[SAVE MESSAGE ERROR]", error);
+    res.status(500).json({ error: "Failed to save message" });
+  }
+});
 // -------- Intake Flow --------
 app.post("/api/intake/next", async (req, res) => {
   try {
@@ -1356,13 +1381,15 @@ app.post("/api/teach/start", async (req, res) => {
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       // إنشاء Thread مرة واحدة (or use existing from DB)
-      if (!teaching.assistant?.threadId) {
+      // Create NEW thread ONLY if this is truly a new teaching session
+      // Check if we're resuming or starting fresh
+      if (req.body.forceNewThread || !teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
         const threadId = createdThread?.id;
         if (!threadId) throw new Error("Failed to create thread");
         teaching.assistant.threadId = threadId;
         logTeach("thread.created", { threadId });
-        
+
         // Save threadId to database for logged-in users
         if (req.session.userId && teaching.dbNoteId) {
           try {
@@ -1580,6 +1607,21 @@ app.post("/api/teach/message", async (req, res) => {
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+    // Save to chat_messages table
+    if (req.session.userId) {
+      try {
+        await db.insert(chatMessages).values({
+          sessionId,
+          userId: req.session.userId,
+          role: 'assistant',
+          content: reply,
+          messageType: 'teaching',
+          metadata: { topic: currentTopic }
+        });
+      } catch (dbErr) {
+        console.error("[TEACH] Failed to save message to chat_messages:", dbErr);
+      }
+    }
     
     // Save transcript to database for logged-in users
     if (req.session.userId && teaching.dbNoteId && teaching.transcript) {

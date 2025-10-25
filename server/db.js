@@ -82,7 +82,17 @@ export const teachingNotes = pgTable('teaching_notes', {
   transcript: jsonb('transcript'), // Raw conversation array: [{from: 'user'|'assistant', text: '...'}]
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
-
+// Chat messages table - stores all chat conversation history
+export const chatMessages = pgTable('chat_messages', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: text('session_id').notNull(), // Links to in-memory session
+  userId: uuid('user_id').references(() => users.id), // Optional - if user logged in
+  role: text('role').notNull(), // 'user' | 'assistant' | 'system'
+  content: text('content').notNull(), // Message text
+  messageType: text('message_type'), // 'mcq' | 'report' | 'teaching' | 'text' | 'intake'
+  metadata: jsonb('metadata'), // Extra data like MCQ choices, correct answer, etc.
+  createdAt: timestamp('created_at').defaultNow().notNull()
+});
 // Session table (for express-session with connect-pg-simple)
 export const sessionTable = pgTable('session', {
   sid: varchar('sid').primaryKey(),
