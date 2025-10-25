@@ -9,6 +9,7 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false;
+    let isRehydrating = false; // Guard to prevent POST during transcript restoration
 
     // DOM elements
     const langButtons = document.querySelectorAll(".lang-btn");
@@ -18,8 +19,13 @@
     const sendBtn = document.getElementById("sendBtn");
     const headerLogoutBtn = document.getElementById("headerLogoutBtn");
 
-    // Initialize
-    init();
+    // Single bootstrap to prevent double initialization
+    let bootstrapped = false;
+    document.addEventListener("DOMContentLoaded", async () => {
+        if (bootstrapped) return;
+        bootstrapped = true;
+        await init();
+    });
 
     async function init() {
         // Authentication guard: Check if user is logged in
@@ -82,83 +88,83 @@
             const phase = data.phase || "idle";
             currentStep = phase;
 
-            // Restore full chat transcript WITHOUT any "Welcome" messages
+            // READ-ONLY restoration: Only restore transcript, NO auto-start logic
             if (data.transcript && Array.isArray(data.transcript) && data.transcript.length > 0) {
-                // Clear chat first
-                chatMessages.innerHTML = "";
-                
-                // Restore all messages exactly as they were
-                data.transcript.forEach(msg => {
-                    if (msg.from === "system") {
-                        // Check if this is a report message
-                        if (msg.isReport && msg.reportData) {
-                            addSystemMessage(msg.text);
-                            addStartTeachingCTA();
-                            showFloatingButton();
-                            return;
-                        }
-                        
-                        // Check if this is an MCQ
-                        if (msg.mcq && msg.mcq.options) {
-                            const mcq = {
-                                question_text: msg.text,
-                                options: msg.mcq.options,
-                                correct_index: msg.mcq.correctIndex
-                            };
-                            
-                            if (msg.pending) {
-                                // This is the current unanswered question
-                                currentMCQ = mcq;
-                                renderMCQ(mcq);
-                            } else {
-                                // Already answered question - just show text
-                                addSystemMessage(msg.text);
-                            }
-                        } else {
-                            // Regular system message
-                            addSystemMessage(msg.text);
-                        }
-                    } else if (msg.from === "user") {
-                        addUserMessage(msg.text);
-                    }
-                });
-                
-                scrollToBottom();
-            } else {
-                // No transcript - start fresh
-                if (phase === "idle") {
-                    startIntakeFlow();
-                }
+                // Rehydrate the full transcript without triggering POST requests
+                rehydrateTranscript(data.transcript);
+            } else if (phase === "idle") {
+                // Only start intake if phase is idle AND no transcript exists
+                startIntakeFlow();
             }
 
-            // Set appropriate state based on phase
+            // Set appropriate state based on phase (NO auto-start, just state flags)
             if (phase === "teaching") {
                 teachingActive = true;
                 showFloatingButton();
             } else if (phase === "report") {
                 currentStep = "report";
-                // Report is already shown in transcript restoration
+                showFloatingButton();
             } else if (phase === "assessment") {
                 currentStep = "assessment";
-                // If no pending question, fetch next one
-                if (!currentMCQ) {
-                    setTimeout(() => fetchNextMCQ(), 500);
-                }
-            } else if (phase === "intake") {
-                // Intake in progress - continue if needed
-                if (!data.transcript || data.transcript.length === 0) {
-                    startIntakeFlow();
-                }
-            } else {
-                // Idle - start intake
-                startIntakeFlow();
+                // currentMCQ is already set by rehydrateTranscript if there's a pending question
             }
 
         } catch (error) {
             console.error("Error loading chat state:", error);
-            // On error, start fresh intake
-            startIntakeFlow();
+            // On error, start fresh intake ONLY if no session exists
+            if (!sessionId) {
+                startIntakeFlow();
+            }
         }
+    }
+
+    // Rehydrate transcript from server state without triggering POST requests
+    function rehydrateTranscript(transcript) {
+        // Set rehydrating guard to prevent POST during restoration
+        isRehydrating = true;
+        
+        // Clear chat first
+        chatMessages.innerHTML = "";
+        
+        // Restore all messages exactly as they were
+        transcript.forEach(msg => {
+            if (msg.from === "system") {
+                // Check if this is a report message
+                if (msg.isReport && msg.reportData) {
+                    addSystemMessage(msg.text);
+                    addStartTeachingCTA();
+                    return;
+                }
+                
+                // Check if this is an MCQ
+                if (msg.mcq && msg.mcq.options) {
+                    const mcq = {
+                        question_text: msg.text,
+                        options: msg.mcq.options,
+                        correct_index: msg.mcq.correctIndex
+                    };
+                    
+                    if (msg.pending) {
+                        // This is the current unanswered question
+                        currentMCQ = mcq;
+                        renderMCQ(mcq);
+                    } else {
+                        // Already answered question - just show text
+                        addSystemMessage(msg.text);
+                    }
+                } else {
+                    // Regular system message
+                    addSystemMessage(msg.text);
+                }
+            } else if (msg.from === "user") {
+                addUserMessage(msg.text);
+            }
+        });
+        
+        scrollToBottom();
+        
+        // Clear rehydrating guard
+        isRehydrating = false;
     }
 
     function setupLanguageToggle() {
