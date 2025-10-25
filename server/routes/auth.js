@@ -259,83 +259,12 @@ router.post('/logout', (req, res) => {
   });
 });
 
-    // GET /api/session/state
-    router.get('/session/state', async (req, res) => {
-      try {
-        const { sessionId } = req.query;
-
-        // If no sessionId provided, return basic state
-        if (!sessionId) {
-          if (!req.session.userId) {
-            return res.json({ loggedIn: false, stage: null, messages: [] });
-          }
-
-          const userId = req.session.userId;
-          const [user] = await db.select().from(users).where(eq(users.id, userId));
-
-          if (!user) {
-            return res.json({ loggedIn: false, stage: null, messages: [] });
-          }
-
-          const profile = user.profileJson || {};
-          let stage = 'idle';
-          if (!profile.intakeCompleted) {
-            stage = 'intake-pending';
-          }
-
-          return res.json({
-            loggedIn: true,
-            stage,
-            messages: [],
-            user: {
-              id: user.id,
-              email: user.email,
-              username: user.username,
-              name: profile.name
-            }
-          });
-        }
-
-        // Fetch chat history for this sessionId
-        const { chatMessages } = await import('../db.js');
-        const { desc } = await import('drizzle-orm');
-        const { eq } = await import('drizzle-orm');
-
-        const messages = await db
-          .select()
-          .from(chatMessages)
-          .where(eq(chatMessages.sessionId, sessionId))
-          .orderBy(chatMessages.createdAt);
-
-        // Determine stage from messages
-        let stage = 'idle';
-        if (messages.length > 0) {
-          const lastMsg = messages[messages.length - 1];
-          if (lastMsg.messageType === 'mcq') stage = 'assessment';
-          else if (lastMsg.messageType === 'report') stage = 'report';
-          else if (lastMsg.messageType === 'teaching') stage = 'teaching';
-          else if (lastMsg.messageType === 'intake') stage = 'intake';
-        }
-
-        return res.json({
-          loggedIn: !!req.session.userId,
-          sessionId,
-          stage,
-          messages: messages.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            messageType: m.messageType,
-            metadata: m.metadata,
-            createdAt: m.createdAt
-          }))
-        });
-
-      } catch (error) {
-        console.error('Session state error:', error);
-        res.status(500).json({ error: 'Server error' });
-      }
-    });
+// GET /api/session/state
+router.get('/session/state', async (req, res) => {
+  try {
+    if (!req.session.userId) {
+      return res.json({ loggedIn: false, stage: null });
+    }
 
     const userId = req.session.userId;
 
