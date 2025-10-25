@@ -204,6 +204,19 @@
             sessionId = data.sessionId;
             hideTypingIndicator();
 
+            // Check if intake is already completed (skipIntake = true)
+            if (data.done && data.skipIntake) {
+                // Intake already completed, show message and start assessment
+                if (data.message) {
+                    addSystemMessage(data.message);
+                }
+                currentStep = "assessment";
+                updateProgress(1);
+                setTimeout(() => startAssessment(), 1000);
+                return;
+            }
+
+            // Normal intake flow
             renderIntakeStep(data);
         } catch (error) {
             console.error("Error starting intake:", error);
@@ -476,6 +489,8 @@
             ) {
                 addSystemMessage(report.message.trim());
                 addStartTeachingCTA();
+                // Show floating button after report is displayed
+                showFloatingButton();
             }
 
             const strengthsToShow =
@@ -520,6 +535,8 @@
 
             if (data && data.message) {
                 addSystemMessage(data.message);
+                // Add save button after each teaching message
+                addSaveTeachingButton();
             } else {
                 addSystemMessage(
                     currentLang === "ar"
@@ -535,6 +552,76 @@
                     : "There was a problem during teaching.",
             );
         }
+    }
+    
+    function addSaveTeachingButton() {
+        // Remove any existing save buttons
+        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
+        
+        const bubbles = Array.from(
+            document.querySelectorAll(".message-bubble.system"),
+        );
+        const last = bubbles[bubbles.length - 1];
+        if (!last) return;
+        
+        const content = last.querySelector(".message-content");
+        if (!content) return;
+        
+        const container = document.createElement("div");
+        container.className = "save-teaching-btn-container";
+        
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "save-teaching-btn";
+        saveBtn.textContent =
+            currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
+        
+        saveBtn.addEventListener("click", async () => {
+            saveBtn.disabled = true;
+            try {
+                const resp = await fetch("/api/teach/save", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sessionId }),
+                });
+                const data = await resp.json();
+                
+                if (data.ok) {
+                    // Reset teaching state
+                    teachingActive = false;
+                    currentStep = "report";
+                    
+                    // Show success message
+                    addSystemMessage(
+                        data.message || (currentLang === "ar"
+                            ? "تم حفظ الدرس بنجاح!"
+                            : "Lesson saved successfully!")
+                    );
+                    
+                    // Remove the save button
+                    container.remove();
+                    
+                    // Show report CTAs again
+                    addStartTeachingCTA();
+                } else {
+                    saveBtn.disabled = false;
+                    addSystemMessage(
+                        data.message || (currentLang === "ar"
+                            ? "فشل حفظ الدرس"
+                            : "Failed to save lesson")
+                    );
+                }
+            } catch (e) {
+                saveBtn.disabled = false;
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "حدث خطأ أثناء حفظ الدرس"
+                        : "An error occurred while saving the lesson"
+                );
+            }
+        });
+        
+        container.appendChild(saveBtn);
+        content.appendChild(container);
     }
 
     // UI helper functions
@@ -718,13 +805,14 @@ ${mcq.choices
         const wrap = document.createElement("div");
         wrap.className = "teaching-cta";
 
-        const btn = document.createElement("button");
-        btn.className = "teach-cta-btn";
-        btn.textContent =
-            currentLang === "ar" ? "ابدأ الشرح" : "Start explanation";
+        // Start Explanation button
+        const explainBtn = document.createElement("button");
+        explainBtn.className = "teach-cta-btn primary";
+        explainBtn.textContent =
+            currentLang === "ar" ? "ابدأ الشرح" : "Start Explanation";
 
-        btn.addEventListener("click", async () => {
-            btn.disabled = true;
+        explainBtn.addEventListener("click", async () => {
+            explainBtn.disabled = true;
             showTypingIndicator();
             try {
                 const resp = await fetch("/api/teach/start", {
@@ -734,10 +822,12 @@ ${mcq.choices
                 });
                 const data = await resp.json();
                 hideTypingIndicator();
-                btn.disabled = false;
 
                 teachingActive = true;
                 currentStep = "teaching";
+
+                // Remove the CTA buttons after starting (can only start once)
+                wrap.remove();
 
                 if (data && data.message) {
                     addSystemMessage(data.message);
@@ -750,7 +840,7 @@ ${mcq.choices
                 }
             } catch (e) {
                 hideTypingIndicator();
-                btn.disabled = false;
+                explainBtn.disabled = false;
                 addSystemMessage(
                     currentLang === "ar"
                         ? "تعذّر بدء الشرح."
@@ -759,7 +849,8 @@ ${mcq.choices
             }
         });
 
-        wrap.appendChild(btn);
+        // Only add the "Start Explanation" button (removed "Start New Assessment")
+        wrap.appendChild(explainBtn);
         content.appendChild(wrap);
     }
 
@@ -823,5 +914,67 @@ ${mcq.choices
         const div = document.createElement("div");
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // ==========================================
+    // Floating New Assessment Button Logic
+    // ==========================================
+    
+    const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
+    
+    function showFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "inline-flex";
+        }
+    }
+    
+    function hideFloatingButton() {
+        if (floatingBtn) {
+            floatingBtn.style.display = "none";
+        }
+    }
+    
+    if (floatingBtn) {
+        floatingBtn.addEventListener("click", async () => {
+            // Confirm action if teaching is active
+            if (teachingActive) {
+                const confirmMsg = currentLang === "ar"
+                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
+                    : "The current explanation will be saved. Start a new assessment?";
+                
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
+                
+                // Save current teaching before starting new assessment
+                try {
+                    await fetch("/api/teach/save", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ sessionId, autoSave: true }),
+                    });
+                } catch (e) {
+                    console.error("Error auto-saving teaching:", e);
+                }
+            }
+            
+            // Clear chat UI
+            chatMessages.innerHTML = "";
+            
+            // Reset state
+            currentStep = "assessment";
+            teachingActive = false;
+            hideFloatingButton();
+            
+            // Show starting message
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "جاري بدء تقييم جديد..."
+                    : "Starting a new assessment..."
+            );
+            
+            // Start new assessment
+            setTimeout(() => startAssessment(), 800);
+        });
     }
 })();

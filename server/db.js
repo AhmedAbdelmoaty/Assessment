@@ -42,8 +42,19 @@ export const authOtps = pgTable('auth_otps', {
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
-// User assessments table (existing)
+// User assessments table - simple structure for quick saves
 export const userAssessments = pgTable('user_assessments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+  difficulty: text('difficulty'),
+  scorePercent: integer('score_percent'),
+  evidence: jsonb('evidence')
+});
+
+// Attempts table - full assessment structure with all details
+export const attempts = pgTable('attempts', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
@@ -59,23 +70,16 @@ export const userAssessments = pgTable('user_assessments', {
   reportData: jsonb('report_data')
 });
 
-// Attempts table (existing)
-export const attempts = pgTable('attempts', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  startedAt: timestamp('started_at').defaultNow().notNull(),
-  completedAt: timestamp('completed_at'),
-  difficulty: text('difficulty'),
-  scorePercent: integer('score_percent'),
-  evidence: jsonb('evidence')
-});
-
-// Teaching notes table (existing)
+// Teaching notes table (enhanced for independent threads)
 export const teachingNotes = pgTable('teaching_notes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
-  topicDisplay: text('topic_display'),
-  text: text('text').notNull(),
+  assessmentId: uuid('assessment_id').references(() => attempts.id), // Links to specific assessment
+  threadId: text('thread_id'), // OpenAI thread ID for this explanation
+  inProgress: boolean('in_progress').default(false).notNull(), // Is this teaching session active?
+  topicDisplay: text('topic_display').notNull(),
+  text: text('text').notNull(), // Formatted transcript for display
+  transcript: jsonb('transcript'), // Raw conversation array: [{from: 'user'|'assistant', text: '...'}]
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 

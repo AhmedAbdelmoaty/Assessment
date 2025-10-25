@@ -1,0 +1,179 @@
+You are a senior full-stack engineer joining an existing Express + Postgres + vanilla JS project. Your task is to make the chat/intake/assessment/teaching flows persist correctly in the DB and reflect live, accurate numbers in both the user dashboard and the admin dashboard. You must keep the UX simple, resilient, and non-repetitive.
+
+What exists (context)
+
+Server: index.js (Express), sessions via Postgres, existing routes: /api/intake/next, /api/assess/*, /api/report, /api/teach/*, /api/auth/*, /api/me, user dashboards, and a new admin dashboard.
+
+DB (db.js): users (with profileJson), userAssessments, attempts, teachingNotes, authOtps, session (express-session store).
+
+Client: chat.js, dashboard.js, etc.
+
+Current gap: chat side-effects (intake, assessment, teaching) aren’t persisted/linked in a way dashboards can read; admin dashboard must show real, DB-sourced numbers; intake fields are shown empty because data isn’t saved in the place dashboards read from.
+
+Goals & constraints (product)
+
+Persistence & sync
+
+Intake: asked once per user. When completed, store under users.profileJson.intake (keys already used by the app) so both user and admin dashboards can read them.
+
+Assessment:
+
+Persist each completed assessment in userAssessments (one row per completed run) with: startedAt, finishedAt, scorePercent, currentLevel, and a minimal assessmentState (evidence array OK).
+
+Scoring rule (very important): The score is out of 6:
+
+Each level (L1, L2, L3) is represented by 2 questions.
+
+If a level is retried, ignore the first pair and only score the latest retry pair for that level.
+
+Levels not reached (because a previous level failed) still count as 2 incorrect (so total denominator is always 6).
+
+Only completed assessments are saved. If user exits before finishing, that assessment is not saved; when they return, it restarts from the first question.
+
+Teaching (Explanation):
+
+The report offers “Start Explanation”. Starting it creates an in-memory teaching transcript only.
+
+Show an “End Lesson & Save” button during teaching; when clicked, save to teachingNotes with a simple title: “Explanation N” (N = number of existing explanations + 1) and the full transcript.
+
+If the user leaves teaching without saving, then on return, the conversation should snap back to the report (discard unsaved explanation messages), ready to Start Explanation again.
+
+Session/Resume UX (no repetition)
+
+Intake: once done, never ask again on later assessments.
+
+Immediately after intake completes, start the first assessment automatically (no “Start Assessment” button).
+
+If user leaves mid-assessment, on return restart the assessment from the beginning (do not attempt to resume mid-question).
+
+After a completed assessment → show the report with two CTAs:
+
+Start Explanation (begins teaching from scratch each time).
+
+Start New Assessment (clears the chat UI only and starts questions immediately — no intake).
+
+No Start Assessment button anywhere. The only persistent CTA after a completed assessment is Start New Assessment.
+
+Dashboards
+
+User dashboard must show:
+
+Profile info including profileJson.intake fields (country, age_band, sector, job_nature, experience_years_band, learning_reason).
+
+A list of completed assessments only with their scorePercent, date, and level reached.
+
+A list of saved explanations (titles “Explanation N”). Clicking one opens the full saved transcript.
+
+Admin dashboard must show real DB numbers (no hardcoded defaults). Provide:
+
+KPIs: total users; (optionally) total users with intake completed.
+
+A pivot-like, interactive matrix (client-side UI) that lets me slice counts by any of the intake fields: Country, Sector, Job Nature, Age Band, Experience Years Band, Learning Reason.
+
+I must be able to select rows/columns (e.g., rows = Country, columns = Sector), or just rows (e.g., rows = Sector only), and see counts per cell.
+
+Include simple filters (e.g., filter Country = Egypt, or Sector = Education).
+
+Do NOT force a fixed nesting like Country → Age → Sector. Make it configurable on the page.
+
+A simple tabular Users view (Name, Email, Username, plus intake fields) with filters and search.
+
+All admin numbers must come from live DB queries (e.g., SELECT ... GROUP BY on users.profileJson.intake.<field>). No mocked data, no client-side fakes.
+
+Auth & access
+
+Add role-based access: users.role ∈ { 'user', 'admin' }.
+
+Admin-only routes (e.g., /api/admin/*) must check role = admin.
+
+Regular users must not be able to open /admin.html or any /api/admin/*.
+
+Admins should default to admin pages; hide user pages from admins if that’s our chosen UX.
+
+We already promoted one account to admin; keep the ability to promote via SQL or a tiny script if needed.
+
+Integrity & safety
+
+Ensure all API responses match the front-end expectations; never break existing user flows.
+
+Keep request limits, sessions, and current security middleware.
+
+Implementation outline (let the agent design details)
+
+Back end
+
+Intake: Ensure /api/intake/next writes the final intake object to users.profileJson.intake (already partly implemented). Confirm dashboards read from this exact location.
+
+Assessment:
+
+On start of an assessment, create an in-memory session only. On complete, compute score using the 6-question rule above. Then insert into userAssessments (one row), and reset in-memory attempt state.
+
+If the user leaves before completion, do not insert; on return, restart from first question.
+
+Teaching:
+
+Maintain a per-session teaching transcript in memory.
+
+On End Lesson & Save, insert into teachingNotes with title Explanation N + transcript. Clear the in-memory transcript afterwards.
+
+If the user leaves before saving, discard the in-memory transcript, and snap the chat back to the report on return.
+
+Admin API:
+
+Add /api/admin/users/raw to return users with intake fields (name/email/username + profileJson.intake), with pagination and search.
+
+Add /api/admin/aggregate endpoints to return grouped counts per intake dimension and combinations (rows/cols selected by query params). These must query Postgres (server-side), not fake on the client.
+
+Front end
+
+Chat:
+
+After intake message “تمام!..” → auto-start assessment (no Start button).
+
+When returning with an incomplete assessment → start from first question.
+
+After report: show Start Explanation and Start New Assessment buttons.
+
+When starting Start New Assessment: clear chat UI (not DB), then call assessment start directly.
+
+During teaching: show End Lesson & Save; after saving, take the user to a clean state (e.g., show a “saved” toast and the Start New Assessment CTA).
+
+User dashboard:
+
+Read and render intake fields from profileJson.intake.
+
+Render completed assessments from userAssessments.
+
+Render explanations list from teachingNotes (Explanation N). Click → modal with full transcript.
+
+Admin dashboard:
+
+Render live metrics from the new admin APIs.
+
+Build the pivot-like matrix UI: selectors for rows/columns/filters; fetch aggregated counts from server; render an interactive grid; allow drill-down to a simple user list optionally (but keep it minimal).
+
+Do not add “Start Assessment” anywhere. The only persistent CTA is Start New Assessment after a completed one.
+
+Acceptance criteria
+
+Intake appears once per user. On reloads or future assessments, it never reappears.
+
+If a user quits mid-assessment and returns, the assessment restarts from the first question.
+
+On completion, the assessment row appears in userAssessments with correct scorePercent (out of 6), final level, and timestamps.
+
+Teaching only persists when “End Lesson & Save” is pressed, creating Explanation N. If the user leaves mid-teaching without saving, returning shows the report (no stray teaching messages).
+
+User dashboard shows correct profile intake values, completed assessments, and list of explanations with full transcripts on click.
+
+Admin dashboard shows real DB counts; the pivot-like matrix lets me change rows/columns/filters to see counts by Country, Sector, Job Nature, Age Band, Experience Years Band, and Learning Reason. No hardcoded numbers.
+
+Role protection: non-admin cannot access /admin.html or /api/admin/*.
+
+Notes
+
+Keep changes incremental and backward-compatible.
+
+If something is ambiguous, prefer the simplest UX that satisfies these constraints.
+
+Use the existing data structures where possible; do not invent complex schemas.
