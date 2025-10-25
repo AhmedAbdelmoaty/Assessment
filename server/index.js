@@ -416,10 +416,7 @@ app.post("/api/intake/next", async (req, res) => {
             return res.json({
               done: true,
               skipIntake: true,
-              message:
-                lang === "ar"
-                  ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
-                  : "Welcome back! We'll start the assessment directly.",
+              sessionId: sessionId // Return sessionId so frontend can store it
             });
           }
           
