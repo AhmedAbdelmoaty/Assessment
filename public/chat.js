@@ -52,10 +52,6 @@
     }
 
     async function checkSessionState() {
-        // ✅ أضف هذا الكود في البداية
-        // محاولة استرجاع الرسائل من localStorage أولاً
-        const restored = restoreChatFromStorage();
-
         try {
             const response = await fetch("/api/session/state");
             const data = await response.json();
@@ -64,32 +60,30 @@
                 sessionId = data.sessionId;
             }
 
-            // ✅ تعديل: إزالة رسالة الترحيب إذا تم استرجاع الشات
+            // Determine what to display based on session state
             if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
+                // Resume existing session
                 currentStep = data.stage === "teaching" ? "teaching" : "assessment";
                 teachingActive = data.stage === "teaching";
-
-                // ✅ فقط إذا لم يتم استرجاع الشات من localStorage
-                if (!restored) {
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                            : "Welcome back! Let's continue where we left off."
-                    );
-                }
-
+                
+                // Show welcome message for resuming
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
+                        : "Welcome back! Let's continue where we left off."
+                );
+                
                 if (currentStep === "assessment") {
                     setTimeout(() => startAssessment(), 1000);
                 }
             } else {
-                // بداية جديدة
+                // Start new intake flow
                 startIntakeFlow();
             }
         } catch (error) {
             console.error("Error checking session state:", error);
-            if (!restored) {
-                startIntakeFlow();
-            }
+            // If error, start fresh intake
+            startIntakeFlow();
         }
     }
 
@@ -651,78 +645,7 @@
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         return html;
     }
-    // ===== حفظ واسترجاع رسائل الشات =====
-    function saveChatToStorage() {
-        try {
-            const messages = [];
-            const bubbles = document.querySelectorAll('.message-bubble');
 
-            bubbles.forEach(bubble => {
-                const isUser = bubble.classList.contains('user');
-                const content = bubble.querySelector('.message-content');
-                if (content) {
-                    messages.push({
-                        type: isUser ? 'user' : 'system',
-                        html: content.innerHTML,
-                        timestamp: Date.now()
-                    });
-                }
-            });
-
-            // حفظ في localStorage
-            localStorage.setItem(`chat_${sessionId}`, JSON.stringify(messages));
-            console.log('[CHAT] Messages saved to localStorage');
-        } catch (e) {
-            console.error('[CHAT] Failed to save messages:', e);
-        }
-    }
-
-    function restoreChatFromStorage() {
-        try {
-            if (!sessionId) return false;
-
-            const saved = localStorage.getItem(`chat_${sessionId}`);
-            if (!saved) return false;
-
-            const messages = JSON.parse(saved);
-            if (!messages || messages.length === 0) return false;
-
-            console.log('[CHAT] Restoring', messages.length, 'messages from localStorage');
-
-            // مسح الشات الحالي
-            chatMessages.innerHTML = '';
-
-            // إعادة بناء الرسائل
-            messages.forEach(msg => {
-                const bubble = document.createElement('div');
-                bubble.className = `message-bubble ${msg.type}`;
-
-                if (msg.type === 'user') {
-                    bubble.innerHTML = `
-                        <div class="message-content">${msg.html}</div>
-                        <div class="message-avatar">
-                            <i class="fas fa-user"></i>
-                        </div>
-                    `;
-                } else {
-                    bubble.innerHTML = `
-                        <div class="message-avatar">
-                            <i class="fas fa-robot"></i>
-                        </div>
-                        <div class="message-content">${msg.html}</div>
-                    `;
-                }
-
-                chatMessages.appendChild(bubble);
-            });
-
-            scrollToBottom();
-            return true;
-        } catch (e) {
-            console.error('[CHAT] Failed to restore messages:', e);
-            return false;
-        }
-    }
     function addUserMessage(text) {
         const bubble = document.createElement("div");
         bubble.className = "message-bubble user";
@@ -734,7 +657,6 @@
         `;
         chatMessages.appendChild(bubble);
         scrollToBottom();
-        saveChatToStorage();
     }
 
     function addSystemMessage(text) {
@@ -753,7 +675,6 @@
         `;
         chatMessages.appendChild(bubble);
         scrollToBottom();
-        saveChatToStorage();
     }
 
     function addChoiceChips(choices) {
@@ -867,7 +788,6 @@ ${mcq.choices
 
         chatMessages.appendChild(container);
         scrollToBottom();
-        saveChatToStorage();
     }
 
     function addStartTeachingCTA() {

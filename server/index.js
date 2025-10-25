@@ -1250,73 +1250,109 @@ async function finalizeTeachingNote(noteId, transcript, lang) {
     .where(eq(teachingNotes.id, noteId));
 }
 
-    app.post("/api/teach/start", async (req, res) => {
+/* =========================
+   Teaching: start (data-only)
+   ========================= */
+app.post("/api/teach/start", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    const session = getSession(sessionId);
+    const teaching = ensureTeachingState(session);
+    teaching.lang = session.lang || teaching.lang || "ar";
+
+    // اجلب الموضوعات من التقرير (نقاط قوة وضعف بصيغة العرض البشرية)
+    const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
+    const strengthsDisplay = Array.isArray(session?.report?.strengths_display) ? session.report.strengths_display : [];
+
+    if (!gapsDisplay.length && !strengthsDisplay.length) {
+      return res.status(400).json({
+        error: true,
+        message: (session.lang === "ar") ? "لا توجد مواضيع للشرح حاليًا." : "No topics to teach right now."
+      });
+    }
+
+    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة "منهجية" بنفس المواضيع الواردة في التقرير فقط
+    if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
+      const langForDisplay = teaching.lang || session.lang || "ar";
+
+      // 1) ابني ترتيب المنهج كأسماء "بشرية" بنفس لغة الجلسة
+      const canonicalKeys = [
+        ...((LEVELS.L1?.clusters) || []),
+        ...((LEVELS.L2?.clusters) || []),
+        ...((LEVELS.L3?.clusters) || []),
+      ];
+      const canonicalDisplays = canonicalKeys.map(k => humanizeCluster(k, langForDisplay));
+
+      // 2) جهّز lookup سريع من القوائم القادمة من التقرير (من غير تعديل)
+      const S = Array.isArray(strengthsDisplay) ? strengthsDisplay : [];
+      const G = Array.isArray(gapsDisplay) ? gapsDisplay : [];
+      const setS = new Set(S);
+      const setG = new Set(G);
+
+      // 3) مرّ على المنهج بالترتيب: لو الموضوع موجود في strengths → ادفعه كـ strength،
+      //    وإلا لو موجود في gaps → ادفعه كـ gap. لا تضف أي موضوع غير موجود في التقرير.
+      const ordered = [];
+      for (const disp of canonicalDisplays) {
+        if (setS.has(disp)) {
+          ordered.push({ display: disp, kind: "strength" });
+          continue;
+        }
+        if (setG.has(disp)) {
+          ordered.push({ display: disp, kind: "gap" });
+          continue;
+        }
+      }
+
+      teaching.topics_queue = ordered;
+    }
+
+
+    teaching.mode = "active";
+    teaching.current_topic_index = 0;
+    teaching.transcript = teaching.transcript || [];
+
+    // اجمع سياق المستخدم من الـintake فقط (بيانات خام—لا تعليمات)
+    teaching.profileContext = {
+      job_nature: session.intake?.job_nature || "",
+      experience_years_band: session.intake?.experience_years_band || "",
+      job_title_exact: session.intake?.job_title_exact || "",
+      sector: session.intake?.sector || "",
+      learning_reason: session.intake?.learning_reason || "",
+    };
+
+    const first = teaching.topics_queue[0] || null;
+    if (!first) {
+      return res.status(400).json({
+        error: true,
+        message: (session.lang === "ar") ? "لا توجد مواضيع للشرح." : "No topics to teach."
+      });
+    }
+
+    logTeach("start.data", { sessionId, lang: teaching.lang, first });
+
+    // Database persistence for logged-in users
+    if (req.session.userId) {
       try {
-        const { sessionId } = req.body || {};
-        const session = getSession(sessionId);
-        const teaching = ensureTeachingState(session);
-        teaching.lang = session.lang || teaching.lang || "ar";
-
-        const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
-        const strengthsDisplay = Array.isArray(session?.report?.strengths_display) ? session.report.strengths_display : [];
-
-        if (!gapsDisplay.length && !strengthsDisplay.length) {
-          return res.status(400).json({
-            error: true,
-            message: (session.lang === "ar") ? "لا توجد مواضيع للشرح حاليًا." : "No topics to teach right now."
-          });
-        }
-
-        if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
-          const langForDisplay = teaching.lang || session.lang || "ar";
-          const canonicalKeys = [
-            ...((LEVELS.L1?.clusters) || []),
-            ...((LEVELS.L2?.clusters) || []),
-            ...((LEVELS.L3?.clusters) || []),
-          ];
-          const canonicalDisplays = canonicalKeys.map(k => humanizeCluster(k, langForDisplay));
-          const S = Array.isArray(strengthsDisplay) ? strengthsDisplay : [];
-          const G = Array.isArray(gapsDisplay) ? gapsDisplay : [];
-          const setS = new Set(S);
-          const setG = new Set(G);
-          const ordered = [];
-          for (const disp of canonicalDisplays) {
-            if (setS.has(disp)) {
-              ordered.push({ display: disp, kind: "strength" });
-              continue;
-            }
-            if (setG.has(disp)) {
-              ordered.push({ display: disp, kind: "gap" });
-              continue;
-            }
+        const noteData = await getOrCreateTeachingNote(req.session.userId, sessionId);
+        if (noteData) {
+          teaching.dbNoteId = noteData.id;
+          teaching.dbAssessmentId = noteData.assessmentId;
+          
+          // If resuming, load the existing threadId and transcript
+          if (noteData.isResume && noteData.threadId) {
+            teaching.assistant = teaching.assistant || {};
+            teaching.assistant.threadId = noteData.threadId;
+            teaching.transcript = noteData.transcript || [];
+            logTeach("teaching.resume", { noteId: noteData.id, threadId: noteData.threadId, transcriptLen: teaching.transcript.length });
+          } else {
+            logTeach("teaching.new", { noteId: noteData.id, assessmentId: noteData.assessmentId });
           }
-          teaching.topics_queue = ordered;
         }
-
-        teaching.mode = "active";
-        teaching.current_topic_index = 0;
-        teaching.transcript = teaching.transcript || [];
-
-        teaching.profileContext = {
-          job_nature: session.intake?.job_nature || "",
-          experience_years_band: session.intake?.experience_years_band || "",
-          job_title_exact: session.intake?.job_title_exact || "",
-          sector: session.intake?.sector || "",
-          learning_reason: session.intake?.learning_reason || "",
-        };
-
-        const first = teaching.topics_queue[0] || null;
-        if (!first) {
-          return res.status(400).json({
-            error: true,
-            message: (session.lang === "ar") ? "لا توجد مواضيع للشرح." : "No topics to teach."
-          });
-        }
-
-        logTeach("start.data", { sessionId, lang: teaching.lang, first });
-
-        // ✅ إزالة: لا نحفظ في الـ database هنا نهائيًا
-        // تم حذف كل كود Database persistence
+      } catch (dbErr) {
+        console.error("[TEACH-START] Database error:", dbErr);
+        // Continue without DB persistence
+      }
+    }
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       // إنشاء Thread مرة واحدة (or use existing from DB)
