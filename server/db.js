@@ -68,6 +68,7 @@ export const attempts = pgTable('attempts', {
   intakeStepIndex: integer('intake_step_index'),
   assessmentState: jsonb('assessment_state'),
   reportData: jsonb('report_data')
+  teachingThreadId: text('teaching_thread_id')
 });
 
 // Teaching notes table (enhanced for independent threads)

@@ -63,7 +63,69 @@ app.use(session({
     sameSite: 'lax'
   }
 }));
+// server/index.js
 
+// ... (بعد تعريف OpenAI وقبل app.use(/api/auth))
+
+// =========================================================
+// 🔑 دالة جديدة: جلب حالة الجلسة من قاعدة البيانات
+// =========================================================
+async function getSessionState(sessionId, userId) {
+  // نبحث في جدول attempts عن آخر محاولة تقييم لهذا المُعرف
+  const [attempt] = await db
+    .select()
+    .from(attempts)
+    .where(and(eq(attempts.id, sessionId), eq(attempts.userId, userId)))
+    .limit(1);
+
+  // إذا وجدنا الجلسة، نُرجع كل بياناتها
+  if (attempt) {
+    return {
+      sessionId: attempt.id,
+      userId: attempt.userId,
+      currentStep: attempt.currentStep || 'intake', // الخطوة الحالية (intake, assessment, report, teaching)
+      currentLevel: attempt.currentLevel,
+      intakeStepIndex: attempt.intakeStepIndex,
+      assessmentState: attempt.assessmentState || {},
+      reportData: attempt.reportData || null,
+      teaching: {
+        mode: 'idle', // سيتم تحديثه لاحقاً
+        assistant: attempt.teachingThreadId
+          ? { threadId: attempt.teachingThreadId } // إن وجد Thread ID، فهذا يعني أن الشرح مُستأنف
+          : null,
+        transcript: [], // لا نحفظ سجل الرسائل هنا، بل فقط الحالة
+        current_topic_index: 0,
+      },
+      // إضافة حقول أخرى تحتاجها (مثل finishedAt، scorePercent، إلخ)
+    };
+  }
+  // إذا لم نجد الجلسة، نُرجع لا شيء (null)
+  return null;
+}
+
+// =========================================================
+// 💾 دالة جديدة: تحديث حالة الجلسة في قاعدة البيانات
+// =========================================================
+async function updateSessionState(sessionId, userId, data) {
+  // نجهز البيانات لتحديث جدول attempts
+  const updateData = {
+    currentStep: data.currentStep,
+    currentLevel: data.currentLevel,
+    intakeStepIndex: data.intakeStepIndex,
+    assessmentState: data.assessmentState,
+    reportData: data.reportData,
+    teachingThreadId: data.teaching?.assistant?.threadId || null, // حفظ الـ Thread ID الجديد
+    finishedAt: data.finishedAt, // إذا انتهت الجلسة
+  };
+
+  // نقوم بتحديث الصف في جدول attempts
+  await db
+    .update(attempts)
+    .set(updateData)
+    .where(and(eq(attempts.id, sessionId), eq(attempts.userId, userId)));
+}
+// =========================================================
+// ... (بقية الكود)
 app.use(express.json());
 
 // Protect /admin.html - only admins can access
@@ -94,8 +156,6 @@ app.use('/api', profileRoutes);
 // Mount admin routes (protected with middleware)
 app.use('/api/admin', adminLimiter, requireAdmin, adminRoutes);
 
-// In-memory session store
-const sessions = new Map();
 
 // OpenAI client
 const openai = new OpenAI({
