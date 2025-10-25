@@ -9,9 +9,7 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false;
-    // ⭐ الجديد: متغيرات علشان إدارة الجلسات
-    let currentSessionId = null;
-    const generateSessionId = () => 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
     // DOM elements
     const langButtons = document.querySelectorAll(".lang-btn");
     const html = document.documentElement;
@@ -19,229 +17,40 @@
     const chatInput = document.getElementById("chatInput");
     const sendBtn = document.getElementById("sendBtn");
     const headerLogoutBtn = document.getElementById("headerLogoutBtn");
-    function escapeHtml(text) {
-        const div = document.createElement("div");
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    function scrollToBottom() {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-    // ⭐ الجديد: function تخزن الرسائل في الـ history
-    async function saveToHistory(role, content) {
-      if (!currentSessionId) return;
-
-      try {
-        await fetch('/api/session/history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: currentSessionId,
-            role,
-            content
-          })
-        });
-      } catch (error) {
-        console.error('Failed to save history:', error);
-      }
-    }
-    function addUserMessage(text, shouldSave = true) {
-      const bubble = document.createElement("div");
-      bubble.className = "message-bubble user";
-      bubble.innerHTML = `
-        <div class="message-content">${escapeHtml(text)}</div>
-        <div class="message-avatar">
-          <i class="fas fa-user"></i>
-        </div>
-      `;
-      chatMessages.appendChild(bubble);
-
-      // ⭐ الجديد: نخزن في الـ history
-      if (shouldSave && currentSessionId) {
-        saveToHistory('user', text);
-      }
-
-      scrollToBottom();
-    }
-    function addSystemMessage(text, shouldSave = true) {
-      if (!text) return;
-
-      const bubble = document.createElement("div");
-      bubble.className = "message-bubble system";
-      bubble.innerHTML = `
-        <div class="message-avatar">
-          <i class="fas fa-robot"></i>
-        </div>
-        <div class="message-content">${formatTutorMessage(text)}</div>
-      `;
-      chatMessages.appendChild(bubble);
-
-      // ⭐ الجديد: نخزن في الـ history
-      if (shouldSave && currentSessionId) {
-        saveToHistory('system', text);
-      }
-
-      scrollToBottom();
-    }
-    
-    async function restoreChatState() {
-      if (!currentSessionId) {
-        // نجرب نجيب الـ sessionId من localStorage
-        currentSessionId = localStorage.getItem('currentSessionId');
-        if (!currentSessionId) return false;
-      }
-
-      try {
-        showTypingIndicator();
-        const response = await fetch(`/api/session/state?sessionId=${currentSessionId}`);
-        const data = await response.json();
-        hideTypingIndicator();
-
-        if (data.expired) {
-          // الجلسة خلصت - نبدأ واحدة جديدة
-          localStorage.removeItem('currentSessionId');
-          currentSessionId = null;
-          return false;
-        }
-
-        if (data.chatHistory && data.chatHistory.length > 0) {
-          console.log('[CLIENT] Restoring chat history:', data.chatHistory.length, 'messages');
-
-          // نمسح أي رسائل موجودة حالياً
-          chatMessages.innerHTML = "";
-
-          // نعيد بناء كل الرسائل
-          data.chatHistory.forEach(msg => {
-            if (msg.role === 'user') {
-              addUserMessage(msg.content, false); // false = ما تخزنش في الhistory تاني
-            } else if (msg.role === 'system') {
-              addSystemMessage(msg.content, false);
-            }
-            // ملاحظة: الـ MCQ messages مش محتاجين نستعرضها لأنها بتكون part of assessment state
-          });
-
-          // نحدد الخطوة الحالية ونكمل منها
-          currentStep = data.currentStep;
-          teachingActive = data.currentStep === 'teaching';
-          sessionId = currentSessionId; // نضمن إن sessionId متسابقة
-
-          console.log('[CLIENT] Restored to step:', currentStep);
-
-          // نستكمل من الخطوة الصحيحة
-          await continueFromCurrentStep(data);
-          return true;
-        }
-
-        return false;
-      } catch (error) {
-        console.error("Failed to restore chat:", error);
-        hideTypingIndicator();
-        return false;
-      }
-    }
-
-    // ⭐ الجديد: نكمل من الخطوة الحالية
-    async function continueFromCurrentStep(sessionState) {
-      switch (sessionState.currentStep) {
-        case 'intake':
-          // لو في intake، نكمل من آخر step
-          if (sessionState.intakeStepIndex > 0) {
-            // نطلب الخطوة التالية في الـ intake
-            setTimeout(() => continueIntake(sessionState), 500);
-          }
-          break;
-
-        case 'assessment':
-          if (sessionState.assessment?.currentQuestion) {
-            // كنا في سؤال - نعرضه تاني
-            console.log('[CLIENT] Restoring MCQ question');
-            addMCQQuestion(sessionState.assessment.currentQuestion);
-          } else {
-            // نطلب السؤال التالي
-            console.log('[CLIENT] Continuing to next question');
-            setTimeout(() => startAssessment(), 500);
-          }
-          break;
-
-        case 'report':
-          // نعرض التقرير تاني
-          if (sessionState.report) {
-            console.log('[CLIENT] Restoring report');
-            addSystemMessage(sessionState.report.message, false);
-            addStartTeachingCTA();
-            showFloatingButton();
-            updateProgress(2, true);
-          }
-          break;
-
-        case 'teaching':
-          // نعرض آخر رسالة في الشرح
-          console.log('[CLIENT] Restoring teaching session');
-          const teachingMessages = sessionState.chatHistory.filter(msg => 
-            msg.role === 'system' || msg.role === 'user'
-          );
-          if (teachingMessages.length > 0) {
-            const lastMessage = teachingMessages[teachingMessages.length - 1];
-            if (lastMessage.role === 'system') {
-              addSystemMessage(lastMessage.content, false);
-            }
-            addSaveTeachingButton();
-          }
-          break;
-      }
-    }
-
-    // ⭐ الجديد: نكمل الـ intake من حيث وقفنا
-    async function continueIntake(sessionState) {
-      try {
-        const response = await fetch("/api/intake/next", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: currentSessionId,
-            lang: currentLang,
-          }),
-        });
-
-        const data = await response.json();
-        renderIntakeStep(data);
-      } catch (error) {
-        console.error("Error continuing intake:", error);
-      }
-    }
-
 
     // Initialize
     init();
 
     async function init() {
-      // Authentication guard
-      try {
-        const response = await fetch("/api/me");
-        if (!response.ok) {
-          window.location.href = "/login.html";
-          return;
+        // Authentication guard: Check if user is logged in
+        try {
+            const response = await fetch("/api/me");
+            if (!response.ok) {
+                // Not logged in, redirect to login
+                window.location.href = "/login.html";
+                return;
+            }
+        } catch (error) {
+            console.error("Auth check failed:", error);
+            window.location.href = "/login.html";
+            return;
         }
-      } catch (error) {
-        window.location.href = "/login.html";
-        return;
-      }
 
-      // User is authenticated, proceed with setup
-      if (window.HeaderUtils) {
-        HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
-        currentLang = HeaderUtils.getCurrentLang();
-      }
-
-      setupSendButton();
-      setupInputHandlers();
-      setupLogout();
-
-      // ⭐ الجديد: نبدأ مباشرة في الـ intake
-      console.log('[DEBUG] Starting fresh session');
-      await startIntakeFlow();
+        // User is authenticated, proceed with setup
+        // Initialize language switch using shared header.js
+        if (window.HeaderUtils) {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+            currentLang = HeaderUtils.getCurrentLang();
+        }
+        
+        setupSendButton();
+        setupInputHandlers();
+        setupLogout();
+        
+        // Check session state and resume if needed
+        await checkSessionState();
     }
-/*
+
     async function checkSessionState() {
         try {
             const response = await fetch("/api/session/state");
@@ -286,7 +95,6 @@
             });
         });
     }
-    */
 
     function switchLanguage(lang) {
         currentLang = lang;
@@ -382,12 +190,6 @@
     }
 
     async function startIntakeFlow() {
-        // ⭐ الجديد: نبدأ session جديد
-        if (!currentSessionId) {
-          currentSessionId = generateSessionId();
-          localStorage.setItem('currentSessionId', currentSessionId);
-          sessionId = currentSessionId; // نضمن التوافق مع الكود القديم
-        }
         showTypingIndicator();
         try {
             const response = await fetch("/api/intake/next", {
@@ -402,19 +204,6 @@
             sessionId = data.sessionId;
             hideTypingIndicator();
 
-            // Check if intake is already completed (skipIntake = true)
-            if (data.done && data.skipIntake) {
-                // Intake already completed, show message and start assessment
-                if (data.message) {
-                    addSystemMessage(data.message);
-                }
-                currentStep = "assessment";
-                updateProgress(1);
-                setTimeout(() => startAssessment(), 1000);
-                return;
-            }
-
-            // Normal intake flow
             renderIntakeStep(data);
         } catch (error) {
             console.error("Error starting intake:", error);
@@ -453,17 +242,11 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    sessionId: currentSessionId,
+                    sessionId,
                     lang: currentLang,
                     answer,
                 }),
             });
-            const sessionIdFromHeader = response.headers.get('X-Session-Id');
-            if (sessionIdFromHeader && !currentSessionId) {
-              currentSessionId = sessionIdFromHeader;
-              localStorage.setItem('currentSessionId', currentSessionId);
-              sessionId = currentSessionId;
-            }
 
             const data = await response.json();
             console.log("[CLIENT] Intake response:", data);
@@ -610,18 +393,13 @@
     }
 
     async function startAssessment() {
-        if (!currentSessionId) {
-          currentSessionId = generateSessionId();
-          localStorage.setItem('currentSessionId', currentSessionId);
-          sessionId = currentSessionId;
-        }
         showTypingIndicator();
 
         try {
             const response = await fetch("/api/assess/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId: currentSessionId }),
+                body: JSON.stringify({ sessionId }),
             });
 
             const mcq = await response.json();
@@ -648,7 +426,7 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    sessionId: currentSessionId,
+                    sessionId,
                     userChoiceIndex: userAnswer,
                 }),
             });
@@ -685,7 +463,7 @@
             const response = await fetch("/api/report", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId: currentSessionId }),
+                body: JSON.stringify({ sessionId }),
             });
 
             const report = await response.json();
@@ -698,8 +476,6 @@
             ) {
                 addSystemMessage(report.message.trim());
                 addStartTeachingCTA();
-                // Show floating button after report is displayed
-                showFloatingButton();
             }
 
             const strengthsToShow =
@@ -737,15 +513,13 @@
             const resp = await fetch("/api/teach/message", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId: currentSessionId, text: text }),
+                body: JSON.stringify({ sessionId, text: text }),
             });
             const data = await resp.json();
             hideTypingIndicator();
 
             if (data && data.message) {
                 addSystemMessage(data.message);
-                // Add save button after each teaching message
-                addSaveTeachingButton();
             } else {
                 addSystemMessage(
                     currentLang === "ar"
@@ -761,76 +535,6 @@
                     : "There was a problem during teaching.",
             );
         }
-    }
-    
-    function addSaveTeachingButton() {
-        // Remove any existing save buttons
-        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
-        
-        const bubbles = Array.from(
-            document.querySelectorAll(".message-bubble.system"),
-        );
-        const last = bubbles[bubbles.length - 1];
-        if (!last) return;
-        
-        const content = last.querySelector(".message-content");
-        if (!content) return;
-        
-        const container = document.createElement("div");
-        container.className = "save-teaching-btn-container";
-        
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "save-teaching-btn";
-        saveBtn.textContent =
-            currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
-        
-        saveBtn.addEventListener("click", async () => {
-            saveBtn.disabled = true;
-            try {
-                const resp = await fetch("/api/teach/save", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                const data = await resp.json();
-                
-                if (data.ok) {
-                    // Reset teaching state
-                    teachingActive = false;
-                    currentStep = "report";
-                    
-                    // Show success message
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "تم حفظ الدرس بنجاح!"
-                            : "Lesson saved successfully!")
-                    );
-                    
-                    // Remove the save button
-                    container.remove();
-                    
-                    // Show report CTAs again
-                    addStartTeachingCTA();
-                } else {
-                    saveBtn.disabled = false;
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "فشل حفظ الدرس"
-                            : "Failed to save lesson")
-                    );
-                }
-            } catch (e) {
-                saveBtn.disabled = false;
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "حدث خطأ أثناء حفظ الدرس"
-                        : "An error occurred while saving the lesson"
-                );
-            }
-        });
-        
-        container.appendChild(saveBtn);
-        content.appendChild(container);
     }
 
     // UI helper functions
@@ -853,6 +557,37 @@
            .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         return html;
+    }
+
+    function addUserMessage(text) {
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble user";
+        bubble.innerHTML = `
+            <div class="message-content">${escapeHtml(text)}</div>
+            <div class="message-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+        `;
+        chatMessages.appendChild(bubble);
+        scrollToBottom();
+    }
+
+    function addSystemMessage(text) {
+        if (!text) {
+            console.error("[CLIENT] Attempted to render blank bot message");
+            return;
+        }
+
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble system";
+        bubble.innerHTML = `
+            <div class="message-avatar">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="message-content">${formatTutorMessage(text)}</div>
+        `;
+        chatMessages.appendChild(bubble);
+        scrollToBottom();
     }
 
     function addChoiceChips(choices) {
@@ -983,29 +718,26 @@ ${mcq.choices
         const wrap = document.createElement("div");
         wrap.className = "teaching-cta";
 
-        // Start Explanation button
-        const explainBtn = document.createElement("button");
-        explainBtn.className = "teach-cta-btn primary";
-        explainBtn.textContent =
-            currentLang === "ar" ? "ابدأ الشرح" : "Start Explanation";
+        const btn = document.createElement("button");
+        btn.className = "teach-cta-btn";
+        btn.textContent =
+            currentLang === "ar" ? "ابدأ الشرح" : "Start explanation";
 
-        explainBtn.addEventListener("click", async () => {
-            explainBtn.disabled = true;
+        btn.addEventListener("click", async () => {
+            btn.disabled = true;
             showTypingIndicator();
             try {
                 const resp = await fetch("/api/teach/start", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId: currentSessionId }),
+                    body: JSON.stringify({ sessionId }),
                 });
                 const data = await resp.json();
                 hideTypingIndicator();
+                btn.disabled = false;
 
                 teachingActive = true;
                 currentStep = "teaching";
-
-                // Remove the CTA buttons after starting (can only start once)
-                wrap.remove();
 
                 if (data && data.message) {
                     addSystemMessage(data.message);
@@ -1018,7 +750,7 @@ ${mcq.choices
                 }
             } catch (e) {
                 hideTypingIndicator();
-                explainBtn.disabled = false;
+                btn.disabled = false;
                 addSystemMessage(
                     currentLang === "ar"
                         ? "تعذّر بدء الشرح."
@@ -1027,8 +759,7 @@ ${mcq.choices
             }
         });
 
-        // Only add the "Start Explanation" button (removed "Start New Assessment")
-        wrap.appendChild(explainBtn);
+        wrap.appendChild(btn);
         content.appendChild(wrap);
     }
 
@@ -1084,79 +815,13 @@ ${mcq.choices
         }
     }
 
-    
-
-    
-
-    // ==========================================
-    // Floating New Assessment Button Logic
-    // ==========================================
-    
-    const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
-    
-    function showFloatingButton() {
-        if (floatingBtn) {
-            floatingBtn.style.display = "inline-flex";
-        }
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-    
-    function hideFloatingButton() {
-        if (floatingBtn) {
-            floatingBtn.style.display = "none";
-        }
-    }
-    
-    if (floatingBtn) {
-      floatingBtn.addEventListener("click", async () => {
-        // ⭐ الجديد: نبدأ session جديد تماماً
-        const newSessionId = generateSessionId();
 
-        // نحذف الـ session القديم من الـ localStorage
-        localStorage.removeItem('currentSessionId');
-
-        // ⭐ الجديد: نعمل cleanup للـ OpenAI threads القديمة
-        if (teachingActive && currentSessionId) {
-          try {
-            await fetch('/api/teach/cleanup', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionId: currentSessionId })
-            });
-          } catch (e) {
-            console.error('Error cleaning up old thread:', e);
-          }
-        }
-
-        // ⭐ الجديد: نضيف confirmation message
-        const confirmMsg = currentLang === "ar"
-          ? "سيتم بدء تقييم جديد. هل أنت متأكد؟"
-          : "A new assessment will start. Are you sure?";
-
-        if (!confirm(confirmMsg)) {
-          return;
-        }
-
-        // نمسح الشات
-        chatMessages.innerHTML = "";
-
-        // ⭐ الجديد: نعطل الـ session القديم ونبدأ جديد
-        currentSessionId = newSessionId;
-        localStorage.setItem('currentSessionId', currentSessionId);
-        sessionId = currentSessionId;
-
-        // نreset الـ state
-        currentStep = "assessment";
-        teachingActive = false;
-        hideFloatingButton();
-
-        // نبدأ assessment جديد
-        addSystemMessage(
-          currentLang === "ar"
-            ? "جاري بدء تقييم جديد..."
-            : "Starting a new assessment..."
-        );
-
-        setTimeout(() => startAssessment(), 800);
-      });
+    function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
     }
 })();

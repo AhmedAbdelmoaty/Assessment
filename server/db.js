@@ -42,19 +42,8 @@ export const authOtps = pgTable('auth_otps', {
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
-// User assessments table - simple structure for quick saves
+// User assessments table (existing)
 export const userAssessments = pgTable('user_assessments', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  startedAt: timestamp('started_at').defaultNow().notNull(),
-  completedAt: timestamp('completed_at'),
-  difficulty: text('difficulty'),
-  scorePercent: integer('score_percent'),
-  evidence: jsonb('evidence')
-});
-
-// Attempts table - full assessment structure with all details
-export const attempts = pgTable('attempts', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
@@ -70,16 +59,23 @@ export const attempts = pgTable('attempts', {
   reportData: jsonb('report_data')
 });
 
-// Teaching notes table (enhanced for independent threads)
+// Attempts table (existing)
+export const attempts = pgTable('attempts', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+  difficulty: text('difficulty'),
+  scorePercent: integer('score_percent'),
+  evidence: jsonb('evidence')
+});
+
+// Teaching notes table (existing)
 export const teachingNotes = pgTable('teaching_notes', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id').references(() => users.id).notNull(),
-  assessmentId: uuid('assessment_id').references(() => attempts.id), // Links to specific assessment
-  threadId: text('thread_id'), // OpenAI thread ID for this explanation
-  inProgress: boolean('in_progress').default(false).notNull(), // Is this teaching session active?
-  topicDisplay: text('topic_display').notNull(),
-  text: text('text').notNull(), // Formatted transcript for display
-  transcript: jsonb('transcript'), // Raw conversation array: [{from: 'user'|'assistant', text: '...'}]
+  topicDisplay: text('topic_display'),
+  text: text('text').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
