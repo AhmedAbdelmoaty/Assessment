@@ -49,6 +49,15 @@ Preferred communication style: Simple, everyday language.
 - Empty teaching_notes database entries on teaching start
 - Transcript truncation bug (previously limited to 8 messages)
 - Artificial "Welcome back" or system prompts on reload
+- All greeting messages from reload paths (frontend and backend)
+- Auto-start logic from checkSessionState() - now read-only restoration only
+
+**Critical Fixes (Latest):**
+1. **Single Bootstrap**: DOMContentLoaded with bootstrapped flag prevents double initialization
+2. **Read-Only Restoration**: checkSessionState() only restores transcript, no auto-start behavior
+3. **Rehydration Guard**: isRehydrating flag prevents POST loops during transcript rebuild
+4. **Teaching Isolation**: Each NEW ASSESSMENT generates fresh UUID → fresh session → fresh threadId
+5. **No Greeting Messages**: Removed all "Welcome"/"مرحبًا" messages from reload paths
 
 ## System Architecture
 
