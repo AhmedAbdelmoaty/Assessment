@@ -335,25 +335,32 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   return queue;
 }
 
-// Init/get session
 function getSession(sessionId) {
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, {
       sessionId,
       lang: "en",
-      currentStep: "intake",
+      currentStep: "intake", // ممكن يكون: intake, assessment, report, teaching
+
+      // ⭐ الجديد: هنخزن كل الرسائل عشان نستعرضها عند العودة
+      chatHistory: [],
+
+      // ⭐ الجديد: عشان نعرف نستكمل من أي خطوة
+      lastActivity: new Date(),
+
       intakeStepIndex: 0,
       openingShown: false,
       intake: {},
       assessment: {
         currentLevel: "L1",
-        attempts: 0, // 0 first attempt, 1 retry
-        evidence: [], // { level, cluster, correct, qid }
+        attempts: 0,
+        evidence: [],
         questionIndexInAttempt: 1,
         usedClustersCurrentAttempt: [],
         currentQuestion: null,
         stemsCurrentAttempt: [],
         lastAttemptStems: {},
+        startedAt: null
       },
       teaching: {
         mode: "idle",
@@ -361,7 +368,8 @@ function getSession(sessionId) {
         topics_queue: [],
         current_topic_index: 0,
         transcript: [],
-        assistant: { threadId: null }
+        assistant: { threadId: null },
+        profileContext: {}
       },
       finished: false,
       report: null,
@@ -395,6 +403,7 @@ app.post("/api/intake/next", async (req, res) => {
     const { sessionId = randomUUID(), lang = "en", answer } = req.body;
     const session = getSession(sessionId);
     session.lang = lang;
+    res.setHeader('X-Session-Id', sessionId);
 
     // Check if logged-in user has already completed intake - skip it entirely
     if (req.session.userId && session.intakeStepIndex === 0 && !session.intakeChecked) {
@@ -450,6 +459,13 @@ app.post("/api/intake/next", async (req, res) => {
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
+      if (session.chatHistory) {
+        session.chatHistory.push({
+          role: 'system',
+          content: data.message,
+          timestamp: new Date()
+        });
+      }
       
       // Initialize assessment state
       session.assessment = session.assessment || {
@@ -712,7 +728,8 @@ app.post("/api/assess/next", async (req, res) => {
   try {
     const { sessionId } = req.body;
     const session = getSession(sessionId);
-    
+    session.currentStep = "assessment";
+    session.lastActivity = new Date();
     // Dev logging
     if (isDev) {
       console.log(`[ASSESS-NEXT] SessionID: ${sessionId}, Step: ${session?.currentStep}, Assessment state:`, {
@@ -852,7 +869,13 @@ app.post("/api/assess/next", async (req, res) => {
       totalQuestions: 2,
       ...(isDev && usedFallback ? { _dev_fallback: true } : {})
     };
-
+    if (session.chatHistory) {
+      session.chatHistory.push({
+        role: 'mcq',
+        content: mcqPayload,
+        timestamp: new Date()
+      });
+    }
     return res.json(mcqPayload);
     
   } catch (err) {
@@ -935,7 +958,13 @@ app.post("/api/assess/answer", async (req, res) => {
         }
       }
     }
-
+    if (session.chatHistory) {
+      session.chatHistory.push({
+        role: 'user', 
+        content: `الإجابة: ${q.choices[userChoiceIndex]}`,
+        timestamp: new Date()
+      });
+    }
     A.currentQuestion = null;
 
     return res.json({
@@ -1094,6 +1123,13 @@ app.post("/api/report", async (req, res) => {
     session.report = report;
     session.finished = true;
     session.currentStep = "report";
+    if (session.chatHistory) {
+      session.chatHistory.push({
+        role: 'system',
+        content: report.message,
+        timestamp: new Date()
+      });
+    }
 
     // Save assessment results to database for logged-in users (only completed assessments)
     if (req.session.userId) {
@@ -1259,6 +1295,8 @@ app.post("/api/teach/start", async (req, res) => {
     const session = getSession(sessionId);
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
+    session.currentStep = "teaching";
+    session.lastActivity = new Date();
 
     // اجلب الموضوعات من التقرير (نقاط قوة وضعف بصيغة العرض البشرية)
     const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
@@ -1408,6 +1446,13 @@ app.post("/api/teach/start", async (req, res) => {
         const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (text) {
           pushTranscript(session, { from: "tutor", text });
+          if (session.chatHistory) {
+            session.chatHistory.push({
+              role: 'system',
+              content: text,
+              timestamp: new Date()
+            });
+          }
           return res.json({ message: text });
         }
       }
@@ -1461,6 +1506,8 @@ app.post("/api/teach/message", async (req, res) => {
     const userText = (text ?? userMessage ?? "").toString().trim();
     const session = getSession(sessionId);
     const teaching = ensureTeachingState(session);
+    session.currentStep = "teaching";
+    session.lastActivity = new Date();
 
     if (!userText) {
       return res.status(400).json({ error: true, message: "Empty message." });
@@ -1478,7 +1525,16 @@ app.post("/api/teach/message", async (req, res) => {
     const current = topicsQueue[teaching.current_topic_index || 0] || { display: "", kind: "gap" };
     const currentTopic = current.display || "";
 
-    try { pushTranscript(session, { from: "user", text: userText }); } catch {}
+    try { 
+      pushTranscript(session, { from: "user", text: userText });
+      if (session.chatHistory) {
+        session.chatHistory.push({
+          role: 'user',
+          content: userText,
+          timestamp: new Date()
+        });
+      } 
+      } catch {}
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       if (!teaching.assistant?.threadId) {
@@ -1521,7 +1577,18 @@ app.post("/api/teach/message", async (req, res) => {
         const assistantMsg = msgs.data.find(m => m.role === "assistant");
         const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (reply) {
-          try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+          try { 
+            pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic });
+            if (session.chatHistory) {
+              session.chatHistory.push({
+                role: 'system',
+                content: reply,
+                timestamp: new Date()
+              });
+            }
+               
+              
+          } catch {}
           
           // Save transcript to database for logged-in users
           if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
@@ -1715,7 +1782,116 @@ app.post("/api/teach/save", async (req, res) => {
     });
   }
 });
+// ⭐ الجديد: API علشان نجيب الـ state الكامل للجلسة
+app.get("/api/session/state", async (req, res) => {
+  try {
+    const { sessionId } = req.query;
 
+    if (!sessionId) {
+      return res.status(400).json({ error: "Session ID required" });
+    }
+
+    const session = getSession(sessionId);
+
+    // نتأكد إن الجلسة لسة نشطة (أقل من 24 ساعة)
+    const now = new Date();
+    const lastActive = new Date(session.lastActivity || session.startedAt || now);
+    const hoursDiff = (now - lastActive) / (1000 * 60 * 60);
+
+    if (hoursDiff > 24) {
+      // الجلسة منتهية - نبدأ واحدة جديدة
+      sessions.delete(sessionId);
+      return res.json({ expired: true });
+    }
+
+    // نحدث وقت النشاط
+    session.lastActivity = now;
+
+    res.json({
+      sessionId: session.sessionId,
+      currentStep: session.currentStep,
+      chatHistory: session.chatHistory || [],
+      lang: session.lang,
+      assessment: session.assessment,
+      teaching: session.teaching,
+      report: session.report,
+      intake: session.intake
+    });
+
+  } catch (err) {
+    console.error("Session state error:", err);
+    res.status(500).json({ error: "Failed to get session state" });
+  }
+});
+// ⭐ الجديد: API علشان نخزن الرسائل في الـ history
+app.post("/api/session/history", async (req, res) => {
+  try {
+    const { sessionId, role, content } = req.body;
+
+    if (!sessionId || !role || !content) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const session = getSession(sessionId);
+
+    if (!session.chatHistory) {
+      session.chatHistory = [];
+    }
+
+    // نضيف الرسالة للـ history
+    session.chatHistory.push({
+      role, // 'user' أو 'system' أو 'mcq'
+      content,
+      timestamp: new Date()
+    });
+
+    // نحافظ على الـ history محدود (آخر 100 رسالة)
+    if (session.chatHistory.length > 100) {
+      session.chatHistory = session.chatHistory.slice(-50);
+    }
+
+    // نحدث وقت النشاط
+    session.lastActivity = new Date();
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Save history error:", err);
+    res.status(500).json({ error: "Failed to save history" });
+  }
+});
+// ⭐ الجديد: API علشان ننظف الـ threads القديمة
+app.post("/api/teach/cleanup", async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: "Session ID required" });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.json({ ok: true }); // الجلسة مش موجودة خلاص
+    }
+
+    // نحاول نوقف الـ thread لو موجود
+    if (session.teaching?.assistant?.threadId) {
+      try {
+        await openai.beta.threads.del(session.teaching.assistant.threadId);
+      } catch (threadError) {
+        console.error('Error deleting thread:', threadError);
+        // مش مشكلة لو مينفعش نمسح الـ thread
+      }
+    }
+
+    // نمسح الجلسة من الـ memory
+    sessions.delete(sessionId);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Cleanup error:", err);
+    res.status(500).json({ error: "Cleanup failed" });
+  }
+});
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", sessions: sessions.size });
