@@ -344,7 +344,6 @@ function getSession(sessionId) {
       currentStep: "intake",
       intakeStepIndex: 0,
       openingShown: false,
-      uiTranscript: [],   // <— holds FULL chat transcript shown to the user (user + assistant)
       intake: {},
       assessment: {
         currentLevel: "L1",
@@ -370,14 +369,6 @@ function getSession(sessionId) {
   }
   return sessions.get(sessionId);
 }
-// Append to unified UI transcript (assessment/report/teaching)
-function pushUiTranscript(session, item) {
-  if (!session.uiTranscript) session.uiTranscript = [];
-  const role = item.role === "user" ? "user" : "assistant";
-  const text = String(item.text || "").slice(0, 5000);
-  session.uiTranscript.push({ role, text, t: Date.now() });
-}
-
 
 // Validation
 function validateIntakeInput(stepKey, value) {
@@ -1722,49 +1713,6 @@ app.post("/api/teach/save", async (req, res) => {
         ? "فشل حفظ الشرح" 
         : "Failed to save explanation"
     });
-  }
-});
-// Unified chat state (rehydration)
-app.get("/api/chat/state", (req, res) => {
-  try {
-    // reuse or create a chat-level session id and keep it in the express-session
-    if (!req.session.chatSessionId) {
-      req.session.chatSessionId = randomUUID();
-    }
-    const chatSessionId = req.session.chatSessionId;
-    const sess = getSession(chatSessionId);
-
-    // Phase mapping based on our in-memory state
-    const phase = sess.currentStep || "intake";
-
-    // Return exactly what the client needs to rebuild UI
-    res.json({
-      ok: true,
-      sessionId: chatSessionId,
-      phase,
-      transcript: Array.isArray(sess.uiTranscript) ? sess.uiTranscript : [],
-      teaching: {
-        threadId: sess?.teaching?.assistant?.threadId || null,
-        runStatus: sess?.teaching?.runStatus || "idle"
-      }
-    });
-  } catch (err) {
-    console.error("[/api/chat/state] error:", err);
-    res.status(500).json({ ok: false, error: "state_error" });
-  }
-});
-// Track a single chat message into the session transcript
-app.post("/api/chat/track", express.json(), (req, res) => {
-  try {
-    const { role, text, sessionId } = req.body || {};
-    const chatSessionId = sessionId || req.session.chatSessionId;
-    if (!chatSessionId) return res.status(400).json({ ok: false, error: "no_session" });
-    const sess = getSession(chatSessionId);
-    pushUiTranscript(sess, { role, text });
-    return res.json({ ok: true, count: sess.uiTranscript.length });
-  } catch (err) {
-    console.error("[/api/chat/track] error:", err);
-    res.status(500).json({ ok: false, error: "track_error" });
   }
 });
 
