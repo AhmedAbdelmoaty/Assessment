@@ -16,6 +16,7 @@ import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import adminRoutes from "./routes/admin.js";
 import { requireAdmin, redirectAdmins } from "./middleware/admin.js";
+import { db, users, chatMessages } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -388,7 +389,31 @@ function validateIntakeInput(stepKey, value) {
   }
   return value && value.trim().length > 0;
 }
+// -------- Save Chat Message --------
+app.post("/api/chat/message", async (req, res) => {
+  try {
+    const { sessionId, role, content, messageType, metadata } = req.body;
 
+    if (!sessionId || !role || !content) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Save message to database
+    const [savedMessage] = await db.insert(chatMessages).values({
+      sessionId,
+      userId: req.session.userId || null,
+      role,
+      content,
+      messageType: messageType || 'text',
+      metadata: metadata || null
+    }).returning();
+
+    res.json({ ok: true, messageId: savedMessage.id });
+  } catch (error) {
+    console.error("[SAVE MESSAGE ERROR]", error);
+    res.status(500).json({ error: "Failed to save message" });
+  }
+});
 // -------- Intake Flow --------
 app.post("/api/intake/next", async (req, res) => {
   try {

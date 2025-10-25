@@ -52,39 +52,94 @@
     }
 
     async function checkSessionState() {
-        try {
-            const response = await fetch("/api/session/state");
-            const data = await response.json();
-
-            if (data.sessionId) {
-                sessionId = data.sessionId;
-            }
-
-            // Determine what to display based on session state
-            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
-                // Resume existing session
-                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
-                teachingActive = data.stage === "teaching";
-                
-                // Show welcome message for resuming
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                        : "Welcome back! Let's continue where we left off."
-                );
-                
-                if (currentStep === "assessment") {
-                    setTimeout(() => startAssessment(), 1000);
-                }
-            } else {
-                // Start new intake flow
-                startIntakeFlow();
-            }
-        } catch (error) {
-            console.error("Error checking session state:", error);
-            // If error, start fresh intake
-            startIntakeFlow();
+      try {
+        // Get sessionId from localStorage or create new one
+        let storedSessionId = localStorage.getItem('chatSessionId');
+        if (!storedSessionId) {
+          storedSessionId = randomUUID();
+          localStorage.setItem('chatSessionId', storedSessionId);
         }
+        sessionId = storedSessionId;
+
+        // Fetch session state with messages
+        const response = await fetch(`/api/session/state?sessionId=${sessionId}`);
+        const data = await response.json();
+
+        // Restore messages to UI
+        if (data.messages && data.messages.length > 0) {
+          data.messages.forEach(msg => {
+            if (msg.role === 'user') {
+              addUserMessage(msg.content, false); // false = don't save again
+            } else if (msg.role === 'system' || msg.role === 'assistant') {
+              if (msg.messageType === 'mcq' && msg.metadata) {
+                // Restore MCQ question
+                const container = document.createElement('div');
+                container.className = 'mcq-container';
+                const levelNames = {
+                  L1: currentLang === "ar" ? "المستوى الأول - الأساسيات" : "Level 1 - Foundations",
+                  L2: currentLang === "ar" ? "المستوى الثاني - التطبيق" : "Level 2 - Core Applied",
+                  L3: currentLang === "ar" ? "المستوى الثالث - المهني" : "Level 3 - Professional",
+                };
+                container.innerHTML = `
+                  <div class="mcq-header">
+                    <span class="mcq-level">${levelNames[msg.metadata.level] || 'Question'}</span>
+                    <span class="mcq-number">${msg.metadata.questionNumber || ''}/${msg.metadata.totalQuestions || ''}</span>
+                  </div>
+                  <div class="mcq-question" dir="auto">${escapeHtml(msg.content)}</div>
+                  <div class="mcq-choices">
+                    ${(msg.metadata.choices || []).map((choice, idx) => `
+                      <div class="mcq-choice" data-idx="${idx}">
+                        <div class="choice-letter">${String.fromCharCode(65 + idx)}</div>
+                        <span dir="auto">${escapeHtml(choice)}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                `;
+                chatMessages.appendChild(container);
+              } else {
+                addSystemMessage(msg.content, false); // false = don't save again
+              }
+            }
+          });
+          scrollToBottom();
+
+          // Determine current step from last message
+          const lastMsg = data.messages[data.messages.length - 1];
+          if (lastMsg.messageType === 'mcq') {
+            currentStep = 'assessment';
+          } else if (lastMsg.messageType === 'report') {
+            currentStep = 'report';
+            updateProgress(2);
+            showFloatingButton();
+          } else if (lastMsg.messageType === 'teaching') {
+            currentStep = 'teaching';
+            teachingActive = true;
+          } else if (lastMsg.messageType === 'intake') {
+            currentStep = 'intake';
+          }
+
+          // If last message was a question from system, don't send welcome message
+          if (lastMsg.role === 'assistant' || lastMsg.role === 'system') {
+            // User needs to respond - do nothing, wait for their input
+            return;
+          }
+        } else {
+          // No messages yet - start fresh intake
+          startIntakeFlow();
+        }
+
+      } catch (error) {
+        console.error("Error checking session state:", error);
+        startIntakeFlow();
+      }
+    }
+
+    function randomUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
     }
 
     function setupLanguageToggle() {
@@ -535,8 +590,7 @@
 
             if (data && data.message) {
                 addSystemMessage(data.message);
-                // Add save button after each teaching message
-                addSaveTeachingButton();
+                
             } else {
                 addSystemMessage(
                     currentLang === "ar"
@@ -554,76 +608,29 @@
         }
     }
     
-    function addSaveTeachingButton() {
-        // Remove any existing save buttons
-        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
-        
-        const bubbles = Array.from(
-            document.querySelectorAll(".message-bubble.system"),
-        );
-        const last = bubbles[bubbles.length - 1];
-        if (!last) return;
-        
-        const content = last.querySelector(".message-content");
-        if (!content) return;
-        
-        const container = document.createElement("div");
-        container.className = "save-teaching-btn-container";
-        
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "save-teaching-btn";
-        saveBtn.textContent =
-            currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
-        
-        saveBtn.addEventListener("click", async () => {
-            saveBtn.disabled = true;
-            try {
-                const resp = await fetch("/api/teach/save", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                const data = await resp.json();
-                
-                if (data.ok) {
-                    // Reset teaching state
-                    teachingActive = false;
-                    currentStep = "report";
-                    
-                    // Show success message
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "تم حفظ الدرس بنجاح!"
-                            : "Lesson saved successfully!")
-                    );
-                    
-                    // Remove the save button
-                    container.remove();
-                    
-                    // Show report CTAs again
-                    addStartTeachingCTA();
-                } else {
-                    saveBtn.disabled = false;
-                    addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "فشل حفظ الدرس"
-                            : "Failed to save lesson")
-                    );
-                }
-            } catch (e) {
-                saveBtn.disabled = false;
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "حدث خطأ أثناء حفظ الدرس"
-                        : "An error occurred while saving the lesson"
-                );
-            }
-        });
-        
-        container.appendChild(saveBtn);
-        content.appendChild(container);
-    }
+   
+    // ==========================================
+    // Save message to database
+    // ==========================================
+    async function saveMessageToDB(role, content, messageType = 'text', metadata = null) {
+      if (!sessionId) return;
 
+      try {
+        await fetch('/api/chat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            role,
+            content,
+            messageType,
+            metadata
+          })
+        });
+      } catch (error) {
+        console.error('[SAVE MESSAGE ERROR]', error);
+      }
+    }
     // UI helper functions
     function normalizeTutorText(raw) {
         let t = (raw ?? "").toString();
@@ -646,35 +653,45 @@
         return html;
     }
 
-    function addUserMessage(text) {
-        const bubble = document.createElement("div");
-        bubble.className = "message-bubble user";
-        bubble.innerHTML = `
-            <div class="message-content">${escapeHtml(text)}</div>
-            <div class="message-avatar">
-                <i class="fas fa-user"></i>
-            </div>
-        `;
-        chatMessages.appendChild(bubble);
-        scrollToBottom();
+    function addUserMessage(text, shouldSave = true) {
+      const bubble = document.createElement("div");
+      bubble.className = "message-bubble user";
+      bubble.innerHTML = `
+          <div class="message-content">${escapeHtml(text)}</div>
+          <div class="message-avatar">
+              <i class="fas fa-user"></i>
+          </div>
+      `;
+      chatMessages.appendChild(bubble);
+      scrollToBottom();
+
+      // Save to database
+      if (shouldSave) {
+        saveMessageToDB('user', text, 'text', null);
+      }
     }
 
-    function addSystemMessage(text) {
-        if (!text) {
-            console.error("[CLIENT] Attempted to render blank bot message");
-            return;
-        }
+    function addSystemMessage(text, shouldSave = true) {
+      if (!text) {
+        console.error("[CLIENT] Attempted to render blank bot message");
+        return;
+      }
 
-        const bubble = document.createElement("div");
-        bubble.className = "message-bubble system";
-        bubble.innerHTML = `
-            <div class="message-avatar">
-                <i class="fas fa-robot"></i>
-            </div>
-            <div class="message-content">${formatTutorMessage(text)}</div>
-        `;
-        chatMessages.appendChild(bubble);
-        scrollToBottom();
+      const bubble = document.createElement("div");
+      bubble.className = "message-bubble system";
+      bubble.innerHTML = `
+          <div class="message-avatar">
+              <i class="fas fa-robot"></i>
+          </div>
+          <div class="message-content">${formatTutorMessage(text)}</div>
+      `;
+      chatMessages.appendChild(bubble);
+      scrollToBottom();
+
+      // Save to database
+      if (shouldSave) {
+        saveMessageToDB('assistant', text, 'text', null);
+      }
     }
 
     function addChoiceChips(choices) {
@@ -787,6 +804,13 @@ ${mcq.choices
         });
 
         chatMessages.appendChild(container);
+        // Save MCQ to database
+          saveMessageToDB('assistant', mcq.prompt, 'mcq', {
+            level: mcq.level,
+            questionNumber: mcq.questionNumber,
+            totalQuestions: mcq.totalQuestions,
+            choices: mcq.choices
+          });
         scrollToBottom();
     }
 
@@ -936,45 +960,49 @@ ${mcq.choices
     
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
-            // Confirm action if teaching is active
-            if (teachingActive) {
-                const confirmMsg = currentLang === "ar"
-                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
-                    : "The current explanation will be saved. Start a new assessment?";
-                
-                if (!confirm(confirmMsg)) {
-                    return;
-                }
-                
-                // Save current teaching before starting new assessment
-                try {
-                    await fetch("/api/teach/save", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId, autoSave: true }),
-                    });
-                } catch (e) {
-                    console.error("Error auto-saving teaching:", e);
-                }
+          // Save current teaching session if active
+          if (teachingActive && teaching.transcript && teaching.transcript.length > 0) {
+            try {
+              await fetch("/api/teach/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId, autoSave: true }),
+              });
+            } catch (e) {
+              console.error("Error auto-saving teaching:", e);
             }
-            
-            // Clear chat UI
-            chatMessages.innerHTML = "";
-            
-            // Reset state
-            currentStep = "assessment";
-            teachingActive = false;
-            hideFloatingButton();
-            
-            // Show starting message
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "جاري بدء تقييم جديد..."
-                    : "Starting a new assessment..."
-            );
-            
-            // Start new assessment
-            setTimeout(() => startAssessment(), 800);
+          }
+
+          // Generate NEW sessionId
+          const newSessionId = randomUUID();
+          localStorage.setItem('chatSessionId', newSessionId);
+          sessionId = newSessionId;
+
+          // Clear chat UI completely
+          chatMessages.innerHTML = "";
+
+          // Reset ALL state
+          currentStep = "intake";
+          teachingActive = false;
+          teaching = {
+            mode: "idle",
+            lang: currentLang,
+            topics_queue: [],
+            current_topic_index: 0,
+            transcript: [],
+            assistant: { threadId: null },
+            profileContext: {}
+          };
+          hideFloatingButton();
+
+          // Start fresh intake
+          addSystemMessage(
+            currentLang === "ar"
+              ? "جلسة جديدة! هنبدأ من البداية."
+              : "New session! Starting fresh."
+          );
+
+          setTimeout(() => startIntakeFlow(), 800);
         });
     }
 })();
