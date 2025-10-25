@@ -94,51 +94,8 @@ app.use('/api', profileRoutes);
 // Mount admin routes (protected with middleware)
 app.use('/api/admin', adminLimiter, requireAdmin, adminRoutes);
 
-// server/index.js
-
-// ... (بعد آخر سطر import)
-
-// Helper to initialize or get the chat state from the persistent user session
-function ensureChatSession(req) {
-  if (!req.session.chat) {
-    req.session.chat = {
-      // Unique ID for this chat instance, useful for debugging
-      id: randomUUID(),
-      lang: "en",
-      currentStep: "intake",
-      intakeStepIndex: 0,
-      openingShown: false,
-      intake: {},
-      assessment: {
-        currentLevel: "L1",
-        attempts: 0,
-        evidence: [],
-        questionIndexInAttempt: 1,
-        usedClustersCurrentAttempt: [],
-        currentQuestion: null,
-        stemsCurrentAttempt: [],
-        lastAttemptStems: {},
-      },
-      teaching: {
-        mode: "idle",
-        lang: "ar",
-        topics_queue: [],
-        current_topic_index: 0,
-        transcript: [],
-        assistant: { threadId: null },
-        profileContext: {},
-        dbNoteId: null, // To link to the teaching_notes table
-        dbAssessmentId: null
-      },
-      finished: false,
-      report: null,
-      // This is the most important addition: a unified chat history
-      history: []
-    };
-  }
-  // Return a reference to the chat object in the session
-  return req.session.chat;
-}
+// In-memory session store
+const sessions = new Map();
 
 // OpenAI client
 const openai = new OpenAI({
@@ -378,6 +335,41 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   return queue;
 }
 
+// Init/get session
+function getSession(sessionId) {
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, {
+      sessionId,
+      lang: "en",
+      currentStep: "intake",
+      intakeStepIndex: 0,
+      openingShown: false,
+      intake: {},
+      assessment: {
+        currentLevel: "L1",
+        attempts: 0, // 0 first attempt, 1 retry
+        evidence: [], // { level, cluster, correct, qid }
+        questionIndexInAttempt: 1,
+        usedClustersCurrentAttempt: [],
+        currentQuestion: null,
+        stemsCurrentAttempt: [],
+        lastAttemptStems: {},
+      },
+      teaching: {
+        mode: "idle",
+        lang: "ar",
+        topics_queue: [],
+        current_topic_index: 0,
+        transcript: [],
+        assistant: { threadId: null }
+      },
+      finished: false,
+      report: null,
+    });
+  }
+  return sessions.get(sessionId);
+}
+
 // Validation
 function validateIntakeInput(stepKey, value) {
   if (stepKey === "name_full") {
@@ -397,55 +389,46 @@ function validateIntakeInput(stepKey, value) {
   return value && value.trim().length > 0;
 }
 
-// server/index.js - استبدل الكود القديم بهذا
-
+// -------- Intake Flow --------
 app.post("/api/intake/next", async (req, res) => {
   try {
-    // 1. Get chat session from the persistent req.session (no more sessionId from client)
-    const chatSession = ensureChatSession(req);
-    const { lang = "en", answer } = req.body;
-    chatSession.lang = lang;
-
-    // 2. If an answer was provided, log it to history first
-    if (answer !== undefined && answer !== null) {
-        chatSession.history.push({ type: 'user', content: { text: answer } });
-    }
+    const { sessionId = randomUUID(), lang = "en", answer } = req.body;
+    const session = getSession(sessionId);
+    session.lang = lang;
 
     // Check if logged-in user has already completed intake - skip it entirely
-    if (req.session.userId && chatSession.intakeStepIndex === 0 && !chatSession.intakeChecked) {
+    if (req.session.userId && session.intakeStepIndex === 0 && !session.intakeChecked) {
       try {
         const { db, users } = await import('./db.js');
         const { eq } = await import('drizzle-orm');
         const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
-
+        
         if (user) {
           const profile = user.profileJson || {};
-
+          
+          // If intake already completed, skip to assessment
           if (profile.intakeCompleted && profile.intake) {
-            chatSession.intake = { ...profile.intake };
-            chatSession.intakeStepIndex = INTAKE_ORDER.length;
-            chatSession.currentStep = "assessment";
-            chatSession.intakeChecked = true;
-
-            const message = lang === "ar"
-                ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
-                : "Welcome back! We'll start the assessment directly.";
-
-            // Log the system message to history
-            chatSession.history.push({ type: 'system', content: { text: message } });
-
+            session.intake = { ...profile.intake };
+            session.intakeStepIndex = INTAKE_ORDER.length; // Mark as completed
+            session.currentStep = "assessment";
+            session.intakeChecked = true;
+            
             return res.json({
               done: true,
               skipIntake: true,
-              message: message,
+              message:
+                lang === "ar"
+                  ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
+                  : "Welcome back! We'll start the assessment directly.",
             });
           }
-
-          chatSession.intake.name_full = profile.name || user.username;
-          chatSession.intake.email = user.email;
-          chatSession.intake.phone_number = profile.phone || '';
-          chatSession.intakeStepIndex = 3;
-          chatSession.intakeChecked = true;
+          
+          // Otherwise auto-populate basic info
+          session.intake.name_full = profile.name || user.username;
+          session.intake.email = user.email;
+          session.intake.phone_number = profile.phone || '';
+          session.intakeStepIndex = 3; // Skip to country (index 3)
+          session.intakeChecked = true;
         }
       } catch (err) {
         console.error('Failed to load user data:', err);
@@ -453,25 +436,23 @@ app.post("/api/intake/next", async (req, res) => {
     }
 
     if (answer !== undefined && answer !== null) {
-      const currentStepKey = INTAKE_ORDER[chatSession.intakeStepIndex];
+      const currentStepKey = INTAKE_ORDER[session.intakeStepIndex];
       const stepConfig = INTAKE_CATALOG[currentStepKey];
       if (!validateIntakeInput(currentStepKey, answer)) {
         const errorMessage =
           stepConfig.validation_error?.[lang] ||
           (lang === "ar" ? "يرجى إدخال إجابة صحيحة" : "Please enter a valid answer");
-
-        // Log the validation error to history
-        chatSession.history.push({ type: 'system', content: { text: errorMessage } });
         return res.json({ error: true, message: errorMessage });
       }
-      chatSession.intake[currentStepKey] = answer;
-      chatSession.intakeStepIndex++;
+      session.intake[currentStepKey] = answer;
+      session.intakeStepIndex++;
     }
 
-    if (chatSession.intakeStepIndex >= INTAKE_ORDER.length) {
-      chatSession.currentStep = "assessment";
-
-      chatSession.assessment = chatSession.assessment || {
+    if (session.intakeStepIndex >= INTAKE_ORDER.length) {
+      session.currentStep = "assessment";
+      
+      // Initialize assessment state
+      session.assessment = session.assessment || {
         currentLevel: "L1",
         attempts: 0,
         evidence: [],
@@ -480,22 +461,25 @@ app.post("/api/intake/next", async (req, res) => {
         stemsCurrentAttempt: [],
         lastAttemptStems: {}
       };
-
+      
+      // Save intake data to database for logged-in users
       if (req.session.userId) {
         try {
           const { db, users } = await import('./db.js');
           const { eq } = await import('drizzle-orm');
-
+          
+          // Get existing profile to preserve other data
           const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
           const existingProfile = user?.profileJson || {};
-
+          
+          // Save intake under profileJson.intake
           await db.update(users).set({ 
             profileJson: {
               ...existingProfile,
-              name: chatSession.intake.name_full,
-              phone: chatSession.intake.phone_number,
+              name: session.intake.name_full,
+              phone: session.intake.phone_number,
               intake: {
-                ...chatSession.intake
+                ...session.intake
               },
               intakeCompleted: true,
               intakeCompletedAt: new Date().toISOString()
@@ -506,51 +490,38 @@ app.post("/api/intake/next", async (req, res) => {
           console.error('[INTAKE] Failed to save intake to database:', err);
         }
       }
-
-      const finalMessage = lang === "ar"
-            ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
-            : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.";
-
-      // Log final intake message to history
-      chatSession.history.push({ type: 'system', content: { text: finalMessage } });
-
+      
       return res.json({
         done: true,
-        message: finalMessage,
+        message:
+          lang === "ar"
+            ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
+            : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.",
       });
     }
 
-    if ((answer === undefined || answer === null) && !chatSession.openingShown) {
-      chatSession.openingShown = true;
-      const openingMessage = INTAKE_OPENING[lang];
-
-      // Log opening message to history
-      chatSession.history.push({ type: 'system', content: { text: openingMessage } });
-
+    if ((answer === undefined || answer === null) && !session.openingShown) {
+      session.openingShown = true;
       return res.json({
+        sessionId,
         stepKey: "__opening__",
         type: "info",
-        prompt: openingMessage,
+        prompt: INTAKE_OPENING[lang],
         lang,
         autoNext: true,
       });
     }
 
-    const nextStepKey = INTAKE_ORDER[chatSession.intakeStepIndex];
+    const nextStepKey = INTAKE_ORDER[session.intakeStepIndex];
     const nextStep = INTAKE_CATALOG[nextStepKey];
-    const responsePayload = {
+    return res.json({
+      sessionId,
       stepKey: nextStepKey,
       type: nextStep.type,
       prompt: nextStep.prompt[lang],
       options: nextStep.options?.[lang] || null,
       lang,
-    };
-
-    // Log the next intake question to history
-    chatSession.history.push({ type: 'intake_step', content: responsePayload });
-
-    return res.json(responsePayload);
-
+    });
   } catch (err) {
     console.error("Intake error:", err);
     res.status(500).json({ error: true, message: "Server error during intake" });
@@ -734,29 +705,28 @@ function getFallbackMCQ(level, lang, questionIndex) {
   return fallbacks[level]?.[qKey]?.[lang] || fallbacks.L1.q1.en;
 }
 
-// server/index.js - استبدل الكود القديم بهذا
-
+// -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
   const isDev = process.env.NODE_ENV !== 'production';
-
+  
   try {
-    // 1. Get chat session from the persistent req.session
-    const chatSession = ensureChatSession(req);
-
+    const { sessionId } = req.body;
+    const session = getSession(sessionId);
+    
     // Dev logging
     if (isDev) {
-      console.log(`[ASSESS-NEXT] UserID: ${req.session.userId}, Step: ${chatSession?.currentStep}, Assessment state:`, {
-        currentLevel: chatSession?.assessment?.currentLevel,
-        attempts: chatSession?.assessment?.attempts,
-        evidenceCount: chatSession?.assessment?.evidence?.length
+      console.log(`[ASSESS-NEXT] SessionID: ${sessionId}, Step: ${session?.currentStep}, Assessment state:`, {
+        currentLevel: session?.assessment?.currentLevel,
+        attempts: session?.assessment?.attempts,
+        evidenceCount: session?.assessment?.evidence?.length
       });
     }
-
+    
     // Initialize assessment state if needed
-    if (chatSession.currentStep !== "assessment" || !chatSession.assessment) {
+    if (session.currentStep !== "assessment" || !session.assessment) {
       if (isDev) console.log(`[ASSESS-NEXT] Initializing assessment state`);
-      chatSession.currentStep = "assessment";
-      chatSession.assessment = {
+      session.currentStep = "assessment";
+      session.assessment = {
         currentLevel: "L1",
         attempts: 0,
         evidence: [],
@@ -767,19 +737,19 @@ app.post("/api/assess/next", async (req, res) => {
       };
     }
 
-    const A = chatSession.assessment;
-
-    // Track assessment start time
+    const A = session.assessment;
+    
+    // Track assessment start time (only on first question of first level)
     if (!A.startedAt && A.currentLevel === "L1" && A.attempts === 0 && A.evidence.length === 0) {
       A.startedAt = new Date();
     }
 
     const profile = {
-      job_nature: chatSession.intake?.job_nature || "",
-      experience_years_band: chatSession.intake?.experience_years_band || "",
-      job_title_exact: chatSession.intake?.job_title_exact || "",
-      sector: chatSession.intake?.sector || "",
-      learning_reason: chatSession.intake?.learning_reason || "",
+      job_nature: session.intake?.job_nature || "",
+      experience_years_band: session.intake?.experience_years_band || "",
+      job_title_exact: session.intake?.job_title_exact || "",
+      sector: session.intake?.sector || "",
+      learning_reason: session.intake?.learning_reason || "",
     };
 
     const attempt_type = A.attempts === 0 ? "first" : "retry";
@@ -790,14 +760,15 @@ app.post("/api/assess/next", async (req, res) => {
     let q = null;
     let usedFallback = false;
 
+    // Check if OpenAI API key exists
     if (!process.env.OPENAI_API_KEY) {
       console.warn('[ASSESS-NEXT] ⚠️  OPENAI_API_KEY not found, using fallback MCQ');
-      q = getFallbackMCQ(A.currentLevel, chatSession.lang || 'en', question_index);
+      q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
       usedFallback = true;
     } else {
       try {
         const systemPrompt = getQuestionPromptSingle({
-          lang: chatSession.lang,
+          lang: session.lang,
           level: A.currentLevel,
           profile,
           attempt_type,
@@ -806,24 +777,41 @@ app.post("/api/assess/next", async (req, res) => {
           avoid_stems,
         });
 
+        if (isDev) {
+          console.log(`[ASSESS-NEXT] OpenAI prompt (first 200 chars): ${systemPrompt.substring(0, 200)}...`);
+        }
+
         const response = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: systemPrompt }],
           response_format: { type: "json_object" },
           temperature: 0.2,
           top_p: 1,
+          max_completion_tokens: 2048,
         });
 
         q = JSON.parse(response.choices[0].message.content);
 
+        // Validate schema
         if (!q || q.kind !== "question" || !Array.isArray(q.choices) || q.choices.length < 3 || 
             typeof q.correct_index !== "number" || q.correct_index < 0 || q.correct_index >= q.choices.length) {
+          console.error("[ASSESS-NEXT] Invalid question schema from OpenAI:", q);
           throw new Error("Invalid question schema");
         }
 
+        if (isDev) {
+          console.log(`[ASSESS-NEXT] ✅ OpenAI success - Level: ${q.level}, Cluster: ${q.cluster}`);
+        }
+
       } catch (openaiErr) {
-        console.error('[ASSESS-NEXT] ⚠️  OpenAI call failed:', openaiErr);
-        q = getFallbackMCQ(A.currentLevel, chatSession.lang || 'en', question_index);
+        console.error('[ASSESS-NEXT] ⚠️  OpenAI call failed:', {
+          status: openaiErr?.status || openaiErr?.response?.status,
+          code: openaiErr?.code,
+          message: openaiErr?.message,
+          errorBody: openaiErr?.response?.data
+        });
+        console.log('[ASSESS-NEXT] Using fallback MCQ');
+        q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
         usedFallback = true;
       }
     }
@@ -836,7 +824,6 @@ app.post("/api/assess/next", async (req, res) => {
       difficulty: q.difficulty || (question_index === 1 ? "easy" : "harder"),
       prompt: q.prompt,
       choices: newChoices,
-      originalChoices: q.choices, // Store original choices for logging user answer text
       correct_index: newCorrectIndex,
       qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     };
@@ -859,46 +846,42 @@ app.post("/api/assess/next", async (req, res) => {
       cluster: current.cluster,
       prompt: current.prompt,
       choices: current.choices,
+      correct_answer: "__hidden__",
+      rationale: "",
       questionNumber: question_index,
       totalQuestions: 2,
       ...(isDev && usedFallback ? { _dev_fallback: true } : {})
     };
 
-    // 2. Log the generated question to history
-    chatSession.history.push({ type: 'mcq', content: mcqPayload });
-
     return res.json(mcqPayload);
-
+    
   } catch (err) {
-    console.error("[ASSESS-NEXT] Fatal error:", err);
+    console.error("[ASSESS-NEXT] Fatal error:", {
+      message: err?.message,
+      stack: isDev ? err?.stack : undefined
+    });
+    
     return res.status(500).json({ 
       error: true,
       stage: "assess-next",
       reason: isDev ? err?.message || "Unknown error" : "Server error",
+      detail: isDev ? err?.code || err?.name : undefined
     });
   }
 });
 
-// server/index.js - استبدل الكود القديم بهذا
-
+// -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
-    // 1. Get chat session from the persistent req.session
-    const chatSession = ensureChatSession(req);
-    const { userChoiceIndex } = req.body;
-    const A = chatSession.assessment;
+    const { sessionId, userChoiceIndex } = req.body;
+    const session = getSession(sessionId);
+    const A = session.assessment;
 
-    if (chatSession.currentStep !== "assessment" || !A.currentQuestion) {
+    if (session.currentStep !== "assessment" || !A.currentQuestion) {
       return res.status(400).json({ error: "No active question" });
     }
 
     const q = A.currentQuestion;
-
-    // 2. Log the user's answer text to history
-    if (q.choices && q.choices[userChoiceIndex]) {
-        const userAnswerText = q.choices[userChoiceIndex];
-        chatSession.history.push({ type: 'user', content: { text: userAnswerText } });
-    }
 
     const isCorrect =
       Number.isInteger(userChoiceIndex) &&
@@ -932,18 +915,18 @@ app.post("/api/assess/answer", async (req, res) => {
           A.questionIndexInAttempt = 1;
           nextAction = "retry_same_level";
         } else {
-          chatSession.currentStep = "report";
+          session.currentStep = "report";
           nextAction = "stop";
         }
       } else {
         if (A.currentLevel === "L1") A.currentLevel = "L2";
         else if (A.currentLevel === "L2") A.currentLevel = "L3";
         else {
-          chatSession.currentStep = "report";
+          session.currentStep = "report";
           nextAction = "complete";
         }
 
-        if (chatSession.currentStep !== "report") {
+        if (session.currentStep !== "report") {
           A.attempts = 0;
           A.stemsCurrentAttempt = [];
           A.usedClustersCurrentAttempt = [];
