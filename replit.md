@@ -12,53 +12,6 @@ The platform uses an adaptive assessment engine that dynamically adjusts questio
 
 Preferred communication style: Simple, everyday language.
 
-## Recent Updates (October 2025)
-
-### Chat State Restoration & Session Management
-
-**Complete Chat Reloading System** - Implemented comprehensive chat state restoration that works across all phases (intake, assessment, report, teaching) without artificial "Welcome" messages or context loss.
-
-**Key Features:**
-- **Mid-Assessment Reload**: Full chat transcript restored with all questions and answers visible
-- **Post-Report Reload**: Report reappears exactly as generated, no restart required
-- **Mid-Teaching Reload**: Teaching conversation fully restored without creating empty database entries
-- **Session Persistence**: localStorage stores sessionId for seamless reload across page refreshes
-
-**Technical Implementation:**
-- `/api/chat/state` endpoint returns complete session state (phase, transcript, pending questions, report data, teaching state)
-- Frontend `checkSessionState()` rehydrates chat UI from server state without adding system messages
-- Teaching notes created ONLY when user clicks NEW ASSESSMENT button (not when teaching starts)
-- NEW ASSESSMENT button performs complete state clearing (localStorage + session + chat UI)
-
-**Teaching Persistence Model:**
-- Teaching state maintained in-memory during conversation
-- No database writes during `/api/teach/start` or `/api/teach/message`
-- Teaching note created in database only when `/api/teach/save` is called
-- Linked to most recent completed assessment via `assessmentId` foreign key
-- Each assessment+teaching session has independent `threadId` for OpenAI context isolation
-
-**Session State Transitions:**
-1. **New Session**: Generate fresh sessionId, clear localStorage, initialize empty state
-2. **Page Reload**: Load sessionId from localStorage, call `/api/chat/state` to restore full transcript
-3. **Phase Changes**: Update currentStep, preserve transcript, maintain context
-4. **NEW ASSESSMENT**: Clear localStorage, generate new sessionId, save teaching if applicable, start fresh
-
-**Removed Features:**
-- "END LESSON & SAVE" button (teaching saves automatically on NEW ASSESSMENT)
-- "Teaching Session" placeholder titles in UI
-- Empty teaching_notes database entries on teaching start
-- Transcript truncation bug (previously limited to 8 messages)
-- Artificial "Welcome back" or system prompts on reload
-- All greeting messages from reload paths (frontend and backend)
-- Auto-start logic from checkSessionState() - now read-only restoration only
-
-**Critical Fixes (Latest):**
-1. **Single Bootstrap**: DOMContentLoaded with bootstrapped flag prevents double initialization
-2. **Read-Only Restoration**: checkSessionState() only restores transcript, no auto-start behavior
-3. **Rehydration Guard**: isRehydrating flag prevents POST loops during transcript rebuild
-4. **Teaching Isolation**: Each NEW ASSESSMENT generates fresh UUID → fresh session → fresh threadId
-5. **No Greeting Messages**: Removed all "Welcome"/"مرحبًا" messages from reload paths
-
 ## System Architecture
 
 ### Frontend Architecture
