@@ -1,22 +1,5 @@
 (function () {
     "use strict";
-    // Fallback UIStore if /js/store.js didn't load
-    if (typeof window.UIStore === 'undefined') {
-        console.warn('[store] UIStore missing — enabling localStorage fallback');
-        window.UIStore = {
-            async getUI(sessionId) {
-                try {
-                    const raw = localStorage.getItem('ui_' + sessionId);
-                    return raw ? JSON.parse(raw) : null;
-                } catch (e) { return null; }
-            },
-            async setUI(sessionId, data) {
-                try {
-                    localStorage.setItem('ui_' + sessionId, JSON.stringify(data));
-                } catch (e) {}
-            }
-        };
-    }
 
     // State management
     let currentLang = "en";
@@ -26,40 +9,6 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false;
-    const SESSION_STORAGE_KEY = "assess_session_id";
-
-    let uiTranscript = []; // [{type:'system'|'user'|'mcq', text?:string, mcq?:object, ts:number}]
-
-    function uuidv4() {
-        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
-            (
-                c ^
-                (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
-            ).toString(16),
-        );
-    }
-
-    async function persistUI() {
-        if (!sessionId || !window.UIStore) return;
-        try {
-            await UIStore.setUI(sessionId, uiTranscript);
-        } catch (e) {
-            /* noop */
-        }
-    }
-
-    async function replayTranscript(list) {
-        if (!Array.isArray(list)) return;
-        for (const item of list) {
-            if (item.type === "system" && typeof item.text === "string") {
-                addSystemMessage(item.text);
-            } else if (item.type === "user" && typeof item.text === "string") {
-                addUserMessage(item.text);
-            } else if (item.type === "mcq" && item.mcq) {
-                addMCQQuestion(item.mcq);
-            }
-        }
-    }
 
     // DOM elements
     const langButtons = document.querySelectorAll(".lang-btn");
@@ -90,134 +39,40 @@
         // User is authenticated, proceed with setup
         // Initialize language switch using shared header.js
         if (window.HeaderUtils) {
-            HeaderUtils.initHeaderLanguageSwitch("#lang-switch");
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
             currentLang = HeaderUtils.getCurrentLang();
         }
-
+        
         setupSendButton();
         setupInputHandlers();
         setupLogout();
-        // === Early UI replay (لو عندنا sessionId محفوظ)
-        try {
-            const savedSession = (() => { try { return localStorage.getItem(SESSION_STORAGE_KEY); } catch(e) { return null; } })();
-            if (savedSession) {
-                sessionId = savedSession;
-                if (window.UIStore) {
-                    const saved = await UIStore.getUI(sessionId);
-                    if (Array.isArray(saved) && saved.length) {
-                        replayTranscript(saved); // يعرض الرسائل القديمة فورًا
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('UI replay at init failed:', e);
-        }
-
+        
         // Check session state and resume if needed
         await checkSessionState();
     }
 
     async function checkSessionState() {
-        const savedSession = (() => {
-            try {
-                return localStorage.getItem(SESSION_STORAGE_KEY);
-            } catch (e) {
-                return null;
-            }
-        })();
-        if (savedSession) {
-            sessionId = savedSession;
-        }
-
-        // Try hydrate before calling /api/session/state
-        if (sessionId) {
-            try {
-                const hr = await fetch("/api/session/hydrate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                if (hr.ok) {
-                    const h = await hr.json();
-                    if (h && h.assessment && h.assessment.currentQuestion) {
-                        currentStep = "assessment";
-                        updateProgress(1);
-                        const mcqExists =
-                            !!document.querySelector(".mcq-container");
-                        if (!mcqExists) {
-                            addMCQQuestion(h.assessment.currentQuestion);
-                        }
-                        return; // لا تكمل إلى /api/session/state ولا تبدأ Intake
-                    }
-                }
-            } catch (e) {
-                console.warn(
-                    "Early hydrate inside checkSessionState failed:",
-                    e,
-                );
-            }
-        }
-
         try {
             const response = await fetch("/api/session/state");
-            const ct = (response.headers.get('content-type') || '').toLowerCase();
-            if (!response.ok || !ct.includes('application/json')) {
-                throw new Error('SESSION_STATE_NOT_JSON');
-            }
             const data = await response.json();
-
 
             if (data.sessionId) {
                 sessionId = data.sessionId;
-                try {
-                    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-                } catch (e) {}
-            }
-            // 1) إعادة تشغيل الواجهة من التخزين المحلي (لو متاحة)
-            try {
-                if (window.UIStore && sessionId) {
-                    const saved = await UIStore.getUI(sessionId);
-                    if (saved && Array.isArray(saved) && saved.length) {
-                        // اعرض الرسائل المحفوظة كما هي
-                        replayTranscript(saved);
-                    }
-                }
-            } catch (e) {
-                console.warn("UI replay failed", e);
-            }
-
-            // 2) سؤال السيرفر عن الحالة الحالية (السؤال الجاري) لإكمال التهيئة
-            try {
-                const hr = await fetch("/api/session/hydrate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                if (hr.ok) {
-                    const h = await hr.json();
-                    if (h && h.assessment && h.assessment.currentQuestion) {
-                        // لو مافيش MCQ ظاهر حاليًا، اعرض السؤال الجاري
-                        const mcqExists =
-                            !!document.querySelector(".mcq-container");
-                        if (!mcqExists) {
-                            addMCQQuestion(h.assessment.currentQuestion);
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn("Hydrate fetch failed", e);
             }
 
             // Determine what to display based on session state
-            if (
-                data.stage === "assessment-in-progress" ||
-                data.stage === "teaching"
-            ) {
+            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
                 // Resume existing session
-                currentStep =
-                    data.stage === "teaching" ? "teaching" : "assessment";
+                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
                 teachingActive = data.stage === "teaching";
-
+                
+                // Show welcome message for resuming
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
+                        : "Welcome back! Let's continue where we left off."
+                );
+                
                 if (currentStep === "assessment") {
                     setTimeout(() => startAssessment(), 1000);
                 }
@@ -335,40 +190,6 @@
     }
 
     async function startIntakeFlow() {
-        // === Early resume guard: don't start intake if we have a saved session with an active question ===
-        try {
-            const savedSession = (() => {
-                try {
-                    return localStorage.getItem(SESSION_STORAGE_KEY);
-                } catch (e) {
-                    return null;
-                }
-            })();
-            if (savedSession) {
-                sessionId = savedSession;
-                const hr = await fetch("/api/session/hydrate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                });
-                if (hr.ok) {
-                    const h = await hr.json();
-                    if (h && h.assessment && h.assessment.currentQuestion) {
-                        currentStep = "assessment";
-                        updateProgress(1);
-                        const alreadyHasMcq =
-                            !!document.querySelector(".mcq-container");
-                        if (!alreadyHasMcq) {
-                            addMCQQuestion(h.assessment.currentQuestion);
-                        }
-                        return; // STOP: don't start intake, we resumed successfully
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn("startIntakeFlow early-hydrate failed:", e);
-        }
-
         showTypingIndicator();
         try {
             const response = await fetch("/api/intake/next", {
@@ -381,16 +202,17 @@
             console.log("[CLIENT] Initial intake response:", data);
 
             sessionId = data.sessionId;
-            try {
-                localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-            } catch (e) {}
             hideTypingIndicator();
 
+            // Check if intake is already completed (skipIntake = true)
             if (data.done && data.skipIntake) {
-                // Resume directly without greeting message
+                // Intake already completed, show message and start assessment
+                if (data.message) {
+                    addSystemMessage(data.message);
+                }
                 currentStep = "assessment";
                 updateProgress(1);
-                setTimeout(() => startAssessment(), 600);
+                setTimeout(() => startAssessment(), 1000);
                 return;
             }
 
@@ -486,7 +308,7 @@
         }
 
         addSystemMessage(data.prompt);
-
+        
         if (data.autoNext) {
             showTypingIndicator();
             try {
@@ -731,30 +553,28 @@
             );
         }
     }
-
+    
     function addSaveTeachingButton() {
         // Remove any existing save buttons
-        document
-            .querySelectorAll(".save-teaching-btn-container")
-            .forEach((el) => el.remove());
-
+        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
+        
         const bubbles = Array.from(
             document.querySelectorAll(".message-bubble.system"),
         );
         const last = bubbles[bubbles.length - 1];
         if (!last) return;
-
+        
         const content = last.querySelector(".message-content");
         if (!content) return;
-
+        
         const container = document.createElement("div");
         container.className = "save-teaching-btn-container";
-
+        
         const saveBtn = document.createElement("button");
         saveBtn.className = "save-teaching-btn";
         saveBtn.textContent =
             currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
-
+        
         saveBtn.addEventListener("click", async () => {
             saveBtn.disabled = true;
             try {
@@ -764,32 +584,30 @@
                     body: JSON.stringify({ sessionId }),
                 });
                 const data = await resp.json();
-
+                
                 if (data.ok) {
                     // Reset teaching state
                     teachingActive = false;
                     currentStep = "report";
-
+                    
                     // Show success message
                     addSystemMessage(
-                        data.message ||
-                            (currentLang === "ar"
-                                ? "تم حفظ الدرس بنجاح!"
-                                : "Lesson saved successfully!"),
+                        data.message || (currentLang === "ar"
+                            ? "تم حفظ الدرس بنجاح!"
+                            : "Lesson saved successfully!")
                     );
-
+                    
                     // Remove the save button
                     container.remove();
-
+                    
                     // Show report CTAs again
                     addStartTeachingCTA();
                 } else {
                     saveBtn.disabled = false;
                     addSystemMessage(
-                        data.message ||
-                            (currentLang === "ar"
-                                ? "فشل حفظ الدرس"
-                                : "Failed to save lesson"),
+                        data.message || (currentLang === "ar"
+                            ? "فشل حفظ الدرس"
+                            : "Failed to save lesson")
                     );
                 }
             } catch (e) {
@@ -797,11 +615,11 @@
                 addSystemMessage(
                     currentLang === "ar"
                         ? "حدث خطأ أثناء حفظ الدرس"
-                        : "An error occurred while saving the lesson",
+                        : "An error occurred while saving the lesson"
                 );
             }
         });
-
+        
         container.appendChild(saveBtn);
         content.appendChild(container);
     }
@@ -810,9 +628,9 @@
     function normalizeTutorText(raw) {
         let t = (raw ?? "").toString();
         t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, "---");
-        t = t.replace(/\n*\s*---\s*\n*/g, "\n---\n");
-        t = t.replace(/\n{3,}/g, "\n\n");
+        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, '---');
+        t = t.replace(/\n*\s*---\s*\n*/g, '\n---\n');
+        t = t.replace(/\n{3,}/g, '\n\n');
         t = t.trim();
         return t;
     }
@@ -821,16 +639,10 @@
         const normalized = normalizeTutorText(text || "");
         const safe = escapeHtml(normalized);
         let html = safe
-            .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
-            .replace(
-                /^###\s+(.+)$/gm,
-                '<div class="msg-h3" dir="auto">$1</div>',
-            )
-            .replace(
-                /^##\s+(.+)$/gm,
-                '<div class="msg-h2" dir="auto">$1</div>',
-            );
-        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+           .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
+           .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
+           .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         return html;
     }
 
@@ -844,14 +656,6 @@
             </div>
         `;
         chatMessages.appendChild(bubble);
-        uiTranscript.push({
-            type: "user",
-            text: String(text || ""),
-            ts: Date.now(),
-        });
-        uiTranscript.push({ type:'user', text:String(text||''), ts:Date.now() });
-        persistUI();
-
         scrollToBottom();
     }
 
@@ -870,13 +674,6 @@
             <div class="message-content">${formatTutorMessage(text)}</div>
         `;
         chatMessages.appendChild(bubble);
-        uiTranscript.push({
-            type: "system",
-            text: String(text || ""),
-            ts: Date.now(),
-        });
-        uiTranscript.push({ type:'system', text:String(text||''), ts:Date.now() });
-        persistUI();
         scrollToBottom();
     }
 
@@ -978,7 +775,7 @@ ${mcq.choices
     .join("")}
             </div>
         `;
-
+        
         const qEl = container.querySelector(".mcq-question");
         if (qEl) {
             qEl.setAttribute("dir", "auto");
@@ -990,9 +787,6 @@ ${mcq.choices
         });
 
         chatMessages.appendChild(container);
-        uiTranscript.push({ type:'mcq', mcq, ts:Date.now() });
-        persistUI();
-
         scrollToBottom();
     }
 
@@ -1125,34 +919,33 @@ ${mcq.choices
     // ==========================================
     // Floating New Assessment Button Logic
     // ==========================================
-
+    
     const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
-
+    
     function showFloatingButton() {
         if (floatingBtn) {
             floatingBtn.style.display = "inline-flex";
         }
     }
-
+    
     function hideFloatingButton() {
         if (floatingBtn) {
             floatingBtn.style.display = "none";
         }
     }
-
+    
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
             // Confirm action if teaching is active
             if (teachingActive) {
-                const confirmMsg =
-                    currentLang === "ar"
-                        ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
-                        : "The current explanation will be saved. Start a new assessment?";
-
+                const confirmMsg = currentLang === "ar"
+                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
+                    : "The current explanation will be saved. Start a new assessment?";
+                
                 if (!confirm(confirmMsg)) {
                     return;
                 }
-
+                
                 // Save current teaching before starting new assessment
                 try {
                     await fetch("/api/teach/save", {
@@ -1164,33 +957,22 @@ ${mcq.choices
                     console.error("Error auto-saving teaching:", e);
                 }
             }
-
-            // لو دي بداية جديدة فعلًا (مافيش واجهة محفوظة)، نظّف وابدأ برسالة
-            let hasSavedUI = false;
-            try {
-                if (window.UIStore && sessionId) {
-                    const saved = await UIStore.getUI(sessionId);
-                    hasSavedUI = Array.isArray(saved) && saved.length > 0;
-                }
-            } catch (e) {}
-
+            
+            // Clear chat UI
+            chatMessages.innerHTML = "";
+            
+            // Reset state
             currentStep = "assessment";
             teachingActive = false;
             hideFloatingButton();
-
-            if (!hasSavedUI) {
-                // بداية جديدة: نظّف واظهر رسالة البدء
-                chatMessages.innerHTML = "";
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "جاري بدء تقييم جديد..."
-                        : "Starting a new assessment..."
-                );
-            } else {
-                // استئناف: لا تنظّف ولا تضيف أي رسالة
-            }
-
-
+            
+            // Show starting message
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "جاري بدء تقييم جديد..."
+                    : "Starting a new assessment..."
+            );
+            
             // Start new assessment
             setTimeout(() => startAssessment(), 800);
         });
