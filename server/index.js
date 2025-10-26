@@ -1514,15 +1514,16 @@ app.post("/api/assess/answer", async (req, res) => {
       return res.status(404).json({ error: "Session not found" });
     }
 
-    // Get in-memory session
-    const session = getSession(sessionId);
-    const A = session.assessment;
-
-    if (session.currentStep !== "assessment" || !A.currentQuestion) {
+    // Get current question from database state
+    const current_question = activeSession?.assessmentState?.current_question;
+    if (!current_question) {
       return res.status(400).json({ error: "No active question" });
     }
+    const q = current_question;
 
-    const q = A.currentQuestion;
+    // Get in-memory session for evidence tracking
+    const session = getSession(sessionId);
+    const A = session.assessment;
 
     const isCorrect =
       Number.isInteger(userChoiceIndex) &&
