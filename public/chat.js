@@ -56,48 +56,51 @@
             const response = await fetch("/api/session/state");
             const data = await response.json();
 
+            // Check authentication
+            if (data.loggedIn === false) {
+                window.location.href = "/login.html";
+                return;
+            }
+
+            // Store sessionId
             if (data.sessionId) {
                 sessionId = data.sessionId;
-                // ✅ حفظ sessionId في localStorage
                 localStorage.setItem("currentSessionId", sessionId);
             }
 
-            // ✅ استعادة chatHistory
+            // Restore chatHistory exactly as returned
             if (data.chatHistory && data.chatHistory.length > 0) {
                 data.chatHistory.forEach((msg) => {
-                    if (msg.type === "system") {
-                        addSystemMessage(msg.text);
-                    } else if (msg.type === "user") {
-                        addUserMessage(msg.text);
-                    } else if (msg.type === "mcq") {
-                        addMCQQuestion(msg.data);
-                    } else if (msg.type === "report") {
-                        addSystemMessage(msg.data.message);
-                        addStartTeachingCTA();
-                        showFloatingButton();
+                    if (msg.role === "user") {
+                        addUserMessage(msg.content);
+                    } else if (msg.role === "assistant") {
+                        // Check meta.type for MCQ questions
+                        if (msg.meta && msg.meta.type === "mcq") {
+                            addMCQQuestion(msg.meta.question);
+                        } else {
+                            addSystemMessage(msg.content);
+                        }
+                    } else if (msg.role === "system") {
+                        addSystemMessage(msg.content);
                     }
                 });
             }
 
-            // ✅ تحديد الحالة
+            // Handle different stages
             if (data.stage === "teaching") {
                 currentStep = "teaching";
                 teachingActive = true;
-                // لو في teaching نشط ومفيش رسائل → ابدأ
-                if (!data.chatHistory || data.chatHistory.length === 0) {
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                            : "Welcome back! Let's continue where we left off.",
-                    );
-                }
                 return;
             }
 
             if (data.stage === "report") {
                 currentStep = "report";
                 updateProgress(2, true);
-                // التقرير موجود في chatHistory
+                // If chatHistory has report, add CTAs
+                if (data.chatHistory && data.chatHistory.length > 0) {
+                    addStartTeachingCTA();
+                    showFloatingButton();
+                }
                 return;
             }
 
@@ -105,28 +108,72 @@
                 currentStep = "assessment";
                 updateProgress(1);
 
-                // ✅ لو في سؤال حالي → عرضه بدون request جديد
-                if (data.currentQuestion) {
-                    addMCQQuestion(data.currentQuestion);
+                // A1 Behavior: awaiting_user_answer=true
+                if (data.assessmentState && data.assessmentState.awaiting_user_answer === true) {
+                    if (data.assessmentState.current_question) {
+                        currentMCQ = data.assessmentState.current_question;
+                        addMCQQuestion(data.assessmentState.current_question);
+                    }
                     return;
                 }
 
-                // لو مفيش سؤال → اطلب واحد جديد
+                // A2 Behavior: is_generating_next=true
+                if (data.assessmentState && data.assessmentState.is_generating_next === true) {
+                    // Poll until flag clears
+                    pollForNextQuestion();
+                    return;
+                }
+
+                // If chatHistory exists, don't call startAssessment()
+                if (data.chatHistory && data.chatHistory.length > 0) {
+                    return;
+                }
+
+                // No chatHistory and no special state, start assessment
                 setTimeout(() => startAssessment(), 1000);
                 return;
             }
 
             if (data.stage === "intake") {
-                startIntakeFlow();
+                // If chatHistory is empty, start intake flow
+                if (!data.chatHistory || data.chatHistory.length === 0) {
+                    startIntakeFlow();
+                }
+                // Otherwise messages are already restored, intake continues from where left off
                 return;
             }
 
-            // idle → ابدأ intake
-            startIntakeFlow();
+            // Default: start intake only if chatHistory is empty
+            if (!data.chatHistory || data.chatHistory.length === 0) {
+                startIntakeFlow();
+            }
         } catch (error) {
             console.error("Error checking session state:", error);
             startIntakeFlow();
         }
+    }
+
+    async function pollForNextQuestion() {
+        const pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch("/api/session/state");
+                const data = await response.json();
+
+                if (!data.assessmentState || data.assessmentState.is_generating_next !== true) {
+                    clearInterval(pollInterval);
+                    // Next question should be in chatHistory, render it
+                    if (data.chatHistory && data.chatHistory.length > 0) {
+                        const lastMsg = data.chatHistory[data.chatHistory.length - 1];
+                        if (lastMsg.role === "assistant" && lastMsg.meta && lastMsg.meta.type === "mcq") {
+                            addMCQQuestion(lastMsg.meta.question);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error polling for next question:", error);
+                clearInterval(pollInterval);
+            }
+        }, 500);
     }
 
     function setupLanguageToggle() {
@@ -998,48 +1045,54 @@ ${mcq.choices
 
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
-            localStorage.removeItem("currentSessionId");
-            sessionId = null;
-            // Confirm action if teaching is active
-            if (teachingActive) {
-                const confirmMsg =
-                    currentLang === "ar"
-                        ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
-                        : "The current explanation will be saved. Start a new assessment?";
+            // Confirmation dialog
+            const confirmMsg =
+                currentLang === "ar"
+                    ? "هل أنت متأكد من بدء تقييم جديد؟ سيتم حفظ التقدم الحالي."
+                    : "Are you sure you want to start a new assessment? Current progress will be saved.";
 
-                if (!confirm(confirmMsg)) {
-                    return;
-                }
-
-                // Save current teaching before starting new assessment
-                try {
-                    await fetch("/api/teach/save", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ sessionId, autoSave: true }),
-                    });
-                } catch (e) {
-                    console.error("Error auto-saving teaching:", e);
-                }
+            if (!confirm(confirmMsg)) {
+                return;
             }
 
-            // Clear chat UI
-            chatMessages.innerHTML = "";
+            // Call POST /api/session/clear
+            try {
+                const response = await fetch("/api/session/clear", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sessionId }),
+                });
 
-            // Reset state
-            currentStep = "assessment";
-            teachingActive = false;
-            hideFloatingButton();
+                if (response.ok) {
+                    // Clear localStorage
+                    localStorage.removeItem("currentSessionId");
+                    sessionId = null;
 
-            // Show starting message
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "جاري بدء تقييم جديد..."
-                    : "Starting a new assessment...",
-            );
+                    // Clear chat UI
+                    chatMessages.innerHTML = "";
 
-            // Start new assessment
-            setTimeout(() => startAssessment(), 800);
+                    // Reset state
+                    currentStep = "intake";
+                    teachingActive = false;
+                    hideFloatingButton();
+
+                    // Reload page or call checkSessionState
+                    window.location.reload();
+                } else {
+                    addSystemMessage(
+                        currentLang === "ar"
+                            ? "فشل في بدء تقييم جديد. يرجى المحاولة مرة أخرى."
+                            : "Failed to start new assessment. Please try again.",
+                    );
+                }
+            } catch (error) {
+                console.error("Error clearing session:", error);
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "حدث خطأ. يرجى المحاولة مرة أخرى."
+                        : "An error occurred. Please try again.",
+                );
+            }
         });
     }
 })();
