@@ -799,65 +799,69 @@ app.post("/api/session/clear", async (req, res) => {
 // -------- Intake Flow --------
 app.post("/api/intake/next", async (req, res) => {
   try {
-    // ✅ ربط sessionId بالـ user
     let { sessionId, lang = "en", answer } = req.body;
 
-    if (!sessionId && req.session.userId) {
-      sessionId = req.session.assessmentSessionId || randomUUID();
-      req.session.assessmentSessionId = sessionId;
-    } else if (!sessionId) {
-      sessionId = randomUUID();
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
     }
 
+    const { db, activeSessions, users } = await import("./db.js");
+    const { eq, and } = await import("drizzle-orm");
+
+    // Get or create session
+    if (!sessionId) {
+      sessionId = req.session.assessmentSessionId || randomUUID();
+      req.session.assessmentSessionId = sessionId;
+    }
+
+    // Fetch active session from DB
+    let [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(
+        and(
+          eq(activeSessions.userId, req.session.userId),
+          eq(activeSessions.sessionId, sessionId)
+        )
+      );
+
+    // Check if user completed intake
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.session.userId));
+
+    const profile = user?.profileJson || {};
+    const hasCompletedIntake = profile.intakeCompleted || false;
+
+    // If intake already completed, return skip response (no-op)
+    if (hasCompletedIntake) {
+      return res.json({ skipped: true });
+    }
+
+    // Create session if doesn't exist
+    if (!activeSession) {
+      [activeSession] = await db
+        .insert(activeSessions)
+        .values({
+          userId: req.session.userId,
+          sessionId,
+          stage: 'intake',
+          chatHistory: [],
+          assessmentState: null,
+          teachingState: null
+        })
+        .returning();
+    }
+
+    // Use in-memory session for intake flow logic (backward compatible)
     const session = getSession(sessionId);
     session.lang = lang;
 
-    // Check if logged-in user has already completed intake - skip it entirely
-    if (
-      req.session.userId &&
-      session.intakeStepIndex === 0 &&
-      !session.intakeChecked
-    ) {
-      try {
-        const { db, users } = await import("./db.js");
-        const { eq } = await import("drizzle-orm");
-        const [user] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, req.session.userId));
+    // Get current chat history from DB
+    let chatHistory = activeSession.chatHistory || [];
 
-        if (user) {
-          const profile = user.profileJson || {};
-
-          // If intake already completed, skip to assessment
-          if (profile.intakeCompleted && profile.intake) {
-            session.intake = { ...profile.intake };
-            session.intakeStepIndex = INTAKE_ORDER.length; // Mark as completed
-            session.currentStep = "assessment";
-            session.intakeChecked = true;
-
-            return res.json({
-              done: true,
-              skipIntake: true,
-              message:
-                lang === "ar"
-                  ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
-                  : "Welcome back! We'll start the assessment directly.",
-            });
-          }
-
-          // Otherwise auto-populate basic info
-          session.intake.name_full = profile.name || user.username;
-          session.intake.email = user.email;
-          session.intake.phone_number = profile.phone || "";
-          session.intakeStepIndex = 3; // Skip to country (index 3)
-          session.intakeChecked = true;
-        }
-      } catch (err) {
-        console.error("Failed to load user data:", err);
-      }
-    }
-
+    // Process answer if provided
     if (answer !== undefined && answer !== null) {
       const currentStepKey = INTAKE_ORDER[session.intakeStepIndex];
       const stepConfig = INTAKE_CATALOG[currentStepKey];
@@ -869,6 +873,21 @@ app.post("/api/intake/next", async (req, res) => {
             : "Please enter a valid answer");
         return res.json({ error: true, message: errorMessage });
       }
+
+      // Append user answer to chat history
+      chatHistory.push({
+        id: randomUUID(),
+        role: 'user',
+        content: answer,
+        ts: new Date().toISOString()
+      });
+
+      // Persist user answer to DB
+      await db
+        .update(activeSessions)
+        .set({ chatHistory, updatedAt: new Date() })
+        .where(eq(activeSessions.sessionId, sessionId));
+
       session.intake[currentStepKey] = answer;
       session.intakeStepIndex++;
     }
@@ -886,6 +905,24 @@ app.post("/api/intake/next", async (req, res) => {
         stemsCurrentAttempt: [],
         lastAttemptStems: {},
       };
+
+      // Append completion message to chat history
+      const completionMessage = lang === "ar"
+        ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
+        : "Great! I now have a clearer picture of you. We'll start the assessment now. There's no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.";
+
+      chatHistory.push({
+        id: randomUUID(),
+        role: 'assistant',
+        content: completionMessage,
+        ts: new Date().toISOString()
+      });
+
+      // Persist completion message to DB
+      await db
+        .update(activeSessions)
+        .set({ chatHistory, updatedAt: new Date() })
+        .where(eq(activeSessions.sessionId, sessionId));
 
       // Save intake data to database for logged-in users
       if (req.session.userId) {
@@ -926,15 +963,27 @@ app.post("/api/intake/next", async (req, res) => {
 
       return res.json({
         done: true,
-        message:
-          lang === "ar"
-            ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
-            : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan.",
+        message: completionMessage,
       });
     }
 
     if ((answer === undefined || answer === null) && !session.openingShown) {
       session.openingShown = true;
+
+      // Append opening message to chat history
+      chatHistory.push({
+        id: randomUUID(),
+        role: 'system',
+        content: INTAKE_OPENING[lang],
+        ts: new Date().toISOString()
+      });
+
+      // Persist opening message to DB
+      await db
+        .update(activeSessions)
+        .set({ chatHistory, updatedAt: new Date() })
+        .where(eq(activeSessions.sessionId, sessionId));
+
       return res.json({
         sessionId,
         stepKey: "__opening__",
@@ -947,12 +996,24 @@ app.post("/api/intake/next", async (req, res) => {
 
     const nextStepKey = INTAKE_ORDER[session.intakeStepIndex];
     const nextStep = INTAKE_CATALOG[nextStepKey];
-    // ✅ حفظ الرسالة في chatHistory
-    session.chatHistory.push({
-      type: "system",
-      text: nextStep.prompt[lang],
-      timestamp: new Date(),
+
+    // Append next question prompt to chat history
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'assistant',
+      content: nextStep.prompt[lang],
+      ts: new Date().toISOString(),
+      meta: {
+        stepKey: nextStepKey,
+        type: nextStep.type
+      }
     });
+
+    // Persist next question to DB
+    await db
+      .update(activeSessions)
+      .set({ chatHistory, updatedAt: new Date() })
+      .where(eq(activeSessions.sessionId, sessionId));
 
     return res.json({
       sessionId,
