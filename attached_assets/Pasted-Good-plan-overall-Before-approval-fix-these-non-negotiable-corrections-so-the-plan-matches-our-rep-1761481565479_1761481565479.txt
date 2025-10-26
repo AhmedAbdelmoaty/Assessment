@@ -1,0 +1,73 @@
+Good plan overall. Before approval, fix these non-negotiable corrections so the plan matches our repo and requirements exactly. Do not implement yet—re-submit the corrected plan first.
+
+Schema location and naming
+
+Do not create shared/schema.ts. Our schema lives in server/db.js (Drizzle, JavaScript).
+
+Use snake_case for the table and columns: table active_sessions; columns id, user_id, session_id, stage, chat_history, assessment_state, teaching_state, updated_at.
+
+Keep chat_history message roles exactly: "user" | "assistant" | "system".
+
+Migration approach
+
+Remove “npm run db:push --force” unless you show the exact safe script. Prefer an idempotent migration (CREATE TABLE IF NOT EXISTS + safe ALTERs) and verify via SQL.
+
+Required verification:
+
+SELECT * FROM active_sessions LIMIT 1;
+
+Ensure indexes exist on user_id and session_id.
+
+/api/session/state semantics
+
+If NOT logged in: return 200 with { loggedIn:false } (no 401).
+
+If logged in: return { loggedIn:true, sessionId, stage, chatHistory, assessmentState, teachingState }.
+If no active session:
+
+If user never completed intake → create with stage='intake' and empty chat_history.
+
+If intake already completed → create with empty chat_history; do not introduce any new stage names.
+
+Allowed stages only
+
+Remove stage='pre_assessment' and any use of stage='new'.
+
+Valid stages are: intake, assessment, report, teaching, closed.
+
+A1 test wording fix
+
+Replace “A1 Test: Answer question, reload BEFORE answering” with:
+“A1 Test: Show a question; reload before answering → the same question is shown; no regeneration.”
+
+Teaching autosave targets (be explicit)
+
+On teaching start and every message:
+(a) append to active_sessions.chat_history, and
+(b) persist/update the corresponding row in teaching_notes immediately (autosave).
+No reliance on “End Lesson & Save” to persist.
+
+Frontend welcome and no extra messages
+
+On resume, render chat_history exactly as returned—no extra banners/messages (no “CHAT RESTORED”).
+
+Do not auto-start assessment if chat_history exists.
+
+Show the welcome only for a brand-new session explicitly created via /api/session/clear (or first-ever user with no intake and an empty chat). Do not key off any non-existent stage values.
+
+Keep all previously agreed requirements exactly as written:
+
+Intake one-time rule and reload during first intake.
+
+Assessment invariants A1/A2 with awaiting_user_answer and is_generating_next flags and idempotency rules.
+
+No duplicates, no partial restore (must include assistant messages), message count equal before/after reload.
+
+Login tests must use a normal User account (Email: aaa@gmail.com
+, Password: 00000000).
+
+Commands and restart sequence as agreed; logs must show a clean Postgres connection and no migration/runtime errors.
+
+Fail-fast policy with one safe auto-fix, then stop with a short failure report if the re-test still fails.
+
+Re-submit the updated plan reflecting these corrections for approval. Do not implement until I explicitly approve.

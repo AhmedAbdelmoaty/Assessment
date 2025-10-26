@@ -39,14 +39,14 @@
         // User is authenticated, proceed with setup
         // Initialize language switch using shared header.js
         if (window.HeaderUtils) {
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+            HeaderUtils.initHeaderLanguageSwitch("#lang-switch");
             currentLang = HeaderUtils.getCurrentLang();
         }
-        
+
         setupSendButton();
         setupInputHandlers();
         setupLogout();
-        
+
         // Check session state and resume if needed
         await checkSessionState();
     }
@@ -58,31 +58,73 @@
 
             if (data.sessionId) {
                 sessionId = data.sessionId;
+                // ✅ حفظ sessionId في localStorage
+                localStorage.setItem("currentSessionId", sessionId);
             }
 
-            // Determine what to display based on session state
-            if (data.stage === "assessment-in-progress" || data.stage === "teaching") {
-                // Resume existing session
-                currentStep = data.stage === "teaching" ? "teaching" : "assessment";
-                teachingActive = data.stage === "teaching";
-                
-                // Show welcome message for resuming
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
-                        : "Welcome back! Let's continue where we left off."
-                );
-                
-                if (currentStep === "assessment") {
-                    setTimeout(() => startAssessment(), 1000);
-                }
-            } else {
-                // Start new intake flow
-                startIntakeFlow();
+            // ✅ استعادة chatHistory
+            if (data.chatHistory && data.chatHistory.length > 0) {
+                data.chatHistory.forEach((msg) => {
+                    if (msg.type === "system") {
+                        addSystemMessage(msg.text);
+                    } else if (msg.type === "user") {
+                        addUserMessage(msg.text);
+                    } else if (msg.type === "mcq") {
+                        addMCQQuestion(msg.data);
+                    } else if (msg.type === "report") {
+                        addSystemMessage(msg.data.message);
+                        addStartTeachingCTA();
+                        showFloatingButton();
+                    }
+                });
             }
+
+            // ✅ تحديد الحالة
+            if (data.stage === "teaching") {
+                currentStep = "teaching";
+                teachingActive = true;
+                // لو في teaching نشط ومفيش رسائل → ابدأ
+                if (!data.chatHistory || data.chatHistory.length === 0) {
+                    addSystemMessage(
+                        currentLang === "ar"
+                            ? "مرحبًا بك! دعنا نكمل من حيث توقفنا."
+                            : "Welcome back! Let's continue where we left off.",
+                    );
+                }
+                return;
+            }
+
+            if (data.stage === "report") {
+                currentStep = "report";
+                updateProgress(2, true);
+                // التقرير موجود في chatHistory
+                return;
+            }
+
+            if (data.stage === "assessment") {
+                currentStep = "assessment";
+                updateProgress(1);
+
+                // ✅ لو في سؤال حالي → عرضه بدون request جديد
+                if (data.currentQuestion) {
+                    addMCQQuestion(data.currentQuestion);
+                    return;
+                }
+
+                // لو مفيش سؤال → اطلب واحد جديد
+                setTimeout(() => startAssessment(), 1000);
+                return;
+            }
+
+            if (data.stage === "intake") {
+                startIntakeFlow();
+                return;
+            }
+
+            // idle → ابدأ intake
+            startIntakeFlow();
         } catch (error) {
             console.error("Error checking session state:", error);
-            // If error, start fresh intake
             startIntakeFlow();
         }
     }
@@ -192,16 +234,22 @@
     async function startIntakeFlow() {
         showTypingIndicator();
         try {
+            // ✅ إرسال sessionId لو موجود
+            const storedSessionId = localStorage.getItem("currentSessionId");
             const response = await fetch("/api/intake/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ lang: currentLang }),
+                body: JSON.stringify({
+                    sessionId: sessionId || storedSessionId,
+                    lang: currentLang,
+                }),
             });
 
             const data = await response.json();
             console.log("[CLIENT] Initial intake response:", data);
 
             sessionId = data.sessionId;
+            localStorage.setItem("currentSessionId", sessionId);
             hideTypingIndicator();
 
             // Check if intake is already completed (skipIntake = true)
@@ -308,7 +356,7 @@
         }
 
         addSystemMessage(data.prompt);
-        
+
         if (data.autoNext) {
             showTypingIndicator();
             try {
@@ -409,6 +457,10 @@
         showTypingIndicator();
 
         try {
+            // ✅ استخدام sessionId من localStorage لو مش موجود
+            if (!sessionId) {
+                sessionId = localStorage.getItem("currentSessionId");
+            }
             const response = await fetch("/api/assess/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -553,28 +605,30 @@
             );
         }
     }
-    
+
     function addSaveTeachingButton() {
         // Remove any existing save buttons
-        document.querySelectorAll(".save-teaching-btn-container").forEach((el) => el.remove());
-        
+        document
+            .querySelectorAll(".save-teaching-btn-container")
+            .forEach((el) => el.remove());
+
         const bubbles = Array.from(
             document.querySelectorAll(".message-bubble.system"),
         );
         const last = bubbles[bubbles.length - 1];
         if (!last) return;
-        
+
         const content = last.querySelector(".message-content");
         if (!content) return;
-        
+
         const container = document.createElement("div");
         container.className = "save-teaching-btn-container";
-        
+
         const saveBtn = document.createElement("button");
         saveBtn.className = "save-teaching-btn";
         saveBtn.textContent =
             currentLang === "ar" ? "إنهاء الدرس وحفظه" : "End Lesson & Save";
-        
+
         saveBtn.addEventListener("click", async () => {
             saveBtn.disabled = true;
             try {
@@ -584,30 +638,32 @@
                     body: JSON.stringify({ sessionId }),
                 });
                 const data = await resp.json();
-                
+
                 if (data.ok) {
                     // Reset teaching state
                     teachingActive = false;
                     currentStep = "report";
-                    
+
                     // Show success message
                     addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "تم حفظ الدرس بنجاح!"
-                            : "Lesson saved successfully!")
+                        data.message ||
+                            (currentLang === "ar"
+                                ? "تم حفظ الدرس بنجاح!"
+                                : "Lesson saved successfully!"),
                     );
-                    
+
                     // Remove the save button
                     container.remove();
-                    
+
                     // Show report CTAs again
                     addStartTeachingCTA();
                 } else {
                     saveBtn.disabled = false;
                     addSystemMessage(
-                        data.message || (currentLang === "ar"
-                            ? "فشل حفظ الدرس"
-                            : "Failed to save lesson")
+                        data.message ||
+                            (currentLang === "ar"
+                                ? "فشل حفظ الدرس"
+                                : "Failed to save lesson"),
                     );
                 }
             } catch (e) {
@@ -615,11 +671,11 @@
                 addSystemMessage(
                     currentLang === "ar"
                         ? "حدث خطأ أثناء حفظ الدرس"
-                        : "An error occurred while saving the lesson"
+                        : "An error occurred while saving the lesson",
                 );
             }
         });
-        
+
         container.appendChild(saveBtn);
         content.appendChild(container);
     }
@@ -628,9 +684,9 @@
     function normalizeTutorText(raw) {
         let t = (raw ?? "").toString();
         t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, '---');
-        t = t.replace(/\n*\s*---\s*\n*/g, '\n---\n');
-        t = t.replace(/\n{3,}/g, '\n\n');
+        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, "---");
+        t = t.replace(/\n*\s*---\s*\n*/g, "\n---\n");
+        t = t.replace(/\n{3,}/g, "\n\n");
         t = t.trim();
         return t;
     }
@@ -639,10 +695,16 @@
         const normalized = normalizeTutorText(text || "");
         const safe = escapeHtml(normalized);
         let html = safe
-           .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
-           .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
-           .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
+            .replace(
+                /^###\s+(.+)$/gm,
+                '<div class="msg-h3" dir="auto">$1</div>',
+            )
+            .replace(
+                /^##\s+(.+)$/gm,
+                '<div class="msg-h2" dir="auto">$1</div>',
+            );
+        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
         return html;
     }
 
@@ -775,7 +837,7 @@ ${mcq.choices
     .join("")}
             </div>
         `;
-        
+
         const qEl = container.querySelector(".mcq-question");
         if (qEl) {
             qEl.setAttribute("dir", "auto");
@@ -919,33 +981,36 @@ ${mcq.choices
     // ==========================================
     // Floating New Assessment Button Logic
     // ==========================================
-    
+
     const floatingBtn = document.getElementById("floatingNewAssessmentBtn");
-    
+
     function showFloatingButton() {
         if (floatingBtn) {
             floatingBtn.style.display = "inline-flex";
         }
     }
-    
+
     function hideFloatingButton() {
         if (floatingBtn) {
             floatingBtn.style.display = "none";
         }
     }
-    
+
     if (floatingBtn) {
         floatingBtn.addEventListener("click", async () => {
+            localStorage.removeItem("currentSessionId");
+            sessionId = null;
             // Confirm action if teaching is active
             if (teachingActive) {
-                const confirmMsg = currentLang === "ar"
-                    ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
-                    : "The current explanation will be saved. Start a new assessment?";
-                
+                const confirmMsg =
+                    currentLang === "ar"
+                        ? "سيتم حفظ الشرح الحالي. هل تريد البدء بتقييم جديد؟"
+                        : "The current explanation will be saved. Start a new assessment?";
+
                 if (!confirm(confirmMsg)) {
                     return;
                 }
-                
+
                 // Save current teaching before starting new assessment
                 try {
                     await fetch("/api/teach/save", {
@@ -957,22 +1022,22 @@ ${mcq.choices
                     console.error("Error auto-saving teaching:", e);
                 }
             }
-            
+
             // Clear chat UI
             chatMessages.innerHTML = "";
-            
+
             // Reset state
             currentStep = "assessment";
             teachingActive = false;
             hideFloatingButton();
-            
+
             // Show starting message
             addSystemMessage(
                 currentLang === "ar"
                     ? "جاري بدء تقييم جديد..."
-                    : "Starting a new assessment..."
+                    : "Starting a new assessment...",
             );
-            
+
             // Start new assessment
             setTimeout(() => startAssessment(), 800);
         });
