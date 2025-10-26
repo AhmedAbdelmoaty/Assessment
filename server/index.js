@@ -704,6 +704,45 @@ function getFallbackMCQ(level, lang, questionIndex) {
   const qKey = questionIndex === 1 ? 'q1' : 'q2';
   return fallbacks[level]?.[qKey]?.[lang] || fallbacks.L1.q1.en;
 }
+// -------- Session Hydration (light) --------
+app.post("/api/session/hydrate", async (req, res) => {
+  try {
+    const { sessionId } = req.body || {};
+    if (!sessionId) {
+      return res.status(400).json({ error: "MISSING_SESSION_ID" });
+    }
+
+    const session = getSession(sessionId);
+    const A = session.assessment || {};
+
+    // جهّز سؤال التقييم الحالي إن وُجد
+    let assessment = null;
+    if (A.currentQuestion) {
+      const question_index = A.questionIndexInAttempt || 1;
+      assessment = {
+        currentQuestion: {
+          kind: "question",
+          level: A.currentQuestion.level,
+          cluster: A.currentQuestion.cluster,
+          prompt: A.currentQuestion.prompt,
+          choices: A.currentQuestion.choices,
+          questionNumber: question_index,
+          totalQuestions: 2
+        }
+      };
+    }
+
+    // يمكن توسيع الـpayload لاحقًا (report/teaching) في مراحل لاحقة
+    return res.json({
+      sessionId,
+      phase: session.currentStep || "intake",
+      assessment
+    });
+  } catch (err) {
+    console.error("HYDRATE error:", err);
+    return res.status(500).json({ error: "HYDRATE_FAILED" });
+  }
+});
 
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
@@ -712,7 +751,23 @@ app.post("/api/assess/next", async (req, res) => {
   try {
     const { sessionId } = req.body;
     const session = getSession(sessionId);
-    
+    if (session.assessment && session.assessment.currentQuestion) {
+      const current = session.assessment.currentQuestion;
+      const question_index = session.assessment.questionIndexInAttempt || 1;
+      const mcqPayload = {
+        kind: "question",
+        level: current.level,
+        cluster: current.cluster,
+        prompt: current.prompt,
+        choices: current.choices,
+        correct_answer: "__hidden__",
+        rationale: "",
+        questionNumber: question_index,
+        totalQuestions: 2
+      };
+      return res.json(mcqPayload);
+    }
+  
     // Dev logging
     if (isDev) {
       console.log(`[ASSESS-NEXT] SessionID: ${sessionId}, Step: ${session?.currentStep}, Assessment state:`, {
