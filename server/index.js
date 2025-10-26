@@ -1807,6 +1807,15 @@ app.post("/api/report", async (req, res) => {
     const session = getSession(sessionId);
     const lang = session.lang || "en";
 
+    // Fetch active_session from DB using sessionId
+    const { db, activeSessions } = await import("./db.js");
+    const { eq } = await import("drizzle-orm");
+    
+    const [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(eq(activeSessions.sessionId, sessionId));
+
     const A = session.assessment || { evidence: [], currentLevel: "L1" };
     const evidence = Array.isArray(A.evidence) ? A.evidence : [];
 
@@ -1989,7 +1998,45 @@ app.post("/api/report", async (req, res) => {
         console.error("[REPORT] Failed to save assessment to database:", err);
       }
     }
-    // ✅ حفظ التقرير في chatHistory
+
+    // ✅ Persist report message to active_sessions
+    if (activeSession) {
+      try {
+        // Get current chatHistory from DB
+        let chatHistory = activeSession.chatHistory || [];
+        
+        // Append report to chatHistory
+        const reportText = narrative || localFallback;
+        chatHistory.push({
+          id: randomUUID(),
+          role: 'assistant',
+          content: reportText,
+          ts: new Date().toISOString(),
+          meta: { type: 'report' }
+        });
+
+        // Preserve other assessment state fields
+        const currentAssessmentState = activeSession.assessmentState || {};
+        
+        // Update DB with new chatHistory, stage, and assessmentState
+        await db.update(activeSessions).set({
+          chatHistory,
+          stage: 'report',
+          assessmentState: {
+            awaiting_user_answer: false,
+            is_generating_next: false,
+            ...currentAssessmentState
+          },
+          updatedAt: new Date()
+        }).where(eq(activeSessions.sessionId, sessionId));
+
+        console.log(`[REPORT] Persisted report to active_sessions for sessionId: ${sessionId}`);
+      } catch (err) {
+        console.error("[REPORT] Failed to persist report to active_sessions:", err);
+      }
+    }
+
+    // ✅ حفظ التقرير في chatHistory (in-memory)
     session.chatHistory.push({
       type: "report",
       data: report,
@@ -2136,6 +2183,24 @@ async function finalizeTeachingNote(noteId, transcript, lang) {
 app.post("/api/teach/start", async (req, res) => {
   try {
     const { sessionId } = req.body || {};
+
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const { db, activeSessions } = await import("./db.js");
+    const { eq } = await import("drizzle-orm");
+
+    // 1. Fetch active_session from DB
+    const [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(eq(activeSessions.sessionId, sessionId));
+
+    if (!activeSession) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
     const session = getSession(sessionId);
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
@@ -2225,6 +2290,10 @@ app.post("/api/teach/start", async (req, res) => {
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
     // Database persistence for logged-in users
+    let threadId = null;
+    let assessmentId = null;
+    let topicDisplay = first.display || "Teaching Session";
+
     if (req.session.userId) {
       try {
         const noteData = await getOrCreateTeachingNote(
@@ -2234,11 +2303,13 @@ app.post("/api/teach/start", async (req, res) => {
         if (noteData) {
           teaching.dbNoteId = noteData.id;
           teaching.dbAssessmentId = noteData.assessmentId;
+          assessmentId = noteData.assessmentId;
 
           // If resuming, load the existing threadId and transcript
           if (noteData.isResume && noteData.threadId) {
             teaching.assistant = teaching.assistant || {};
             teaching.assistant.threadId = noteData.threadId;
+            threadId = noteData.threadId;
             teaching.transcript = noteData.transcript || [];
             logTeach("teaching.resume", {
               noteId: noteData.id,
@@ -2258,11 +2329,13 @@ app.post("/api/teach/start", async (req, res) => {
       }
     }
 
+    let initialTeachingMessage = "";
+
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       // إنشاء Thread مرة واحدة (or use existing from DB)
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
-        const threadId = createdThread?.id;
+        threadId = createdThread?.id;
         if (!threadId) throw new Error("Failed to create thread");
         teaching.assistant.threadId = threadId;
         logTeach("thread.created", { threadId });
@@ -2279,8 +2352,9 @@ app.post("/api/teach/start", async (req, res) => {
             console.error("[TEACH-START] Failed to save threadId:", dbErr);
           }
         }
+      } else {
+        threadId = teaching.assistant.threadId;
       }
-      const threadId = teaching.assistant.threadId;
 
       // رسالة افتتاحية "بيانات فقط"
       const topicsLine = teaching.topics_queue
@@ -2327,44 +2401,83 @@ app.post("/api/teach/start", async (req, res) => {
         const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (text) {
           pushTranscript(session, { from: "tutor", text });
-          return res.json({ message: text });
+          initialTeachingMessage = text;
         }
       }
 
-      const fb =
-        session.lang === "ar"
+      if (!initialTeachingMessage) {
+        const fb =
+          session.lang === "ar"
           ? "هنبدأ شرح أول موضوع بشكل بسيط خطوة بخطوة."
           : "Let’s start with the first topic, step by step.";
-      pushTranscript(session, { from: "tutor", text: fb });
-      return res.json({ message: fb });
+        pushTranscript(session, { from: "tutor", text: fb });
+        initialTeachingMessage = fb;
+      }
+    } else {
+      // ============= Fallback بدون Assistant =============
+      const sys = getTeachingSystemPrompt({ lang: teaching.lang });
+      const userSeed =
+        teaching.lang === "ar"
+          ? [
+              `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
+              `ابدأ بالموضوع: "${first.display}" (النوع: ${first.kind}).`,
+            ].join("\n")
+          : [
+              `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
+              `Start with topic: "${first.display}" (kind: ${first.kind}).`,
+            ].join("\n");
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-5",
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: userSeed },
+        ],
+        temperature: 0.2,
+        top_p: 1,
+        max_completion_tokens: 2200,
+      });
+      const text = (completion?.choices?.[0]?.message?.content || "").trim();
+      pushTranscript(session, { from: "tutor", text });
+      initialTeachingMessage = text;
     }
 
-    // ============= Fallback بدون Assistant =============
-    const sys = getTeachingSystemPrompt({ lang: teaching.lang });
-    const userSeed =
-      teaching.lang === "ar"
-        ? [
-            `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
-            `ابدأ بالموضوع: "${first.display}" (النوع: ${first.kind}).`,
-          ].join("\n")
-        : [
-            `Profile context: ${JSON.stringify(teaching.profileContext || {})}`,
-            `Start with topic: "${first.display}" (kind: ${first.kind}).`,
-          ].join("\n");
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        { role: "system", content: sys },
-        { role: "user", content: userSeed },
-      ],
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 2200,
+    // 2. Append start message to chatHistory
+    let chatHistory = activeSession.chatHistory || [];
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'assistant',
+      content: initialTeachingMessage,
+      ts: new Date().toISOString(),
+      meta: { type: 'teaching_start' }
     });
-    const text = (completion?.choices?.[0]?.message?.content || "").trim();
-    pushTranscript(session, { from: "tutor", text });
-    return res.json({ message: text });
+
+    // 3. Create or update teaching_notes row
+    if (teaching.dbNoteId) {
+      await updateTeachingNote(teaching.dbNoteId, {
+        threadId: threadId,
+        topicDisplay: topicDisplay,
+        transcript: teaching.transcript,
+        inProgress: true
+      });
+    }
+
+    // 4. Update active_sessions
+    await db
+      .update(activeSessions)
+      .set({
+        chatHistory: chatHistory,
+        stage: 'teaching',
+        teachingState: {
+          threadId: threadId,
+          assessmentId: assessmentId,
+          topicDisplay: topicDisplay
+        },
+        updatedAt: new Date()
+      })
+      .where(eq(activeSessions.sessionId, sessionId));
+
+    return res.json({ message: initialTeachingMessage });
   } catch (err) {
     console.error("/api/teach/start error:", err?.message || err, err?.stack);
     return res
@@ -2380,12 +2493,31 @@ app.post("/api/teach/message", async (req, res) => {
   try {
     const { sessionId, text, userMessage } = req.body || {};
     const userText = (text ?? userMessage ?? "").toString().trim();
-    const session = getSession(sessionId);
-    const teaching = ensureTeachingState(session);
+
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
 
     if (!userText) {
       return res.status(400).json({ error: true, message: "Empty message." });
     }
+
+    const { db, activeSessions } = await import("./db.js");
+    const { eq } = await import("drizzle-orm");
+
+    // 1. Fetch active_session from DB
+    const [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(eq(activeSessions.sessionId, sessionId));
+
+    if (!activeSession) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const session = getSession(sessionId);
+    const teaching = ensureTeachingState(session);
+
     if (teaching.mode !== "active") {
       logTeach("message.inactive", { sessionId });
       return res.status(400).json({
@@ -2406,6 +2538,21 @@ app.post("/api/teach/message", async (req, res) => {
       kind: "gap",
     };
     const currentTopic = current.display || "";
+
+    // 2. Append user message to chatHistory
+    let chatHistory = activeSession.chatHistory || [];
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'user',
+      content: userText,
+      ts: new Date().toISOString()
+    });
+
+    // 3. Update active_sessions immediately with user message
+    await db
+      .update(activeSessions)
+      .set({ chatHistory, updatedAt: new Date() })
+      .where(eq(activeSessions.sessionId, sessionId));
 
     try {
       pushTranscript(session, { from: "user", text: userText });
@@ -2470,7 +2617,21 @@ app.post("/api/teach/message", async (req, res) => {
             });
           } catch {}
 
-          // Save transcript to database for logged-in users
+          // 5. Append tutor response to chatHistory
+          chatHistory.push({
+            id: randomUUID(),
+            role: 'assistant',
+            content: reply,
+            ts: new Date().toISOString()
+          });
+
+          // 6. Dual persistence: (a) Update active_sessions.chatHistory
+          await db
+            .update(activeSessions)
+            .set({ chatHistory, updatedAt: new Date() })
+            .where(eq(activeSessions.sessionId, sessionId));
+
+          // 6. Dual persistence: (b) Update teaching_notes.transcript (autosave)
           if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
             try {
               await updateTeachingNote(teaching.dbNoteId, {
@@ -2500,7 +2661,21 @@ app.post("/api/teach/message", async (req, res) => {
         });
       } catch {}
 
-      // Save transcript to database for logged-in users
+      // 5. Append tutor response to chatHistory
+      chatHistory.push({
+        id: randomUUID(),
+        role: 'assistant',
+        content: fb,
+        ts: new Date().toISOString()
+      });
+
+      // 6. Dual persistence: (a) Update active_sessions.chatHistory
+      await db
+        .update(activeSessions)
+        .set({ chatHistory, updatedAt: new Date() })
+        .where(eq(activeSessions.sessionId, sessionId));
+
+      // 6. Dual persistence: (b) Update teaching_notes.transcript (autosave)
       if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
         try {
           await updateTeachingNote(teaching.dbNoteId, {
@@ -2549,7 +2724,21 @@ app.post("/api/teach/message", async (req, res) => {
       });
     } catch {}
 
-    // Save transcript to database for logged-in users
+    // 5. Append tutor response to chatHistory
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'assistant',
+      content: reply,
+      ts: new Date().toISOString()
+    });
+
+    // 6. Dual persistence: (a) Update active_sessions.chatHistory
+    await db
+      .update(activeSessions)
+      .set({ chatHistory, updatedAt: new Date() })
+      .where(eq(activeSessions.sessionId, sessionId));
+
+    // 6. Dual persistence: (b) Update teaching_notes.transcript (autosave)
     if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
       try {
         await updateTeachingNote(teaching.dbNoteId, {
