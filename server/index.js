@@ -678,6 +678,124 @@ function validateIntakeInput(stepKey, value) {
   return value && value.trim().length > 0;
 }
 
+// -------- Session State & Persistence --------
+app.get("/api/session/state", async (req, res) => {
+  try {
+    // If not logged in, return loggedIn: false
+    if (!req.session.userId) {
+      return res.json({ loggedIn: false });
+    }
+
+    const { db, activeSessions, users } = await import("./db.js");
+    const { eq, and } = await import("drizzle-orm");
+
+    // Check if user completed intake
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.session.userId));
+
+    const hasCompletedIntake = user?.profileJson?.intakeCompleted || false;
+
+    // Get or create active session
+    let sessionId = req.session.assessmentSessionId;
+    let activeSession;
+
+    if (sessionId) {
+      [activeSession] = await db
+        .select()
+        .from(activeSessions)
+        .where(
+          and(
+            eq(activeSessions.userId, req.session.userId),
+            eq(activeSessions.sessionId, sessionId)
+          )
+        );
+    }
+
+    // If no active session exists, create one
+    if (!activeSession) {
+      sessionId = randomUUID();
+      req.session.assessmentSessionId = sessionId;
+
+      const initialStage = hasCompletedIntake ? 'assessment' : 'intake';
+
+      [activeSession] = await db
+        .insert(activeSessions)
+        .values({
+          userId: req.session.userId,
+          sessionId,
+          stage: initialStage,
+          chatHistory: [],
+          assessmentState: null,
+          teachingState: null
+        })
+        .returning();
+    }
+
+    // Return session state
+    return res.json({
+      loggedIn: true,
+      sessionId: activeSession.sessionId,
+      stage: activeSession.stage,
+      chatHistory: activeSession.chatHistory || [],
+      assessmentState: activeSession.assessmentState,
+      teachingState: activeSession.teachingState
+    });
+
+  } catch (error) {
+    console.error("Error in /api/session/state:", error);
+    return res.status(500).json({ error: "Failed to retrieve session state" });
+  }
+});
+
+app.post("/api/session/clear", async (req, res) => {
+  try {
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const { db, activeSessions } = await import("./db.js");
+    const { eq } = await import("drizzle-orm");
+
+    // Mark old session as closed if exists
+    if (req.session.assessmentSessionId) {
+      await db
+        .update(activeSessions)
+        .set({ stage: 'closed', updatedAt: new Date() })
+        .where(
+          eq(activeSessions.sessionId, req.session.assessmentSessionId)
+        );
+    }
+
+    // Create new session
+    const newSessionId = randomUUID();
+    req.session.assessmentSessionId = newSessionId;
+
+    const [newSession] = await db
+      .insert(activeSessions)
+      .values({
+        userId: req.session.userId,
+        sessionId: newSessionId,
+        stage: 'assessment',
+        chatHistory: [],
+        assessmentState: null,
+        teachingState: null
+      })
+      .returning();
+
+    return res.json({
+      success: true,
+      sessionId: newSession.sessionId,
+      stage: newSession.stage
+    });
+
+  } catch (error) {
+    console.error("Error in /api/session/clear:", error);
+    return res.status(500).json({ error: "Failed to clear session" });
+  }
+});
+
 // -------- Intake Flow --------
 app.post("/api/intake/next", async (req, res) => {
   try {
