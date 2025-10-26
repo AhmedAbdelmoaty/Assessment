@@ -1218,6 +1218,40 @@ app.post("/api/assess/next", async (req, res) => {
 
   try {
     const { sessionId } = req.body;
+
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    // ✅ A1: Fetch active_session from DB
+    const { db, activeSessions } = await import("./db.js");
+    const { eq, and } = await import("drizzle-orm");
+
+    let [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(
+        and(
+          eq(activeSessions.userId, req.session.userId),
+          eq(activeSessions.sessionId, sessionId)
+        )
+      );
+
+    if (!activeSession) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    // ✅ A2: Check awaiting_user_answer and is_generating_next flags
+    const assessmentState = activeSession.assessmentState || {};
+    if (assessmentState.awaiting_user_answer || assessmentState.is_generating_next) {
+      return res.status(409).json({
+        error: "Question already pending",
+        awaiting_user_answer: !!assessmentState.awaiting_user_answer,
+        is_generating_next: !!assessmentState.is_generating_next
+      });
+    }
+
+    // Get in-memory session for compatibility
     const session = getSession(sessionId);
 
     // Dev logging
@@ -1390,12 +1424,51 @@ app.post("/api/assess/next", async (req, res) => {
       totalQuestions: 2,
       ...(isDev && usedFallback ? { _dev_fallback: true } : {}),
     };
-    // ✅ حفظ السؤال في chatHistory
+
+    // ✅ A3: Append question to chatHistory
+    const chatHistory = activeSession.chatHistory || [];
+    const questionText = `${current.prompt}\n\n${current.choices.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'assistant',
+      content: questionText,
+      ts: new Date().toISOString(),
+      meta: {
+        type: 'mcq',
+        level: current.level,
+        cluster: current.cluster,
+        choices: current.choices,
+        correctIndex: current.correct_index
+      }
+    });
+
+    // ✅ A4: Update DB atomically
+    await db.update(activeSessions).set({
+      chatHistory,
+      assessmentState: {
+        ...assessmentState,
+        awaiting_user_answer: true,
+        is_generating_next: false,
+        current_question: current,
+        currentLevel: A.currentLevel,
+        attempts: A.attempts,
+        evidence: A.evidence,
+        questionIndexInAttempt: A.questionIndexInAttempt,
+        usedClustersCurrentAttempt: A.usedClustersCurrentAttempt,
+        stemsCurrentAttempt: A.stemsCurrentAttempt,
+        lastAttemptStems: A.lastAttemptStems
+      },
+      stage: 'assessment',
+      updatedAt: new Date()
+    }).where(eq(activeSessions.sessionId, sessionId));
+
+    // ✅ حفظ السؤال في in-memory chatHistory
     session.chatHistory.push({
       type: "mcq",
       data: mcqPayload,
       timestamp: new Date(),
     });
+    
     return res.json(mcqPayload);
   } catch (err) {
     console.error("[ASSESS-NEXT] Fatal error:", {
@@ -1414,8 +1487,34 @@ app.post("/api/assess/next", async (req, res) => {
 
 // -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
+  const isDev = process.env.NODE_ENV !== "production";
+
   try {
     const { sessionId, userChoiceIndex } = req.body;
+
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    // ✅ B1: Fetch active_session from DB
+    const { db, activeSessions } = await import("./db.js");
+    const { eq, and } = await import("drizzle-orm");
+
+    let [activeSession] = await db
+      .select()
+      .from(activeSessions)
+      .where(
+        and(
+          eq(activeSessions.userId, req.session.userId),
+          eq(activeSessions.sessionId, sessionId)
+        )
+      );
+
+    if (!activeSession) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    // Get in-memory session
     const session = getSession(sessionId);
     const A = session.assessment;
 
@@ -1438,6 +1537,40 @@ app.post("/api/assess/answer", async (req, res) => {
       qid: q.qid,
     });
 
+    // ✅ B2: Append user answer to chatHistory
+    let chatHistory = activeSession.chatHistory || [];
+    const userAnswerText = `Selected: ${q.choices[userChoiceIndex] || 'Invalid choice'}`;
+    chatHistory.push({
+      id: randomUUID(),
+      role: 'user',
+      content: userAnswerText,
+      ts: new Date().toISOString(),
+      meta: {
+        selectedIndex: userChoiceIndex,
+        isCorrect
+      }
+    });
+
+    // ✅ B3: Set awaiting_user_answer=false, is_generating_next=true
+    // ✅ B4: Update DB (first update)
+    await db.update(activeSessions).set({
+      chatHistory,
+      assessmentState: {
+        awaiting_user_answer: false,
+        is_generating_next: true,
+        current_question: null,
+        currentLevel: A.currentLevel,
+        attempts: A.attempts,
+        evidence: A.evidence,
+        questionIndexInAttempt: A.questionIndexInAttempt,
+        usedClustersCurrentAttempt: A.usedClustersCurrentAttempt,
+        stemsCurrentAttempt: A.stemsCurrentAttempt,
+        lastAttemptStems: A.lastAttemptStems
+      },
+      updatedAt: new Date()
+    }).where(eq(activeSessions.sessionId, sessionId));
+
+    // Calculate next action
     let nextAction = "continue";
 
     if (A.questionIndexInAttempt === 1) {
@@ -1482,6 +1615,175 @@ app.post("/api/assess/answer", async (req, res) => {
           nextAction = "advance";
         }
       }
+    }
+
+    // If we need to continue (not stop/complete), generate next question immediately
+    if (nextAction === "continue" || nextAction === "retry_same_level" || nextAction === "advance") {
+      // ✅ B5: Generate next MCQ question
+      const profile = {
+        job_nature: session.intake?.job_nature || "",
+        experience_years_band: session.intake?.experience_years_band || "",
+        job_title_exact: session.intake?.job_title_exact || "",
+        sector: session.intake?.sector || "",
+        learning_reason: session.intake?.learning_reason || "",
+      };
+
+      const attempt_type = A.attempts === 0 ? "first" : "retry";
+      const question_index = A.questionIndexInAttempt || 1;
+      const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
+      const avoid_stems =
+        attempt_type === "retry" ? A.lastAttemptStems[A.currentLevel] || [] : [];
+
+      let nextQ = null;
+      let usedFallback = false;
+
+      // Check if OpenAI API key exists
+      if (!process.env.OPENAI_API_KEY) {
+        console.warn(
+          "[ASSESS-ANSWER] ⚠️  OPENAI_API_KEY not found, using fallback MCQ",
+        );
+        nextQ = getFallbackMCQ(A.currentLevel, session.lang || "en", question_index);
+        usedFallback = true;
+      } else {
+        try {
+          const systemPrompt = getQuestionPromptSingle({
+            lang: session.lang,
+            level: A.currentLevel,
+            profile,
+            attempt_type,
+            question_index,
+            used_clusters_current_attempt,
+            avoid_stems,
+          });
+
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: systemPrompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+            top_p: 1,
+            max_completion_tokens: 2048,
+          });
+
+          nextQ = JSON.parse(response.choices[0].message.content);
+
+          // Validate schema
+          if (
+            !nextQ ||
+            nextQ.kind !== "question" ||
+            !Array.isArray(nextQ.choices) ||
+            nextQ.choices.length < 3 ||
+            typeof nextQ.correct_index !== "number" ||
+            nextQ.correct_index < 0 ||
+            nextQ.correct_index >= nextQ.choices.length
+          ) {
+            console.error(
+              "[ASSESS-ANSWER] Invalid question schema from OpenAI:",
+              nextQ,
+            );
+            throw new Error("Invalid question schema");
+          }
+
+          if (isDev) {
+            console.log(
+              `[ASSESS-ANSWER] ✅ OpenAI success - Level: ${nextQ.level}, Cluster: ${nextQ.cluster}`,
+            );
+          }
+        } catch (openaiErr) {
+          console.error("[ASSESS-ANSWER] ⚠️  OpenAI call failed:", {
+            status: openaiErr?.status || openaiErr?.response?.status,
+            code: openaiErr?.code,
+            message: openaiErr?.message,
+          });
+          console.log("[ASSESS-ANSWER] Using fallback MCQ");
+          nextQ = getFallbackMCQ(
+            A.currentLevel,
+            session.lang || "en",
+            question_index,
+          );
+          usedFallback = true;
+        }
+      }
+
+      const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(
+        nextQ.choices,
+        nextQ.correct_index,
+      );
+
+      const nextCurrent = {
+        level: nextQ.level || A.currentLevel,
+        cluster: nextQ.cluster,
+        difficulty: nextQ.difficulty || (question_index === 1 ? "easy" : "harder"),
+        prompt: nextQ.prompt,
+        choices: newChoices,
+        correct_index: newCorrectIndex,
+        qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      };
+      A.currentQuestion = nextCurrent;
+
+      if (attempt_type === "first") {
+        A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
+        A.stemsCurrentAttempt.push(nextCurrent.prompt);
+      }
+
+      if (question_index === 1 && nextCurrent.cluster) {
+        if (!A.usedClustersCurrentAttempt.includes(nextCurrent.cluster)) {
+          A.usedClustersCurrentAttempt.push(nextCurrent.cluster);
+        }
+      }
+
+      // ✅ B6: Append next question to chatHistory
+      const nextQuestionText = `${nextCurrent.prompt}\n\n${nextCurrent.choices.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+      chatHistory.push({
+        id: randomUUID(),
+        role: 'assistant',
+        content: nextQuestionText,
+        ts: new Date().toISOString(),
+        meta: {
+          type: 'mcq',
+          level: nextCurrent.level,
+          cluster: nextCurrent.cluster,
+          choices: nextCurrent.choices,
+          correctIndex: nextCurrent.correct_index
+        }
+      });
+
+      // ✅ B7: Update DB (second update) with next question
+      await db.update(activeSessions).set({
+        chatHistory,
+        assessmentState: {
+          awaiting_user_answer: true,
+          is_generating_next: false,
+          current_question: nextCurrent,
+          currentLevel: A.currentLevel,
+          attempts: A.attempts,
+          evidence: A.evidence,
+          questionIndexInAttempt: A.questionIndexInAttempt,
+          usedClustersCurrentAttempt: A.usedClustersCurrentAttempt,
+          stemsCurrentAttempt: A.stemsCurrentAttempt,
+          lastAttemptStems: A.lastAttemptStems
+        },
+        updatedAt: new Date()
+      }).where(eq(activeSessions.sessionId, sessionId));
+    } else {
+      // Stop or complete - set flags to false
+      await db.update(activeSessions).set({
+        chatHistory,
+        assessmentState: {
+          awaiting_user_answer: false,
+          is_generating_next: false,
+          current_question: null,
+          currentLevel: A.currentLevel,
+          attempts: A.attempts,
+          evidence: A.evidence,
+          questionIndexInAttempt: A.questionIndexInAttempt,
+          usedClustersCurrentAttempt: A.usedClustersCurrentAttempt,
+          stemsCurrentAttempt: A.stemsCurrentAttempt,
+          lastAttemptStems: A.lastAttemptStems
+        },
+        stage: 'report',
+        updatedAt: new Date()
+      }).where(eq(activeSessions.sessionId, sessionId));
     }
 
     A.currentQuestion = null;
