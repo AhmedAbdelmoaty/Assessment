@@ -49,16 +49,18 @@ ${avoidPart ? `- avoid_stems:\n${avoidPart}` : ""}
 
 ### LEVEL CATALOG (use **only** these clusters; do not drift)
 **L1 — Foundations**
-- central_tendency_foundations: mean/median/mode; how they differ; sensitivity to outliers; choose the appropriate center when data are skewed or contain outliers.
-- dispersion_boxplot_foundations: range, variance, standard deviation; interpret SD vs data homogeneity and shape; read a boxplot to judge spread/balance.
+- central_tendency_basics: mean/median/mode; when each is appropriate; simple numeric interpretations.
+- basic_spread_distribution_shape: range; qualitative shape (symmetry/skew/modality); read simple histograms/frequency tables.
 
 **L2 — Core Applied Descriptives**
-- distribution_shape_normality: normal vs right/left-skewed shapes; how shape influences central tendency and dispersion; detect non-normality from simple histograms/checks.
-- data_quality_outliers_iqr: five-number summary; IQR and lower/upper bounds (LB/UB); how outliers affect mean/SD; when to keep vs remove.
+- quantiles_iqr_boxplots: quartiles/percentiles, IQR, Tukey fences; compare groups via side-by-side boxplots.
+- standard_deviation_variability: variance/SD, coefficient of variation; interpret spread relative to mean/scale.
+- grouped_summaries: per-group mean/median/IQR; weighted vs unweighted; simple pivot-style comparisons.
 
 **L3 — Professional Descriptive Skills**
-- correlation_bivariate_patterns: read scatterplots; direction (positive/negative) and general form; correlation coefficient (magnitude & direction); correlation ≠ causation.
-- non_normal_skew_kurtosis_z: diagnose skewness & kurtosis; use simple transforms (log/√) to improve interpretability; use Z-scores to gauge distance from mean and flag potential outliers even when data aren’t perfectly normal.
+- z_scores_standardization: compute/interpret z-scores; compare across units/scales.
+- correlation_vs_covariance: magnitude/direction & units; read scatterplots; beware nonlinearity/heteroscedasticity.
+- skewness_kurtosis_diagnostics: skewness & kurtosis; read Q–Q plots; suggest monotonic transformations when suitable.
 
 ### PERSONALIZATION POLICY (scenario-only; NEVER echo role/years)
 - Use profile fields **only** to shape a realistic scenario (domain, metric names, units, plausible values), **not** to describe the user.
@@ -115,13 +117,6 @@ ${
   - **Set \`correct_index\` to the position after shuffling** (not always 0).
   - Avoid “All of the above/None of the above” (and Arabic equivalents) unless absolutely necessary and appropriate; do not overuse.
   - Distractors must be realistic and share type/units with the correct option.
-
-  ### CLARITY & COMPLETENESS (applies to **every** question)
-- The stem must be **fully self-contained, unambiguous, and task-clear. A learner should understand what’s required on first read.
-- **Include all information needed** to obtain the correct answer. **Never** ask for a value that cannot be computed/inferred from the stem.
-- If the scenario uses numeric interpretation (e.g., SD), **provide minimal context** to make the number meaningful (e.g., indicative mean/range).
-- If using Tukey fences, provide sufficient info (e.g., Q1 & Q3 and/or IQR) so LB/UB are derivable.
-- Use **realistic scales/units** consistent with the scenario flavor.
 
 ### OUTPUT FORMAT — JSON ONLY (STRICT)
 Return **JSON only**, no prose, no markdown. Use this exact schema example (indices are examples only):

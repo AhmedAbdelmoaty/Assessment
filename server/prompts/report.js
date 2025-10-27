@@ -84,21 +84,9 @@ ${lang === "ar"
 ### EXAMPLES OF TOPIC NAME USAGE (IMPORTANT)
 - You will receive topic names already formatted for humans (e.g.,
 ${lang==="ar"
-  ? `"النزعة المركزية (المتوسط/الوسيط/المنوال)", 
-"التشتت ومخطط الصندوق (المدى/التباين/الانحراف المعياري)", 
-"شكل التوزيع والطبيعية", 
-"جودة البيانات والقيم الشاذة (IQR وحدود LB/UB)", 
-"الارتباط والأنماط الثنائية", 
-"البيانات غير الطبيعية (التواء/تفلطح/Z-Score)".
-`
-  : `"Central Tendency (Mean/Median/Mode)", 
-"Dispersion & Box Plot (Range/Variance/SD)", 
-"Distribution Shape & Normality", 
-"Data Quality & Outliers (IQR, LB/UB)", 
-"Correlation & Bivariate Patterns", 
-"Non-Normal Data (Skewness/Kurtosis/Z-Scores)".
-`}
-- **Never** print raw codes like "central_tendency_foundations" or "data_quality_outliers_iqr".
+  ? `"مقاييس النزعة المركزية"، "التشتت وشكل التوزيع"، "الربيعات و(IQR) ومخططات الصندوق"، "الانحراف المعياري والتباين"، "ملخّصات حسب المجموعات"، "الدرجات المعيارية (Z-Scores) والتقييس"، "الارتباط مقابل التغاير"، "الالتواء والتفلطح (تشخيص الشكل)".`
+  : `"Central Tendency Basics", "Spread & Distribution Shape", "Quantiles, IQR & Boxplots", "Standard Deviation & Variability", "Grouped Summaries", "Z-Scores & Standardization", "Correlation vs. Covariance", "Skewness & Kurtosis Diagnostics".`}
+- **Never** print raw codes like "z_scores_standardization" or "quantiles_iqr_boxplots".
 
 ### LENGTH & FORMAT
 - Total target: ~80–140 words ${lang==="ar" ? "(بالعربية)" : ""}.
