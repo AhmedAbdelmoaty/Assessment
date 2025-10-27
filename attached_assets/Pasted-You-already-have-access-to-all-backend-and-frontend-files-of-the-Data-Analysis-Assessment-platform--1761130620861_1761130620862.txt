@@ -1,0 +1,118 @@
+You already have access to all backend and frontend files of the Data Analysis Assessment platform.
+Before making any code changes, carefully read this prompt to fully understand the flow and logic required.
+
+🎯 Goal
+
+Fix and enhance the chat and persistence logic to make each assessment and explanation fully independent, stable, and properly saved — with zero data mismatch or state errors.
+
+🔧 Required Fixes & Adjustments
+
+Start Explanation Behavior
+
+The “Start Explanation” button appears only once inside the report message (after assessment completion).
+
+When clicked, it becomes disabled or disappears immediately — it cannot be pressed again.
+
+The explanation (teaching) begins once only per report.
+
+Explanation Continuation
+
+If the user leaves the chat during an explanation and returns later,
+they should find the entire previous conversation (messages) exactly as they left it —
+and be able to continue naturally from that point without losing context.
+
+The assistant must still remember the previous messages (thread context) and continue the same lesson smoothly.
+
+Independent Threads
+
+Every assessment + explanation pair must have its own threadId (or conversation context).
+
+Starting a new assessment = start a new clean thread with no link to previous ones.
+
+The assistant must not reference or remember any past explanations from other assessments.
+
+If the user resumes a lesson (same assessment), reuse the same threadId.
+
+If the user starts a new assessment, generate a brand new threadId.
+
+Persistent Save & Resume Logic
+
+Teaching state must be saved in the database: teaching_state = { inProgress, threadId, transcript, lastMessage }.
+
+On chat reload:
+
+If inProgress and same assessment_id, reload the saved messages and continue.
+
+If new assessment started → reset teaching state completely.
+
+Floating “New Assessment” Button
+
+Remove “Start New Assessment” from the report message.
+
+Add a floating small button labeled “New Assessment”:
+
+Always visible under the chat header (fixed/sticky).
+
+On mobile: compact pill design, doesn’t block messages.
+
+On desktop: small, right-aligned near header.
+
+When clicked:
+
+If user is in explanation → save current explanation (Explanation N) and start a new assessment.
+
+If user is in the middle of assessment → discard current one and restart from level 1.
+
+If user is at report screen (no active teaching) → just start a new assessment directly.
+
+Starting a new assessment always resets the current chat and thread state cleanly.
+
+Saving Rules
+
+Assessments: saved only if fully completed.
+
+Explanations: saved only when the user starts a new assessment (or explicitly ends teaching later).
+
+UI Consistency
+
+Buttons styled as small rounded pills, brand maroon color, subtle shadow.
+
+“Start Explanation” only in report message.
+
+“New Assessment” — fixed small floating button always visible.
+
+⚙️ Validation & Safety
+
+Before pushing any changes:
+
+Verify that every update does not break:
+
+intake persistence,
+
+assessment saving logic,
+
+existing dashboard queries, or
+
+session state handling.
+
+Ensure each thread reset, assessment restart, or teaching save happens atomically and without state leak.
+
+Test the flow end-to-end:
+
+fresh user → intake → assessment → report → explanation → new assessment → repeat
+
+returning user mid-explanation → resume correctly
+
+starting new assessment after completion → no memory from previous threads.
+
+✅ Expected Result
+
+Chat flow runs smoothly with no repeated intake.
+
+Each assessment and explanation are fully isolated and saved correctly.
+
+The floating “New Assessment” button works at any time without breaking context.
+
+Resuming explanation reloads the same conversation seamlessly.
+
+No cross-memory or thread contamination between sessions.

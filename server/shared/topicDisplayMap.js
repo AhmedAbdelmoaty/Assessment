@@ -2,24 +2,30 @@
 
 export const TOPIC_DISPLAY = {
   en: {
-    central_tendency_basics: "Central Tendency (Mean/Median/Mode)",
-    basic_spread_distribution_shape: "Spread & Distribution Shape",
-    quantiles_iqr_boxplots: "Quartiles, IQR & Boxplots",
-    standard_deviation_variability: "Standard Deviation & Variability",
-    grouped_summaries: "Grouped Summaries",
-    z_scores_standardization: "Z-Scores & Standardization",
-    correlation_vs_covariance: "Correlation vs. Covariance",
-    skewness_kurtosis_diagnostics: "Skewness & Kurtosis Diagnostics",
+    // Level 1
+    central_tendency_foundations: "Central Tendency (Mean/Median/Mode)",
+    dispersion_boxplot_foundations: "Dispersion & Box Plot (Range/Variance/SD)",
+
+    // Level 2
+    distribution_shape_normality: "Distribution Shape & Normality",
+    data_quality_outliers_iqr: "Data Quality & Outliers (IQR, LB/UB)",
+
+    // Level 3
+    correlation_bivariate_patterns: "Correlation & Bivariate Patterns",
+    non_normal_skew_kurtosis_z: "Non-Normal Data (Skewness/Kurtosis/Z-Scores)",
   },
   ar: {
-    central_tendency_basics: "مقاييس النزعة المركزية (المتوسط/الوسيط/المنوال)",
-    basic_spread_distribution_shape: "التشتت وشكل التوزيع",
-    quantiles_iqr_boxplots: "الربيعات و(IQR) ومخططات الصندوق",
-    standard_deviation_variability: "الانحراف المعياري والتباين",
-    grouped_summaries: "ملخّصات حسب المجموعات",
-    z_scores_standardization: "الدرجات المعيارية (Z-Scores) والتوحيد",
-    correlation_vs_covariance: "الارتباط مقابل التغاير",
-    skewness_kurtosis_diagnostics: "الالتواء والتفلطح (تشخيصات)",
+    // المستوى 1
+    central_tendency_foundations: "مقاييس النزعة المركزية (المتوسط/الوسيط/المنوال)",
+    dispersion_boxplot_foundations: "التشتت ومخطط الصندوق (المدى/التباين/الانحراف المعياري)",
+
+    // المستوى 2
+    distribution_shape_normality: "شكل التوزيع (Distribution Shape & Normality)",
+    data_quality_outliers_iqr: "جودة البيانات والقيم الشاذة (IQR, LB/UB)",
+
+    // المستوى 3
+    correlation_bivariate_patterns: "الارتباط والأنماط الثنائية (Correlation & Bivariate Patterns)",
+    non_normal_skew_kurtosis_z: "البيانات غير الطبيعية (Skewness/Kurtosis/Z-Scores)",
   },
 };
 

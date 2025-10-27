@@ -1,0 +1,192 @@
+You are The Ultimate Full-Stack Engineer (Node.js + Express + Vanilla JS)
+
+Goal: finalize header UX and polish the auth pages across the whole app while preserving the current visual identity (brand maroon, fonts, spacing). No frameworks.
+
+Non-negotiable constraints
+
+Do not change the brand look & feel (colors, radii, shadows, fonts).
+
+Keep existing page separation: index.html (Home), dashboard.html (protected), chat.html (protected), login.html, signup.html.
+
+Keep current auth/session guards and routes as they are.
+
+All language behavior remains client-side (no backend changes).
+
+Keep everything LTR; just switch content language text like today.
+
+What’s wrong now (context)
+
+The language control shows two buttons on some pages and one on others; UX must be unified.
+
+Home header has Login / Sign Up centered; they should move to the far right (like the reference screenshot).
+
+Dashboard/Chat headers: need a single language toggle button after Logout; and Logout button color must match the brand maroon (not bright red).
+
+Login/Signup pages: use the company logo at the top of the card instead of the chart icon.
+
+Signup form card is too tall; on common laptop heights it requires scrolling. Reduce vertical spacing so the full card fits without scrolling while keeping readability.
+
+Tasks
+1) Unify language switch to one button across all pages
+
+Behavior
+
+A single pill button shows the other language label.
+
+If current language is English → button text: العربية (with the existing globe/AZ icon).
+
+If current language is Arabic → button text: English.
+
+On click: toggle language, persist to localStorage('lang'), and refresh UI (same as current behavior).
+
+This same one-button control must appear on all pages: index.html, dashboard.html, chat.html, login.html, signup.html.
+
+Where to change
+
+Create a small shared helper in public/js/header.js (new) that:
+
+Renders the single language button,
+
+Reads/writes localStorage('lang'),
+
+Updates button label,
+
+Exposes initHeaderLanguageSwitch(containerEl).
+
+Replace any existing two-button language markup with one placeholder container (e.g., <div id="lang-switch"></div>) and call the init function from page JS.
+
+CSS
+
+Reuse current style (rounded, subtle shadow). Keep the AZ/globe icon.
+
+Class suggestion: .lang-switch (container) + .lang-btn (button).
+
+Make sure hover/focus states match site’s token vars.
+
+2) Home header actions alignment
+
+Index (Home)
+
+Move Login and Sign Up buttons in the header to the far right, exactly like the reference screenshot (Sign Up at the edge, then a small divider, then the language switch).
+
+Keep the same two buttons duplicated in the hero section (beneath the welcome text) as you already did, but leave the header versions as well.
+
+Where
+
+public/index.html header region + minor CSS adjustments in public/styles.css:
+
+Right-align the action group with a flex container:
+.header-actions { margin-left:auto; display:flex; align-items:center; gap:12px; }
+
+Add a thin vertical divider element between Sign Up and the lang switch:
+.header-divider { width:1px; height:22px; background: var(--border); }
+
+3) Dashboard & Chat headers
+
+Keep the current left area (logo + tabs).
+
+Right side order: Logout button, then the single language button (from Task 1).
+
+Fix Logout color to match brand maroon (--primary), not the bright red.
+
+Update its class to use the same button styling system already in the site (rounded, maroon bg, white text).
+
+Ensure Chat uses the exact same header component as Dashboard (already separated pages now).
+
+Files: public/dashboard.html, public/chat.html, public/styles.css (button class), page JS files.
+
+4) Login & Signup pages – unify header language button and card branding
+
+Replace the chart/graph icon in both forms with the company logo (/assets/imp-logo.jpeg), centered above the title.
+
+Keep size consistent (e.g., height 56–64px; responsive).
+
+Use the same single language button (Task 1) in the page header.
+
+Files: public/login.html, public/signup.html.
+
+5) Signup form vertical spacing (fit without scroll)
+
+Adjust spacing so that on a 1366×768 viewport the entire signup card is visible without page scroll (assuming standard browser UI). Keep clarity and touch targets.
+
+Tuning suggestions in public/styles.css:
+
+Reduce top/bottom padding of the signup card.
+
+Reduce vertical margins between stacked fields from e.g., 16px → 10–12px.
+
+Slightly reduce the heading/subtitle spacing.
+
+Ensure inputs still have at least 44px hit area.
+
+If needed, make the card container use max-height: calc(100vh - 160px) with internal scroll only if absolutely necessary — but aim to avoid scroll by spacing tightening first.
+
+File map & minimal JS structure (for clarity)
+
+public/js/header.js (new): shared language toggle init & any header helpers.
+
+public/app.js: Home-page only logic (already done earlier).
+
+public/dashboard.js: dashboard interactivity (already exists).
+
+public/chat.js: chat logic (already exists).
+
+Each page includes:
+
+<script src="/js/header.js" defer></script>
+<script src="/js/<page>.js" defer></script>
+
+
+and contains <div id="lang-switch"></div> where the button should appear.
+
+CSS notes (public/styles.css)
+
+Add/adjust:
+
+.header-actions { margin-left:auto; display:flex; align-items:center; gap:12px; }
+.header-divider { width:1px; height:22px; background: var(--border); }
+
+.lang-switch .lang-btn {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:10px 14px; border:1px solid var(--border);
+  border-radius:999px; background:#fff; color:var(--foreground);
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
+}
+
+.btn-logout {
+  background: var(--primary); color: var(--primary-foreground);
+  border: none; border-radius: 999px; padding:10px 16px;
+  box-shadow: 0 3px 10px rgba(165,32,37,.25);
+}
+
+/* Signup card tightening */
+.auth-card { padding: 24px 28px; }
+.auth-card .card-title { margin-top: 8px; margin-bottom: 8px; }
+.auth-card .card-subtitle { margin-bottom: 16px; }
+.auth-card .form-row { margin-bottom: 10px; } /* was larger */
+.auth-logo { height: 60px; width:auto; display:block; margin:0 auto 8px; }
+
+
+Apply .auth-card, .card-title, .card-subtitle, .form-row, .auth-logo in login.html and signup.html.
+
+Acceptance checklist
+
+Single language button (shows the other language) appears and works the same on all pages.
+
+Home header shows Login / Sign Up aligned to the far right, with a thin divider and the language button on their right (Sign Up at the edge, then divider, then language).
+
+Dashboard & Chat headers: same layout; Logout button is brand maroon; language button comes after it.
+
+Login/Signup forms show the company logo at top (no chart icon).
+
+Signup card fits without page scroll on a 1366×768 viewport while keeping good readability and 44px hit-areas.
+
+No visual regressions to the existing brand style (maroon, rounded corners, shadows, fonts).
+
+All existing guards/flows still work:
+
+Home → Login → Dashboard → Chat (protected pages keep the aligned header).
+
+Language toggle persists and updates correctly.
+
+Please implement the above exactly, keep changes minimal and localized, and preserve the current design language.

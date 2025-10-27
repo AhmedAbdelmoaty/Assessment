@@ -6,6 +6,8 @@ This is a bilingual (English/Arabic) learning assessment platform designed to ev
 
 The platform uses an adaptive assessment engine that dynamically adjusts question difficulty based on user performance, covering descriptive statistics topics from foundational concepts to professional-level skills.
 
+**New Feature (October 2025)**: Admin-only interactive data dashboard for user distribution analysis with role-based access control.
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
@@ -67,11 +69,19 @@ Preferred communication style: Simple, everyday language.
 - `assessment`: Progress tracking (level, attempts, evidence array, asked clusters)
 - `report`: Final assessment results (message, strengths, gaps, proficiency level)
 
-**Database Configuration (Future-Ready)**
+**Database Configuration**
 - Drizzle ORM configured with PostgreSQL dialect
-- Schema defined in `shared/schema.ts` with Zod validation
-- Neon serverless PostgreSQL driver ready for integration
-- Migration system in place via drizzle-kit
+- Neon serverless PostgreSQL driver for production
+- Migration system via drizzle-kit (use `npm run db:push --force`)
+- Users table includes role-based access control (user/admin roles)
+
+**Database Schema**
+- `users` table: id, email, username, pass_hash, role, profile_json, created_at, email_verified_at
+- `auth_otps` table: OTP verification for email
+- `user_assessments` table: Assessment progress and results
+- `attempts` table: Historical attempt records
+- `teaching_notes` table: User learning notes
+- `session` table: Express session storage
 
 ### External Dependencies
 
@@ -101,3 +111,73 @@ Preferred communication style: Simple, everyday language.
 - clsx + tailwind-merge: Conditional className composition
 - cmdk: Command palette functionality
 - nanoid: Unique ID generation
+
+## Admin Dashboard
+
+### Overview
+Admin-only interactive data dashboard with pivot matrix analytics for analyzing user distribution across demographic and professional categories. Provides real-time insights with configurable dimensions and multi-select filters, showing real database aggregations without exposing individual user PII.
+
+### Features
+- **Role-Based Access**: Only users with `role = 'admin'` can access `/admin.html` and `/api/admin/*` endpoints
+- **KPI Cards**: Total Users, Filtered Users, Top Country (from real database queries)
+- **Pivot Matrix**: Interactive 2D matrix with configurable row/column dimensions
+  - 6 available dimensions: Country, Sector, Job Nature, Age Band, Experience, Learning Reason
+  - Swap rows/columns freely for different views
+  - Row totals, column totals, and grand total
+  - Lightweight heatmap coloring for visual patterns
+- **Multi-Select Filters**: Filter by any combination of dimension values
+  - Filters affect both pivot matrix and users table
+  - Debounced for performance (300ms delay)
+  - Automatic pagination reset when filters change
+- **Synced Users Table**: Shows individual user rows matching current filters
+  - Displays: Name, Email, Username, Country, Age Band, Sector, Job Nature, Experience, Reason
+  - Search by name, email, or username (debounced 300ms)
+  - Pagination: 20 rows per page with smart page reset
+  - Export to CSV functionality
+- **Real-Time Refresh**: Reload data without page reload
+- **Bilingual Support**: Full English/Arabic language support with RTL layout
+- **Responsive Design**: Mobile-friendly with breakpoint at 768px
+
+### Security
+- Admin middleware (`server/middleware/admin.js`) validates user role on every request
+- Regular users receive 403 (API) or redirect to `/dashboard.html` (HTML)
+- Admins are redirected from regular user pages to `/admin.html`
+- Protected routes mounted before static file serving (prevents SPA fallback exposure)
+- Rate limiting: 100 requests per 15 minutes for admin endpoints
+- No PII exposed - only aggregated counts displayed
+
+### Data Source
+Dashboard queries `profile_json.intake` fields from the `users` table:
+- `country`: User's country
+- `age_band`: Age range (18-24, 25-34, 35-44, 45-54, 55+)
+- `sector`: Industry sector (Technology, Finance, Healthcare, etc.)
+- `job_nature`: Job function (IT/Data, Accounting/Finance, Marketing, etc.)
+- `experience_years_band`: Experience range (0-2, 3-5, 6-10, 11-15, 16+)
+- `learning_reason`: Primary learning motivation
+
+### API Endpoints
+- `GET /api/admin/users/raw`: Returns flat array of user rows with all intake fields (id, email, username, name, country, age_band, sector, job_nature, experience_years_band, learning_reason)
+
+### Technical Implementation
+- **Client-Side Pivot Building**: API returns flat rows; client builds pivot matrix for performance
+- **Pagination Reset Logic**: `currentPage` resets to 1 when filters change or data refreshes to prevent empty table bug
+- **Clamping Guard**: `renderPagination()` clamps `currentPage` to valid range (1 to totalPages)
+- **SQL Verification Queries**: Included in code comments for manual verification of aggregated counts
+
+### Files
+- `server/middleware/admin.js`: Role-based access control middleware
+- `server/routes/admin.js`: Admin API endpoints (users/raw)
+- `public/admin.html`: Admin dashboard UI with pivot controls
+- `public/js/admin.js`: Pivot matrix logic + users table sync
+- `public/css/admin.css`: Minimal, responsive, RTL-friendly styling
+
+### Admin User Setup
+To create an admin user:
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'user@example.com';
+```
+
+**Test Admin Account**:
+- Email: admin@example.com
+- Password: admin123
+- Role: admin

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Learning Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <script src="/js/header.js"></script>
+</head>
+<body>
+    <!-- Global Header -->
+    <header class="chat-header" id="globalHeader">
+        <!-- Logo -->
+        <a href="/admin.html" class="brand">
+            <img
+                src="/assets/imp-logo.jpeg"
+                alt="IMP - Institute of Management Professionals"
+                class="brand-logo"
+            />
+        </a>
+
+        <!-- Title -->
+        <h1 class="admin-header-title">
+            <i class="fas fa-chart-bar"></i>
+            <span data-lang-content="en">Admin Dashboard</span>
+            <span class="hidden" data-lang-content="ar">لوحة المدير</span>
+        </h1>
+
+        <!-- Header Actions -->
+        <div class="header-actions">
+            <!-- Logout Button -->
+            <button id="headerLogoutBtn" class="btn-logout" data-testid="button-admin-logout">
+                <i class="fas fa-sign-out-alt"></i>
+                <span data-lang-content="en">Logout</span>
+                <span class="hidden" data-lang-content="ar">خروج</span>
+            </button>
+
+            <!-- Language Toggle -->
+            <div id="lang-switch"></div>
+        </div>
+    </header>
+
+    <!-- Admin Content -->
+    <main class="admin-container">
+        <!-- KPI Cards -->
+        <section class="kpi-section">
+            <div class="kpi-card" data-testid="kpi-total-users">
+                <div class="kpi-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-label">
+                        <span data-lang-content="en">Total Users</span>
+                        <span class="hidden" data-lang-content="ar">إجمالي المستخدمين</span>
+                    </div>
+                    <div class="kpi-value" id="totalUsersKPI">-</div>
+                </div>
+            </div>
+
+            <div class="kpi-card" data-testid="kpi-filtered-users">
+                <div class="kpi-icon">
+                    <i class="fas fa-filter"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-label">
+                        <span data-lang-content="en">Filtered Users</span>
+                        <span class="hidden" data-lang-content="ar">المستخدمين المصفّين</span>
+                    </div>
+                    <div class="kpi-value" id="filteredUsersKPI">-</div>
+                </div>
+            </div>
+
+            <div class="kpi-card" data-testid="kpi-top-country">
+                <div class="kpi-icon">
+                    <i class="fas fa-globe"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-label">
+                        <span data-lang-content="en">Top Country</span>
+                        <span class="hidden" data-lang-content="ar">أعلى دولة</span>
+                    </div>
+                    <div class="kpi-value" id="topCountryKPI">-</div>
+                    <div class="kpi-subtext" id="topCountryCount"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pivot Controls -->
+        <section class="pivot-controls">
+            <div class="control-group">
+                <label for="rowsSelect">
+                    <i class="fas fa-arrows-alt-v"></i>
+                    <span data-lang-content="en">Rows</span>
+                    <span class="hidden" data-lang-content="ar">الصفوف</span>
+                </label>
+                <select id="rowsSelect" data-testid="select-rows">
+                    <option value="country">Country</option>
+                    <option value="sector">Sector</option>
+                    <option value="job_nature">Job Nature</option>
+                    <option value="age_band">Age Band</option>
+                    <option value="experience_years_band">Experience</option>
+                    <option value="learning_reason">Learning Reason</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="columnsSelect">
+                    <i class="fas fa-arrows-alt-h"></i>
+                    <span data-lang-content="en">Columns</span>
+                    <span class="hidden" data-lang-content="ar">الأعمدة</span>
+                </label>
+                <select id="columnsSelect" data-testid="select-columns">
+                    <option value="none">None</option>
+                    <option value="country">Country</option>
+                    <option value="sector">Sector</option>
+                    <option value="job_nature">Job Nature</option>
+                    <option value="age_band">Age Band</option>
+                    <option value="experience_years_band">Experience</option>
+                    <option value="learning_reason">Learning Reason</option>
+                </select>
+            </div>
+
+            <div class="control-group filters-group">
+                <label>
+                    <i class="fas fa-filter"></i>
+                    <span data-lang-content="en">Filters</span>
+                    <span class="hidden" data-lang-content="ar">المرشحات</span>
+                </label>
+                <div id="filtersContainer" class="filters-container"></div>
+            </div>
+
+            <button id="refreshBtn" class="refresh-btn" data-testid="button-refresh">
+                <i class="fas fa-sync-alt"></i>
+                <span data-lang-content="en">Refresh</span>
+                <span class="hidden" data-lang-content="ar">تحديث</span>
+            </button>
+        </section>
+
+        <!-- Pivot Matrix -->
+        <section class="pivot-section">
+            <h2 class="section-title">
+                <i class="fas fa-table"></i>
+                <span data-lang-content="en">Pivot Matrix</span>
+                <span class="hidden" data-lang-content="ar">مصفوفة التحليل</span>
+            </h2>
+            <div id="pivotContainer" class="pivot-container" data-testid="pivot-matrix">
+                <div class="loading-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span data-lang-content="en">Loading data...</span>
+                    <span class="hidden" data-lang-content="ar">جاري تحميل البيانات...</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Users Table -->
+        <section class="users-section">
+            <div class="users-header">
+                <h2 class="section-title">
+                    <i class="fas fa-users"></i>
+                    <span data-lang-content="en">Users Table</span>
+                    <span class="hidden" data-lang-content="ar">جدول المستخدمين</span>
+                </h2>
+                <div class="users-actions">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        placeholder="Search name, email, username..." 
+                        class="search-input"
+                        data-testid="input-search"
+                    />
+                    <button id="exportBtn" class="export-btn" data-testid="button-export">
+                        <i class="fas fa-download"></i>
+                        <span data-lang-content="en">Export CSV</span>
+                        <span class="hidden" data-lang-content="ar">تصدير CSV</span>
+                    </button>
+                </div>
+            </div>
+            <div id="usersTableContainer" class="users-table-container" data-testid="users-table">
+                <div class="loading-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span data-lang-content="en">Loading data...</span>
+                    <span class="hidden" data-lang-content="ar">جاري تحميل البيانات...</span>
+                </div>
+            </div>
+            <div id="paginationContainer" class="pagination-container"></div>
+        </section>
+    </main>
+
+    <script src="/js/admin.js"></script>
+    <script>
+        // Initialize language switch
+        document.addEventListener('DOMContentLoaded', () => {
+            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
+        });
+
+        // Logout handler
+        document.getElementById('headerLogoutBtn')?.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/auth/logout', { method: 'POST' });
+                if (resp.ok) {
+                    window.location.href = '/';
+                } else {
+                    alert('Logout failed. Please try again.');
+                }
+            } catch (err) {
+                console.error('Logout error:', err);
+                alert('Logout failed. Please try again.');
+            }
+        });
+    </script>
+</body>
+</html>
