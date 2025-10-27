@@ -1,29 +1,25 @@
-import express from "express";
-import bcrypt from "bcrypt";
-import { db, users, authOtps } from "../db.js";
-import { eq, and, isNull, gt, desc } from "drizzle-orm";
-import { sql } from "drizzle-orm";
-import nodemailer from "nodemailer";
+import express from 'express';
+import bcrypt from 'bcrypt';
+import { db, users, authOtps } from '../db.js';
+import { eq, and, isNull, gt, desc } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
+import nodemailer from 'nodemailer';
 
 const router = express.Router();
 
 // Email configuration
 let transporter = null;
-const SMTP_CONFIGURED = !!(
-  process.env.SMTP_HOST &&
-  process.env.SMTP_USER &&
-  process.env.SMTP_PASS
-);
+const SMTP_CONFIGURED = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
 if (SMTP_CONFIGURED) {
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
+    port: parseInt(process.env.SMTP_PORT || '587'),
     secure: false,
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+      pass: process.env.SMTP_PASS
+    }
   });
 }
 
@@ -33,61 +29,51 @@ function generateOTP() {
 }
 
 // POST /api/auth/signup
-router.post("/signup", async (req, res) => {
+router.post('/signup', async (req, res) => {
   try {
-    const { name, username, email, phone, password, confirmPassword } =
-      req.body;
+    const { name, username, email, phone, password, confirmPassword } = req.body;
 
     // Validation
     if (!name || !username || !email || !password || !confirmPassword) {
-      return res
-        .status(400)
-        .json({ error: "All required fields must be provided" });
+      return res.status(400).json({ error: 'All required fields must be provided' });
     }
 
     if (password !== confirmPassword) {
-      return res.status(400).json({ error: "Passwords do not match" });
+      return res.status(400).json({ error: 'Passwords do not match' });
     }
 
     if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "Password must be at least 6 characters" });
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
     if (username.length < 3 || username.length > 30) {
-      return res
-        .status(400)
-        .json({ error: "Username must be 3-30 characters" });
+      return res.status(400).json({ error: 'Username must be 3-30 characters' });
     }
 
     if (!/^[a-z0-9_-]+$/i.test(username)) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Username can only contain letters, numbers, underscores, and hyphens",
-        });
+      return res.status(400).json({ error: 'Username can only contain letters, numbers, underscores, and hyphens' });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: "Invalid email address" });
+      return res.status(400).json({ error: 'Invalid email address' });
     }
 
     // Check if email or username already exists
     const existingUsers = await db
       .select()
       .from(users)
-      .where(sql`${users.email} = ${email} OR ${users.username} = ${username}`);
+      .where(
+        sql`${users.email} = ${email} OR ${users.username} = ${username}`
+      );
 
     if (existingUsers.length > 0) {
       const existingUser = existingUsers[0];
       if (existingUser.email === email) {
-        return res.status(409).json({ error: "Email already registered" });
+        return res.status(409).json({ error: 'Email already registered' });
       }
       if (existingUser.username === username) {
-        return res.status(409).json({ error: "Username already taken" });
+        return res.status(409).json({ error: 'Username already taken' });
       }
     }
 
@@ -95,16 +81,13 @@ router.post("/signup", async (req, res) => {
     const passHash = await bcrypt.hash(password, 10);
 
     // Create user
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        email,
-        username,
-        passHash,
-        profileJson: { name, phone: phone || null },
-        emailVerifiedAt: null,
-      })
-      .returning();
+    const [newUser] = await db.insert(users).values({
+      email,
+      username,
+      passHash,
+      profileJson: { name, phone: phone || null },
+      emailVerifiedAt: null
+    }).returning();
 
     // Generate OTP
     const otpCode = generateOTP();
@@ -114,7 +97,7 @@ router.post("/signup", async (req, res) => {
       userId: newUser.id,
       code: otpCode,
       expiresAt,
-      consumedAt: null,
+      consumedAt: null
     });
 
     // Send OTP via email or log to console
@@ -123,72 +106,78 @@ router.post("/signup", async (req, res) => {
         await transporter.sendMail({
           from: process.env.FROM_EMAIL || process.env.SMTP_USER,
           to: email,
-          subject: "Verify your email - Learning Assessment Platform",
+          subject: 'Verify your email - Learning Assessment Platform',
           html: `
             <h2>Email Verification</h2>
             <p>Hello ${name},</p>
             <p>Your verification code is: <strong>${otpCode}</strong></p>
             <p>This code will expire in 15 minutes.</p>
             <p>If you didn't request this, please ignore this email.</p>
-          `,
+          `
         });
         console.log(`[EMAIL] OTP sent to ${email}`);
       } catch (emailError) {
-        console.error("[EMAIL ERROR]", emailError);
+        console.error('[EMAIL ERROR]', emailError);
         console.log(`[DEV MODE] OTP for ${email}: ${otpCode}`);
       }
     } else {
       console.log(`[DEV MODE] OTP for ${email}: ${otpCode}`);
     }
 
-    res.json({
+    res.json({ 
       ok: true,
-      devMode: !SMTP_CONFIGURED,
+      devMode: !SMTP_CONFIGURED
     });
+
   } catch (error) {
-    console.error("Signup error:", error);
-    res.status(500).json({ error: "Server error during signup" });
+    console.error('Signup error:', error);
+    res.status(500).json({ error: 'Server error during signup' });
   }
 });
 
 // POST /api/auth/verify-otp
-router.post("/verify-otp", async (req, res) => {
+router.post('/verify-otp', async (req, res) => {
   try {
     const { email, code } = req.body;
 
     if (!email || !code) {
-      return res.status(400).json({ error: "Email and code are required" });
+      return res.status(400).json({ error: 'Email and code are required' });
     }
 
     // Find user
     const [user] = await db.select().from(users).where(eq(users.email, email));
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ error: 'User not found' });
     }
 
     // Find latest unconsumed OTP
     const otps = await db
       .select()
       .from(authOtps)
-      .where(and(eq(authOtps.userId, user.id), isNull(authOtps.consumedAt)))
+      .where(
+        and(
+          eq(authOtps.userId, user.id),
+          isNull(authOtps.consumedAt)
+        )
+      )
       .orderBy(desc(authOtps.createdAt))
       .limit(1);
 
     if (otps.length === 0) {
-      return res.status(400).json({ error: "No valid OTP found" });
+      return res.status(400).json({ error: 'No valid OTP found' });
     }
 
     const otp = otps[0];
 
     // Check expiration
     if (new Date() > new Date(otp.expiresAt)) {
-      return res.status(400).json({ error: "OTP has expired" });
+      return res.status(400).json({ error: 'OTP has expired' });
     }
 
     // Compare codes (as strings to preserve leading zeros)
     if (otp.code !== code) {
-      return res.status(400).json({ error: "Invalid OTP code" });
+      return res.status(400).json({ error: 'Invalid OTP code' });
     }
 
     // Mark OTP as consumed
@@ -204,45 +193,46 @@ router.post("/verify-otp", async (req, res) => {
       .where(eq(users.id, user.id));
 
     res.json({ ok: true });
+
   } catch (error) {
-    console.error("OTP verification error:", error);
-    res.status(500).json({ error: "Server error during verification" });
+    console.error('OTP verification error:', error);
+    res.status(500).json({ error: 'Server error during verification' });
   }
 });
 
 // POST /api/auth/login
-router.post("/login", async (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
     // Find user
     const [user] = await db.select().from(users).where(eq(users.email, email));
 
     if (!user) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Check if email is verified
     if (!user.emailVerifiedAt) {
-      return res.status(401).json({ error: "Please verify your email first" });
+      return res.status(401).json({ error: 'Please verify your email first' });
     }
 
     // Verify password
     const isValid = await bcrypt.compare(password, user.passHash);
 
     if (!isValid) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Regenerate session to prevent session fixation
     req.session.regenerate((err) => {
       if (err) {
-        console.error("Session regeneration error:", err);
-        return res.status(500).json({ error: "Login failed" });
+        console.error('Session regeneration error:', err);
+        return res.status(500).json({ error: 'Login failed' });
       }
 
       // Create session with user data
@@ -251,72 +241,68 @@ router.post("/login", async (req, res) => {
 
       res.json({ ok: true });
     });
+
   } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ error: "Server error during login" });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error during login' });
   }
 });
 
 // POST /api/auth/logout
-router.post("/logout", (req, res) => {
+router.post('/logout', (req, res) => {
   req.session.destroy((err) => {
     if (err) {
-      console.error("Logout error:", err);
-      return res.status(500).json({ error: "Error logging out" });
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Error logging out' });
     }
     res.json({ ok: true });
   });
 });
 
 // GET /api/session/state
-router.get("/session/state", async (req, res) => {
+router.get('/session/state', async (req, res) => {
   try {
     if (!req.session.userId) {
       return res.json({ loggedIn: false, stage: null });
     }
 
     const userId = req.session.userId;
-    const sessionId = req.session.assessmentSessionId;
 
-    // ✅ جلب session data من الـ backend
-    const sessionData = sessionId ? global.sessions?.get(sessionId) : null;
+    // Check if user exists
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
 
-    if (!sessionData) {
-      return res.json({
-        loggedIn: true,
-        stage: "idle",
-        sessionId: null,
-      });
+    if (!user) {
+      return res.json({ loggedIn: false, stage: null });
     }
 
-    // ✅ تحديد المرحلة الحقيقية
-    let stage = "idle";
-    if (
-      sessionData.currentStep === "teaching" ||
-      sessionData.teaching?.mode === "active"
-    ) {
-      stage = "teaching";
-    } else if (sessionData.currentStep === "report" && sessionData.report) {
-      stage = "report";
-    } else if (sessionData.currentStep === "assessment") {
-      stage = "assessment";
-    } else if (sessionData.currentStep === "intake") {
-      stage = "intake";
+    // Determine stage based on user's progress
+    // This is a simplified version - you'll need to add logic based on your specific requirements
+    let stage = 'idle';
+
+    // Check if intake is pending (profileJson doesn't have intake data)
+    const profile = user.profileJson || {};
+    if (!profile.intakeCompleted) {
+      stage = 'intake-pending';
     }
+
+    // Note: We don't check for in-progress assessments because incomplete assessments 
+    // are never saved to DB. Assessments only persist when completed.
+    // If user exits mid-assessment, they restart from the beginning on return.
 
     res.json({
       loggedIn: true,
       stage,
-      sessionId,
-      chatHistory: sessionData.chatHistory || [],
-      currentQuestion: sessionData.assessment?.currentQuestion || null,
-      teaching: sessionData.teaching || null,
-      report: sessionData.report || null,
-      lang: sessionData.lang || "en",
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        name: profile.name
+      }
     });
+
   } catch (error) {
-    console.error("Session state error:", error);
-    res.status(500).json({ error: "Server error" });
+    console.error('Session state error:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

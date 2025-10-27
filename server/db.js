@@ -83,18 +83,6 @@ export const teachingNotes = pgTable('teaching_notes', {
   createdAt: timestamp('created_at').defaultNow().notNull()
 });
 
-// Active sessions table (for session persistence across reloads)
-export const activeSessions = pgTable('active_sessions', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  sessionId: text('session_id').unique().notNull(),
-  stage: text('stage').default('intake').notNull(),
-  chatHistory: jsonb('chat_history').default(sql`'[]'::jsonb`).notNull(),
-  assessmentState: jsonb('assessment_state'),
-  teachingState: jsonb('teaching_state'),
-  updatedAt: timestamp('updated_at').defaultNow().notNull()
-});
-
 // Session table (for express-session with connect-pg-simple)
 export const sessionTable = pgTable('session', {
   sid: varchar('sid').primaryKey(),
