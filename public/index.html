@@ -9,55 +9,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
-    <script src="/js/header.js"></script>
 </head>
 <body>
-    <!-- Global Header -->
-    <header class="chat-header" id="globalHeader">
-      <!-- Logo -->
-      <a href="/" class="brand">
-        <img
-          src="/assets/imp-logo.jpeg"
-          alt="IMP - Institute of Management Professionals"
-          class="brand-logo"
-        />
-      </a>
+    <!-- Global Header: same spacing/class as original chat header -->
+    <div class="chat-header" id="globalHeader">
+      <!-- Logo (replaces robot + titles) -->
+      <img
+        src="/assets/imp-logo.jpeg"
+        alt="IMP - Institute of Management Professionals"
+        class="brand-logo"
+      />
 
-      <!-- Header Actions Container (aligned to far right) -->
-      <div class="header-actions">
-        <!-- Auth Buttons (shown when logged out, hidden on mobile < 768px) -->
-        <div class="header-auth-buttons" id="authButtonsLoggedOut" style="display: flex; gap: 12px;">
-          <a href="/login.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-login">
-            <span data-lang-content="en">Login</span>
-            <span class="hidden" data-lang-content="ar">دخول</span>
-          </a>
-          <a href="/signup.html" class="auth-link-btn" style="padding: 10px 20px; background: var(--primary); color: white; border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-signup">
-            <span data-lang-content="en">Sign Up</span>
-            <span class="hidden" data-lang-content="ar">تسجيل</span>
-          </a>
-        </div>
-
-        <!-- User Menu (shown when logged in) -->
-        <div class="header-user-menu" id="userMenuLoggedIn" style="display: none; gap: 12px;">
-          <a href="/dashboard.html" class="auth-link-btn" style="padding: 10px 20px; border: 1px solid var(--primary); color: var(--primary); border-radius: 8px; text-decoration: none; font-weight: 600;" data-testid="link-dashboard">
-            <i class="fas fa-th-large"></i>
-            <span data-lang-content="en">Dashboard</span>
-            <span class="hidden" data-lang-content="ar">لوحة التحكم</span>
-          </a>
-          <button id="headerLogoutBtn" class="btn-logout" data-testid="button-logout">
-            <i class="fas fa-sign-out-alt"></i>
-            <span data-lang-content="en">Logout</span>
-            <span class="hidden" data-lang-content="ar">خروج</span>
-          </button>
-        </div>
-
-        <!-- Divider -->
-        <div class="header-divider"></div>
-
-        <!-- Single Language Toggle -->
-        <div id="lang-switch"></div>
+      <!-- Language toggle moved inside the header (keep original shape) -->
+      <div class="lang-toggle header-lang">
+        <button type="button" class="lang-btn active" data-lang="en">English</button>
+        <button type="button" class="lang-btn" data-lang="ar">العربية</button>
       </div>
-    </header>
+    </div>
 
     <!-- Landing Section -->
     <section class="landing-section" id="landingSection">
@@ -80,61 +48,67 @@
                     <p class="hero-subtitle">هدفي مساعدتك في تعلم تحليل البيانات، سنقيّم مستواك خطوة بخطوة، وفي النهاية ستحصل على خطة تعلم واضحة تناسب هدفك.</p>
                 </div>
                 
-                <!-- Action Buttons (Visible on All Screens, Primary CTA on Mobile) -->
-                <div style="display: flex; gap: 16px; justify-content: center; margin-top: 32px;">
-                    <button class="cta-button" onclick="window.location.href='/login.html'" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" data-testid="button-hero-login">
-                        <span data-lang-content="en">Login</span>
-                        <span class="hidden" data-lang-content="ar">دخول</span>
-                    </button>
-                    <button class="cta-button" onclick="window.location.href='/signup.html'" data-testid="button-hero-signup">
-                        <span data-lang-content="en">Sign Up</span>
-                        <span class="hidden" data-lang-content="ar">تسجيل</span>
-                        <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
+                <button class="cta-button" id="startBtn">
+                    <span class="cta-text" data-lang-content="en">Start Assessment</span>
+                    <span class="cta-text hidden" data-lang-content="ar">ابدأ التقييم</span>
+                    <i class="fas fa-arrow-right"></i>
+                </button>
             </div>
         </div>
     </section>
 
-    <script>
-        // Initialize language switch
-        document.addEventListener('DOMContentLoaded', () => {
-            HeaderUtils.initHeaderLanguageSwitch('#lang-switch');
-        });
+    <!-- Chat Section -->
+    <section class="chat-section" id="chatSection">
+       
+        <!-- Progress Indicator -->
+        <div class="progress-indicator">
+            <div class="progress-steps">
+                <div class="progress-line">
+                    <div class="progress-fill" style="width: 0%;"></div>
+                </div>
+                
+                <div class="progress-step active">
+                    <div class="step-circle">1</div>
+                    <div class="step-label" data-lang-content="en">Profile</div>
+                    <div class="step-label hidden" data-lang-content="ar">الملف</div>
+                </div>
+                
+                <div class="progress-step">
+                    <div class="step-circle">2</div>
+                    <div class="step-label" data-lang-content="en">Assessment</div>
+                    <div class="step-label hidden" data-lang-content="ar">التقييم</div>
+                </div>
+                
+                <div class="progress-step">
+                    <div class="step-circle">3</div>
+                    <div class="step-label" data-lang-content="en">Results</div>
+                    <div class="step-label hidden" data-lang-content="ar">النتائج</div>
+                </div>
+            </div>
+        </div>
 
-        // Check authentication state on page load
-        async function checkAuthState() {
-            try {
-                const response = await fetch('/api/me');
-                if (response.ok) {
-                    // User is logged in
-                    document.getElementById('authButtonsLoggedOut').style.display = 'none';
-                    document.getElementById('userMenuLoggedIn').style.display = 'flex';
-                } else {
-                    // User is logged out
-                    document.getElementById('authButtonsLoggedOut').style.display = 'flex';
-                    document.getElementById('userMenuLoggedIn').style.display = 'none';
-                }
-            } catch (error) {
-                // Assume logged out on error
-                document.getElementById('authButtonsLoggedOut').style.display = 'flex';
-                document.getElementById('userMenuLoggedIn').style.display = 'none';
-            }
-        }
+        <!-- Chat Messages Container -->
+        <div class="chat-messages" id="chatMessages">
+            <!-- Messages will be dynamically added here -->
+        </div>
 
-        // Handle logout
-        document.getElementById('headerLogoutBtn')?.addEventListener('click', async () => {
-            try {
-                await fetch('/api/auth/logout', { method: 'POST' });
-                window.location.reload();
-            } catch (error) {
-                console.error('Logout failed:', error);
-            }
-        });
-
-        // Check auth on page load
-        checkAuthState();
-    </script>
+        <!-- Input Container -->
+        <div class="input-container">
+            <div class="input-wrapper">
+                <input 
+                    type="text" 
+                    class="chat-input" 
+                    id="chatInput"
+                    placeholder="Type your message..."
+                    data-placeholder-en="Type your message..."
+                    data-placeholder-ar="اكتب رسالتك..."
+                >
+                <button class="send-button" id="sendBtn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </section>
 
     <script src="app.js"></script>
 </body>

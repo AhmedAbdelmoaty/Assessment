@@ -8,91 +8,13 @@ import { getQuestionPromptSingle } from "./prompts/system.js";
 import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
-import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import authRoutes from "./routes/auth.js";
-import profileRoutes from "./routes/profile.js";
-import adminRoutes from "./routes/admin.js";
-import { requireAdmin, redirectAdmins } from "./middleware/admin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: false, // Allow inline scripts for now
-  crossOriginEmbedderPolicy: false
-}));
-
-// Rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 requests per window
-  message: "Too many requests, please try again later"
-});
-
-// Rate limiting for admin endpoints
-const adminLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window (higher for data dashboard)
-  message: "Too many requests, please try again later"
-});
-
-// Trust proxy (for Replit)
-app.set('trust proxy', 1);
-
-// Session management with PostgreSQL
-const PgSession = connectPgSimple(session);
-app.use(session({
-  store: new PgSession({
-    conString: process.env.DATABASE_URL,
-    tableName: 'session',
-    createTableIfMissing: true
-  }),
-  secret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    sameSite: 'lax'
-  }
-}));
-
 app.use(express.json());
-
-// Protect /admin.html - only admins can access
-app.get('/admin.html', requireAdmin);
-
-// Protect /chat.html and /dashboard.html - redirect to login if not authenticated, redirect admins to /admin.html
-app.get('/chat.html', redirectAdmins, (req, res, next) => {
-  if (!req.session.userId) {
-    return res.redirect('/login.html');
-  }
-  next();
-});
-
-app.get('/dashboard.html', redirectAdmins, (req, res, next) => {
-  if (!req.session.userId) {
-    return res.redirect('/login.html');
-  }
-  next();
-});
-
-// Serve static files (after protected routes)
 app.use(express.static(join(__dirname, "../public")));
-
-// Mount auth and profile routes
-app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api', profileRoutes);
-
-// Mount admin routes (protected with middleware)
-app.use('/api/admin', adminLimiter, requireAdmin, adminRoutes);
 
 // In-memory session store
 const sessions = new Map();
@@ -143,7 +65,9 @@ function pushTranscript(session, item) {
     from: item.from, // "user" | "tutor"
     text: String(item.text || "").slice(0, 4000)
   });
-  // Full transcript is now preserved for database persistence and thread resumption
+  if (session.teaching.transcript.length > 8) {
+    session.teaching.transcript = session.teaching.transcript.slice(-8);
+  }
 }
 
 // محتفظين بيها كما هي (حتى لو مش مستخدمة حاليًا) لضمان عدم كسر أي تكامل لاحق
@@ -396,45 +320,6 @@ app.post("/api/intake/next", async (req, res) => {
     const session = getSession(sessionId);
     session.lang = lang;
 
-    // Check if logged-in user has already completed intake - skip it entirely
-    if (req.session.userId && session.intakeStepIndex === 0 && !session.intakeChecked) {
-      try {
-        const { db, users } = await import('./db.js');
-        const { eq } = await import('drizzle-orm');
-        const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
-        
-        if (user) {
-          const profile = user.profileJson || {};
-          
-          // If intake already completed, skip to assessment
-          if (profile.intakeCompleted && profile.intake) {
-            session.intake = { ...profile.intake };
-            session.intakeStepIndex = INTAKE_ORDER.length; // Mark as completed
-            session.currentStep = "assessment";
-            session.intakeChecked = true;
-            
-            return res.json({
-              done: true,
-              skipIntake: true,
-              message:
-                lang === "ar"
-                  ? "مرحبًا! هنبدأ أسئلة التقييم مباشرة."
-                  : "Welcome back! We'll start the assessment directly.",
-            });
-          }
-          
-          // Otherwise auto-populate basic info
-          session.intake.name_full = profile.name || user.username;
-          session.intake.email = user.email;
-          session.intake.phone_number = profile.phone || '';
-          session.intakeStepIndex = 3; // Skip to country (index 3)
-          session.intakeChecked = true;
-        }
-      } catch (err) {
-        console.error('Failed to load user data:', err);
-      }
-    }
-
     if (answer !== undefined && answer !== null) {
       const currentStepKey = INTAKE_ORDER[session.intakeStepIndex];
       const stepConfig = INTAKE_CATALOG[currentStepKey];
@@ -450,47 +335,6 @@ app.post("/api/intake/next", async (req, res) => {
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
-      
-      // Initialize assessment state
-      session.assessment = session.assessment || {
-        currentLevel: "L1",
-        attempts: 0,
-        evidence: [],
-        questionIndexInAttempt: 1,
-        usedClustersCurrentAttempt: [],
-        stemsCurrentAttempt: [],
-        lastAttemptStems: {}
-      };
-      
-      // Save intake data to database for logged-in users
-      if (req.session.userId) {
-        try {
-          const { db, users } = await import('./db.js');
-          const { eq } = await import('drizzle-orm');
-          
-          // Get existing profile to preserve other data
-          const [user] = await db.select().from(users).where(eq(users.id, req.session.userId));
-          const existingProfile = user?.profileJson || {};
-          
-          // Save intake under profileJson.intake
-          await db.update(users).set({ 
-            profileJson: {
-              ...existingProfile,
-              name: session.intake.name_full,
-              phone: session.intake.phone_number,
-              intake: {
-                ...session.intake
-              },
-              intakeCompleted: true,
-              intakeCompletedAt: new Date().toISOString()
-            }
-          }).where(eq(users.id, req.session.userId));
-          console.log(`[INTAKE] Saved intake data for user ${req.session.userId}`);
-        } catch (err) {
-          console.error('[INTAKE] Failed to save intake to database:', err);
-        }
-      }
-      
       return res.json({
         done: true,
         message:
@@ -500,7 +344,7 @@ app.post("/api/intake/next", async (req, res) => {
       });
     }
 
-    if ((answer === undefined || answer === null) && !session.openingShown) {
+    if ((answer === undefined || answer === null) && session.intakeStepIndex === 0 && !session.openingShown) {
       session.openingShown = true;
       return res.json({
         sessionId,
@@ -540,216 +384,23 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
-// Fallback MCQs when OpenAI fails (2 questions per level, 3 levels = 6 total)
-function getFallbackMCQ(level, lang, questionIndex) {
-  const fallbacks = {
-    L1: {
-      q1: {
-        en: {
-          kind: "question",
-          level: "L1",
-          cluster: "central_tendency_foundations",
-          prompt: "What is the mean of the following dataset: 2, 4, 6, 8, 10?",
-          choices: ["5", "6", "7", "8"],
-          correct_index: 1,
-          difficulty: "easy"
-        },
-        ar: {
-          kind: "question",
-          level: "L1",
-          cluster: "central_tendency_foundations",
-          prompt: "ما هو المتوسط الحسابي للبيانات التالية: 2، 4، 6، 8، 10؟",
-          choices: ["5", "6", "7", "8"],
-          correct_index: 1,
-          difficulty: "easy"
-        }
-      },
-      q2: {
-        en: {
-          kind: "question",
-          level: "L1",
-          cluster: "central_tendency_foundations",
-          prompt: "In the dataset [3, 7, 7, 10, 13], what is the median?",
-          choices: ["7", "8", "10", "6.5"],
-          correct_index: 0,
-          difficulty: "easy"
-        },
-        ar: {
-          kind: "question",
-          level: "L1",
-          cluster: "central_tendency_foundations",
-          prompt: "في البيانات [3، 7، 7، 10، 13]، ما هو الوسيط؟",
-          choices: ["7", "8", "10", "6.5"],
-          correct_index: 0,
-          difficulty: "easy"
-        }
-      }
-    },
-    L2: {
-      q1: {
-        en: {
-          kind: "question",
-          level: "L2",
-          cluster: "distribution_analysis",
-          prompt: "Which measure is most affected by outliers in a dataset?",
-          choices: ["Mean", "Median", "Mode", "Range"],
-          correct_index: 0,
-          difficulty: "medium"
-        },
-        ar: {
-          kind: "question",
-          level: "L2",
-          cluster: "distribution_analysis",
-          prompt: "أي من المقاييس التالية يتأثر بشكل أكبر بالقيم المتطرفة في البيانات؟",
-          choices: ["المتوسط الحسابي", "الوسيط", "المنوال", "المدى"],
-          correct_index: 0,
-          difficulty: "medium"
-        }
-      },
-      q2: {
-        en: {
-          kind: "question",
-          level: "L2",
-          cluster: "distribution_analysis",
-          prompt: "What does a standard deviation of zero indicate about a dataset?",
-          choices: [
-            "All values are the same",
-            "The data is normally distributed",
-            "There are no outliers",
-            "The mean equals the median"
-          ],
-          correct_index: 0,
-          difficulty: "medium"
-        },
-        ar: {
-          kind: "question",
-          level: "L2",
-          cluster: "distribution_analysis",
-          prompt: "ماذا يعني الانحراف المعياري الصفري في مجموعة بيانات؟",
-          choices: [
-            "جميع القيم متطابقة",
-            "البيانات موزعة طبيعياً",
-            "لا توجد قيم متطرفة",
-            "المتوسط يساوي الوسيط"
-          ],
-          correct_index: 0,
-          difficulty: "medium"
-        }
-      }
-    },
-    L3: {
-      q1: {
-        en: {
-          kind: "question",
-          level: "L3",
-          cluster: "statistical_inference",
-          prompt: "What is the standard error of the mean used for in statistical analysis?",
-          choices: [
-            "Measuring the spread of individual data points",
-            "Estimating the precision of the sample mean",
-            "Calculating the range of the dataset",
-            "Determining the mode of the distribution"
-          ],
-          correct_index: 1,
-          difficulty: "hard"
-        },
-        ar: {
-          kind: "question",
-          level: "L3",
-          cluster: "statistical_inference",
-          prompt: "ما هو الغرض من الخطأ المعياري للمتوسط في التحليل الإحصائي؟",
-          choices: [
-            "قياس انتشار نقاط البيانات الفردية",
-            "تقدير دقة المتوسط العيني",
-            "حساب المدى للبيانات",
-            "تحديد المنوال للتوزيع"
-          ],
-          correct_index: 1,
-          difficulty: "hard"
-        }
-      },
-      q2: {
-        en: {
-          kind: "question",
-          level: "L3",
-          cluster: "statistical_inference",
-          prompt: "In hypothesis testing, what does a p-value less than 0.05 typically indicate?",
-          choices: [
-            "The null hypothesis is proven true",
-            "There is strong evidence against the null hypothesis",
-            "The sample size is too small",
-            "The data follows a normal distribution"
-          ],
-          correct_index: 1,
-          difficulty: "hard"
-        },
-        ar: {
-          kind: "question",
-          level: "L3",
-          cluster: "statistical_inference",
-          prompt: "في اختبار الفرضيات، ماذا تعني قيمة p أقل من 0.05 عادةً؟",
-          choices: [
-            "تم إثبات صحة الفرضية الصفرية",
-            "هناك دليل قوي ضد الفرضية الصفرية",
-            "حجم العينة صغير جداً",
-            "البيانات تتبع التوزيع الطبيعي"
-          ],
-          correct_index: 1,
-          difficulty: "hard"
-        }
-      }
-    }
-  };
-  
-  const qKey = questionIndex === 1 ? 'q1' : 'q2';
-  return fallbacks[level]?.[qKey]?.[lang] || fallbacks.L1.q1.en;
-}
-
 // -------- Assessment: get ONE MCQ --------
 app.post("/api/assess/next", async (req, res) => {
-  const isDev = process.env.NODE_ENV !== 'production';
-  
   try {
     const { sessionId } = req.body;
     const session = getSession(sessionId);
-    
-    // Dev logging
-    if (isDev) {
-      console.log(`[ASSESS-NEXT] SessionID: ${sessionId}, Step: ${session?.currentStep}, Assessment state:`, {
-        currentLevel: session?.assessment?.currentLevel,
-        attempts: session?.assessment?.attempts,
-        evidenceCount: session?.assessment?.evidence?.length
-      });
-    }
-    
-    // Initialize assessment state if needed
-    if (session.currentStep !== "assessment" || !session.assessment) {
-      if (isDev) console.log(`[ASSESS-NEXT] Initializing assessment state`);
-      session.currentStep = "assessment";
-      session.assessment = {
-        currentLevel: "L1",
-        attempts: 0,
-        evidence: [],
-        questionIndexInAttempt: 1,
-        usedClustersCurrentAttempt: [],
-        stemsCurrentAttempt: [],
-        lastAttemptStems: {}
-      };
+    if (session.currentStep !== "assessment") {
+      return res.status(400).json({ error: "Not in assessment phase" });
     }
 
     const A = session.assessment;
-    
-    // Track assessment start time (only on first question of first level)
-    if (!A.startedAt && A.currentLevel === "L1" && A.attempts === 0 && A.evidence.length === 0) {
-      A.startedAt = new Date();
-    }
 
     const profile = {
-      job_nature: session.intake?.job_nature || "",
-      experience_years_band: session.intake?.experience_years_band || "",
-      job_title_exact: session.intake?.job_title_exact || "",
-      sector: session.intake?.sector || "",
-      learning_reason: session.intake?.learning_reason || "",
+      job_nature: session.intake.job_nature || "",
+      experience_years_band: session.intake.experience_years_band || "",
+      job_title_exact: session.intake.job_title_exact || "",
+      sector: session.intake.sector || "",
+      learning_reason: session.intake.learning_reason || "",
     };
 
     const attempt_type = A.attempts === 0 ? "first" : "retry";
@@ -757,63 +408,30 @@ app.post("/api/assess/next", async (req, res) => {
     const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
     const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems[A.currentLevel] || []) : [];
 
-    let q = null;
-    let usedFallback = false;
+    const systemPrompt = getQuestionPromptSingle({
+      lang: session.lang,
+      level: A.currentLevel,
+      profile,
+      attempt_type,
+      question_index,
+      used_clusters_current_attempt,
+      avoid_stems,
+    });
 
-    // Check if OpenAI API key exists
-    if (!process.env.OPENAI_API_KEY) {
-      console.warn('[ASSESS-NEXT] ⚠️  OPENAI_API_KEY not found, using fallback MCQ');
-      q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
-      usedFallback = true;
-    } else {
-      try {
-        const systemPrompt = getQuestionPromptSingle({
-          lang: session.lang,
-          level: A.currentLevel,
-          profile,
-          attempt_type,
-          question_index,
-          used_clusters_current_attempt,
-          avoid_stems,
-        });
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "system", content: systemPrompt }],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      top_p: 1,
+      max_completion_tokens: 2048,
+    });
 
-        if (isDev) {
-          console.log(`[ASSESS-NEXT] OpenAI prompt (first 200 chars): ${systemPrompt.substring(0, 200)}...`);
-        }
+    const q = JSON.parse(response.choices[0].message.content);
 
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [{ role: "system", content: systemPrompt }],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-          top_p: 1,
-          max_completion_tokens: 2048,
-        });
-
-        q = JSON.parse(response.choices[0].message.content);
-
-        // Validate schema
-        if (!q || q.kind !== "question" || !Array.isArray(q.choices) || q.choices.length < 3 || 
-            typeof q.correct_index !== "number" || q.correct_index < 0 || q.correct_index >= q.choices.length) {
-          console.error("[ASSESS-NEXT] Invalid question schema from OpenAI:", q);
-          throw new Error("Invalid question schema");
-        }
-
-        if (isDev) {
-          console.log(`[ASSESS-NEXT] ✅ OpenAI success - Level: ${q.level}, Cluster: ${q.cluster}`);
-        }
-
-      } catch (openaiErr) {
-        console.error('[ASSESS-NEXT] ⚠️  OpenAI call failed:', {
-          status: openaiErr?.status || openaiErr?.response?.status,
-          code: openaiErr?.code,
-          message: openaiErr?.message,
-          errorBody: openaiErr?.response?.data
-        });
-        console.log('[ASSESS-NEXT] Using fallback MCQ');
-        q = getFallbackMCQ(A.currentLevel, session.lang || 'en', question_index);
-        usedFallback = true;
-      }
+    if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
+      console.error("Invalid question schema from model:", q);
+      return res.status(500).json({ error: "Invalid question format from model" });
     }
 
     const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
@@ -850,23 +468,12 @@ app.post("/api/assess/next", async (req, res) => {
       rationale: "",
       questionNumber: question_index,
       totalQuestions: 2,
-      ...(isDev && usedFallback ? { _dev_fallback: true } : {})
     };
 
     return res.json(mcqPayload);
-    
   } catch (err) {
-    console.error("[ASSESS-NEXT] Fatal error:", {
-      message: err?.message,
-      stack: isDev ? err?.stack : undefined
-    });
-    
-    return res.status(500).json({ 
-      error: true,
-      stage: "assess-next",
-      reason: isDev ? err?.message || "Unknown error" : "Server error",
-      detail: isDev ? err?.code || err?.name : undefined
-    });
+    console.error("Assessment next error:", err);
+    res.status(500).json({ error: "Server error during assessment" });
   }
 });
 
@@ -975,35 +582,6 @@ app.post("/api/report", async (req, res) => {
     const strengths_display = strengths.map(c => humanizeCluster(c, lang));
     const gaps_display = gaps.map(c => humanizeCluster(c, lang));
 
-    // Calculate score using 6-question rule:
-    // - Each level (L1, L2, L3) = 2 questions
-    // - If retry, only count latest 2 questions for that level
-    // - Levels not reached = 2 incorrect
-    function calculateScore(evidence, highestReached) {
-      const levels = ['L1', 'L2', 'L3'];
-      let correctCount = 0;
-      
-      for (const level of levels) {
-        const levelEvidence = evidence.filter(e => e.level === level);
-        
-        if (levelEvidence.length === 0) {
-          // Level not reached = 2 incorrect (add 0 to correctCount)
-          continue;
-        }
-        
-        // Only count the latest 2 questions for this level (handles retries)
-        const latest2 = levelEvidence.slice(-2);
-        correctCount += latest2.filter(e => e.correct).length;
-      }
-      
-      // Total is always out of 6 (2 questions × 3 levels)
-      const scorePercent = Math.round((correctCount / 6) * 100);
-      return { correctCount, totalQuestions: 6, scorePercent };
-    }
-    
-    const { correctCount, totalQuestions, scorePercent } = calculateScore(evidence, highestReached);
-    
-    // Keep legacy counts for display purposes
     const total_questions = evidence.length;
     const total_correct = evidence.filter(e => e.correct).length;
     const summary_counts = {
@@ -1095,34 +673,6 @@ app.post("/api/report", async (req, res) => {
     session.finished = true;
     session.currentStep = "report";
 
-    // Save assessment results to database for logged-in users (only completed assessments)
-    if (req.session.userId) {
-      try {
-        const { db, attempts } = await import('./db.js');
-        
-        // Use tracked start time or current time as fallback
-        const startedAt = session.assessment?.startedAt || new Date();
-        
-        await db.insert(attempts).values({
-          userId: req.session.userId,
-          startedAt: startedAt,
-          finishedAt: new Date(),
-          difficultyTier: 'adaptive',
-          totalQuestions: totalQuestions, // Always 6
-          correctAnswers: correctCount, // Out of 6, with retry handling
-          scorePercent: scorePercent, // Using 6-question rule
-          currentLevel: highestReached,
-          currentStep: 'completed',
-          intakeStepIndex: null,
-          assessmentState: { evidence, strengths, gaps },
-          reportData: report
-        });
-        console.log(`[REPORT] Saved assessment (score: ${correctCount}/6 = ${scorePercent}%) for user ${req.session.userId}`);
-      } catch (err) {
-        console.error('[REPORT] Failed to save assessment to database:', err);
-      }
-    }
-
     return res.json(report);
   } catch (err) {
     console.error("Report generation fatal error:", err);
@@ -1140,115 +690,6 @@ app.post("/api/report", async (req, res) => {
     });
   }
 });
-
-/* ===================================================
-   Teaching Notes Database Helpers (Independent Threads)
-   =================================================== */
-
-// Get or create teaching note for current assessment
-async function getOrCreateTeachingNote(userId, sessionId) {
-  const { db, teachingNotes, attempts } = await import('./db.js');
-  const { eq, desc, and } = await import('drizzle-orm');
-  
-  // Get the most recent completed assessment for this user
-  const latestAttempt = await db
-    .select()
-    .from(attempts)
-    .where(and(
-      eq(attempts.userId, userId),
-      eq(attempts.currentStep, 'completed')
-    ))
-    .orderBy(desc(attempts.finishedAt))
-    .limit(1);
-  
-  if (!latestAttempt || latestAttempt.length === 0) {
-    return null; // No completed assessment found
-  }
-  
-  const assessmentId = latestAttempt[0].id;
-  
-  // Check if there's an in-progress teaching note for this assessment
-  const existingNote = await db
-    .select()
-    .from(teachingNotes)
-    .where(and(
-      eq(teachingNotes.userId, userId),
-      eq(teachingNotes.assessmentId, assessmentId),
-      eq(teachingNotes.inProgress, true)
-    ))
-    .limit(1);
-  
-  if (existingNote && existingNote.length > 0) {
-    // Resume existing teaching
-    return {
-      id: existingNote[0].id,
-      assessmentId: existingNote[0].assessmentId,
-      threadId: existingNote[0].threadId,
-      transcript: existingNote[0].transcript || [],
-      isResume: true
-    };
-  }
-  
-  // Create new teaching note
-  const newNote = await db
-    .insert(teachingNotes)
-    .values({
-      userId: userId,
-      assessmentId: assessmentId,
-      threadId: null, // Will be set when thread is created
-      inProgress: true,
-      topicDisplay: 'Teaching Session',
-      text: '', // Will be updated when saved
-      transcript: []
-    })
-    .returning();
-  
-  return {
-    id: newNote[0].id,
-    assessmentId: assessmentId,
-    threadId: null,
-    transcript: [],
-    isResume: false
-  };
-}
-
-// Update teaching note with threadId and transcript
-async function updateTeachingNote(noteId, data) {
-  const { db, teachingNotes } = await import('./db.js');
-  const { eq } = await import('drizzle-orm');
-  
-  await db
-    .update(teachingNotes)
-    .set(data)
-    .where(eq(teachingNotes.id, noteId));
-}
-
-// Save and finalize teaching note
-async function finalizeTeachingNote(noteId, transcript, lang) {
-  const { db, teachingNotes } = await import('./db.js');
-  const { eq } = await import('drizzle-orm');
-  
-  // Format transcript as text
-  const formattedText = transcript.map((entry, idx) => {
-    const from = entry.from === 'user' ? (lang === 'ar' ? 'المتعلم' : 'Learner') : (lang === 'ar' ? 'المدرّس' : 'Tutor');
-    return `[${from}]: ${entry.text}`;
-  }).join('\n\n');
-  
-  // Generate topic display
-  const topicDisplay = lang === 'ar' 
-    ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
-    : `Explanation ${new Date().toLocaleDateString('en-US')}`;
-  
-  await db
-    .update(teachingNotes)
-    .set({
-      text: formattedText,
-      topicDisplay: topicDisplay,
-      transcript: transcript,
-      inProgress: false
-    })
-    .where(eq(teachingNotes.id, noteId));
-}
 
 /* =========================
    Teaching: start (data-only)
@@ -1330,48 +771,14 @@ app.post("/api/teach/start", async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
-    // Database persistence for logged-in users
-    if (req.session.userId) {
-      try {
-        const noteData = await getOrCreateTeachingNote(req.session.userId, sessionId);
-        if (noteData) {
-          teaching.dbNoteId = noteData.id;
-          teaching.dbAssessmentId = noteData.assessmentId;
-          
-          // If resuming, load the existing threadId and transcript
-          if (noteData.isResume && noteData.threadId) {
-            teaching.assistant = teaching.assistant || {};
-            teaching.assistant.threadId = noteData.threadId;
-            teaching.transcript = noteData.transcript || [];
-            logTeach("teaching.resume", { noteId: noteData.id, threadId: noteData.threadId, transcriptLen: teaching.transcript.length });
-          } else {
-            logTeach("teaching.new", { noteId: noteData.id, assessmentId: noteData.assessmentId });
-          }
-        }
-      } catch (dbErr) {
-        console.error("[TEACH-START] Database error:", dbErr);
-        // Continue without DB persistence
-      }
-    }
-
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // إنشاء Thread مرة واحدة (or use existing from DB)
+      // إنشاء Thread مرة واحدة
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
         const threadId = createdThread?.id;
         if (!threadId) throw new Error("Failed to create thread");
         teaching.assistant.threadId = threadId;
         logTeach("thread.created", { threadId });
-        
-        // Save threadId to database for logged-in users
-        if (req.session.userId && teaching.dbNoteId) {
-          try {
-            await updateTeachingNote(teaching.dbNoteId, { threadId: threadId });
-            logTeach("thread.saved_to_db", { noteId: teaching.dbNoteId, threadId });
-          } catch (dbErr) {
-            console.error("[TEACH-START] Failed to save threadId:", dbErr);
-          }
-        }
       }
       const threadId = teaching.assistant.threadId;
 
@@ -1522,16 +929,6 @@ app.post("/api/teach/message", async (req, res) => {
         const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (reply) {
           try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
-          
-          // Save transcript to database for logged-in users
-          if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-            try {
-              await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-            } catch (dbErr) {
-              console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-            }
-          }
-          
           return res.json({ message: reply });
         }
       }
@@ -1540,16 +937,6 @@ app.post("/api/teach/message", async (req, res) => {
         ? "تمام، خلّيني أوضّحها خطوة خطوة."
         : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
-      
-      // Save transcript to database for logged-in users
-      if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-        try {
-          await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-        } catch (dbErr) {
-          console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-        }
-      }
-      
       return res.json({ message: fb });
     }
 
@@ -1580,139 +967,11 @@ app.post("/api/teach/message", async (req, res) => {
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
-    
-    // Save transcript to database for logged-in users
-    if (req.session.userId && teaching.dbNoteId && teaching.transcript) {
-      try {
-        await updateTeachingNote(teaching.dbNoteId, { transcript: teaching.transcript });
-      } catch (dbErr) {
-        console.error("[TEACH-MESSAGE] Failed to save transcript:", dbErr);
-      }
-    }
-    
     return res.json({ message: reply });
 
   } catch (err) {
     console.error("/api/teach/message error:", err?.message || err, err?.stack);
     return res.status(500).json({ error: true, message: "Teaching message failed." });
-  }
-});
-
-/* =================================
-   Teaching: save transcript to database
-   ================================= */
-app.post("/api/teach/save", async (req, res) => {
-  try {
-    const { sessionId, autoSave } = req.body || {};
-    const session = getSession(sessionId);
-    const teaching = ensureTeachingState(session);
-    const lang = session.lang || "en";
-
-    // Must be logged in to save
-    if (!req.session.userId) {
-      return res.status(401).json({
-        error: true,
-        message: lang === "ar" ? "يجب تسجيل الدخول لحفظ الشرح" : "Must be logged in to save explanation"
-      });
-    }
-
-    // Must have a transcript to save
-    if (!Array.isArray(teaching.transcript) || teaching.transcript.length === 0) {
-      return res.status(400).json({
-        error: true,
-        message: lang === "ar" ? "لا يوجد محتوى للحفظ" : "No content to save"
-      });
-    }
-
-    // Finalize the teaching note in database (marks inProgress = false)
-    if (teaching.dbNoteId) {
-      try {
-        await finalizeTeachingNote(teaching.dbNoteId, teaching.transcript, lang);
-        
-        const title = lang === "ar" 
-          ? `شرح ${new Date().toLocaleDateString('ar-EG')}`
-          : `Explanation ${new Date().toLocaleDateString('en-US')}`;
-        
-        console.log(`[TEACH] Finalized teaching note ${teaching.dbNoteId} for user ${req.session.userId}`);
-        
-        // Clear the transcript and reset teaching state
-        teaching.transcript = [];
-        teaching.mode = "idle";
-        teaching.current_topic_index = 0;
-        teaching.dbNoteId = null;
-        teaching.dbAssessmentId = null;
-        
-        return res.json({
-          ok: true,
-          message: autoSave 
-            ? (lang === "ar" ? "تم حفظ الشرح تلقائيًا" : "Explanation auto-saved")
-            : (lang === "ar" ? `تم حفظ "${title}" بنجاح!` : `"${title}" saved successfully!`),
-          title
-        });
-      } catch (dbErr) {
-        console.error("[TEACH-SAVE] Failed to finalize teaching note:", dbErr);
-        // Fall through to create new note
-      }
-    }
-
-    // Fallback: Create new teaching note if no dbNoteId exists
-    const { db, teachingNotes } = await import('./db.js');
-    const { eq, count } = await import('drizzle-orm');
-    
-    const countResult = await db
-      .select({ count: count() })
-      .from(teachingNotes)
-      .where(eq(teachingNotes.userId, req.session.userId));
-    
-    const explanationNumber = (countResult[0]?.count || 0) + 1;
-    const title = lang === "ar" 
-      ? `الشرح ${explanationNumber}` 
-      : `Explanation ${explanationNumber}`;
-
-    // Format transcript as readable text
-    const transcriptText = teaching.transcript
-      .map(entry => {
-        const label = entry.from === "user" 
-          ? (lang === "ar" ? "أنا" : "Me") 
-          : (lang === "ar" ? "المعلم" : "Tutor");
-        return `${label}: ${entry.text}`;
-      })
-      .join("\n\n");
-
-    // Save to database (fallback path for legacy sessions)
-    await db.insert(teachingNotes).values({
-      userId: req.session.userId,
-      topicDisplay: title,
-      text: transcriptText,
-      transcript: teaching.transcript,
-      inProgress: false,
-      threadId: teaching.assistant?.threadId || null,
-      assessmentId: null
-    });
-
-    // Clear the transcript and reset teaching state
-    teaching.transcript = [];
-    teaching.mode = "idle";
-    teaching.current_topic_index = 0;
-
-    console.log(`[TEACH] Saved explanation "${title}" for user ${req.session.userId}`);
-
-    return res.json({
-      ok: true,
-      message: lang === "ar" 
-        ? `تم حفظ "${title}" بنجاح!` 
-        : `"${title}" saved successfully!`,
-      title
-    });
-
-  } catch (err) {
-    console.error("/api/teach/save error:", err);
-    return res.status(500).json({
-      error: true,
-      message: (req.body.lang || "en") === "ar" 
-        ? "فشل حفظ الشرح" 
-        : "Failed to save explanation"
-    });
   }
 });
 
