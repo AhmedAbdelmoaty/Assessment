@@ -31,16 +31,113 @@
     const chatMessages = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput");
     const sendBtn = document.getElementById("sendBtn");
+    // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
+    async function authGuardAndLoad() {
+      // 1) تأكد المستخدم مسجّل (لو مش مسجّل → Login)
+      try {
+        const meResp = await fetch("/api/auth/me");
+        const me = await meResp.json();
+        if (!meResp.ok || !me?.ok || !me?.user) {
+          window.location.href = "/login.html";
+          return false;
+        }
+        // طبّق اللغة المحفوظة (لو بتستخدم i18n.js)
+        if (window.LA_I18N && me.user.locale) {
+          window.LA_I18N.setLocale(me.user.locale);
+        }
+      } catch {
+        window.location.href = "/login.html";
+        return false;
+      }
+
+      // 2) حمّل الجلسة والرسائل المحفوظة
+      try {
+        const chatResp = await fetch("/api/chat/current");
+        if (chatResp.ok) {
+          const data = await chatResp.json();
+          if (Array.isArray(data.messages)) {
+            renderPersistedMessages(data.messages);
+            // لو السيرفر رجّع sessionId ممكن نخزّنه
+            if (data.session?.id && !sessionId) sessionId = data.session.id;
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to load persisted chat:", e);
+      }
+
+      return true;
+    }
+
+    function renderPersistedMessages(messages) {
+      (messages || []).forEach((m) => {
+        const txt = (m?.content || "").toString();
+        if (!txt) return;
+        if ((m?.sender || "") === "user") addUserMessage(txt);
+        else addSystemMessage(txt);
+      });
+    }
+
+    // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
+    async function authGuardAndLoad() {
+      // 1) تحقق من تسجيل الدخول
+      const meResp = await fetch("/api/auth/me");
+      if (!meResp.ok) {
+        // غير مسجل → روح لصفحة اللوجين
+        window.location.href = "/login.html";
+        return false;
+      }
+
+      // 2) حمّل الجلسة والرسائل المحفوظة
+      const chatResp = await fetch("/api/chat/current");
+      if (chatResp.ok) {
+        const data = await chatResp.json();
+        // لو فيه رسائل محفوظة، اعرضها بالترتيب
+        if (Array.isArray(data.messages)) {
+          renderPersistedMessages(data.messages);
+        }
+      }
+
+      return true;
+    }
+
+    // تعرض الرسائل المحفوظة باستخدام دوال العرض الحالية
+    function renderPersistedMessages(messages) {
+      (messages || []).forEach(m => {
+        const txt = (m?.content || "").toString();
+        if (!txt) return;
+        if ((m?.sender || "") === "user") addUserMessage(txt);
+        else addSystemMessage(txt);
+      });
+    }
+
 
     // Initialize
-    init();
+    (async function init() {
+      // 0) حماية الصفحة + تحميل الرسائل (لو فشل → هيحوّل لـ login.html)
+      const ok = await authGuardAndLoad();
+      if (!ok) return;
 
-    function init() {
-        setupLanguageToggle();
+      // 1) لغة/أزرار عامة
+      setupLanguageToggle();
+      setupSendButton();
+      setupInputHandlers();
+
+      // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
+      if (startBtn && landingSection) {
         setupStartButton();
-        setupSendButton();
-        setupInputHandlers();
-    }
+        return; // في الحالة دي هنستنى الضغط على Start
+      }
+
+      // 3) أما في app.html (لا يوجد landing/start) → شغّل الشات فورًا
+      if (chatSection) chatSection.classList.add("active");
+      currentSection = "chat";
+      updateProgress(0);
+
+      // لو ما عندناش sessionId من /api/chat/current نبدأ intake لتوليدها
+      if (!sessionId) {
+        startIntakeFlow();
+      }
+    })();
 
     function setupLanguageToggle() {
         langButtons.forEach((btn) => {
@@ -88,14 +185,16 @@
     }
 
     function setupStartButton() {
-        startBtn.addEventListener("click", function () {
-            landingSection.style.display = "none";
-            chatSection.classList.add("active");
-            currentSection = "chat";
-            updateProgress(0);
-            startIntakeFlow();
-        });
+      if (!startBtn) return;
+      startBtn.addEventListener("click", function() {
+        landingSection && (landingSection.style.display = "none");
+        chatSection && chatSection.classList.add("active");
+        currentSection = "chat";
+        updateProgress(0);
+        startIntakeFlow();
+      });
     }
+
 
     function setupSendButton() {
         sendBtn.addEventListener("click", sendMessage);
@@ -732,7 +831,7 @@ ${mcq.choices
                 <h2 class="report-title">${resultsTitle}</h2>
                 <p class="report-message">${escapeHtml(report.message)}</p>
             </div>
-            
+
             <div class="report-section">
                 <div class="section-title">
                     <div class="section-icon strengths">
@@ -753,7 +852,7 @@ ${mcq.choices
                         .join("")}
                 </div>
             </div>
-            
+
             <div class="report-section">
                 <div class="section-title">
                     <div class="section-icon gaps">

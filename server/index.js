@@ -1,3 +1,6 @@
+// server/index.js  (نسخة محدثة كاملة)
+
+// ===== Imports (موجودة عندك) =====
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -9,17 +12,49 @@ import { getFinalReportPrompt } from "./prompts/report.js";
 import { humanizeCluster, toDisplayList } from "./shared/topicDisplayMap.js";
 import { getTeachingSystemPrompt } from "./prompts/teach.js";
 
+// ===== [ADDED] أمان الدخول + اتصال قاعدة البيانات =====
+import pg from "pg";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import bcrypt from "bcryptjs";
+
+// ===== Paths / App =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 const app = express();
 app.use(express.json());
 app.use(express.static(join(__dirname, "../public")));
 
-// In-memory session store
+// ===== [ADDED] Postgres Pool + Session Store =====
+const { Pool } = pg;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Replit/Proxy
+app.set("trust proxy", 1);
+
+const PgSession = connectPgSimple(session);
+app.use(session({
+  store: new PgSession({
+    pool,
+    createTableIfMissing: true,   // ينشئ جدول "session" تلقائيًا لو مش موجود
+    pruneSessionInterval: 60 * 60 // تنظيف كل ساعة
+  }),
+  name: process.env.SESSION_COOKIE_NAME || "sid",
+  secret: process.env.SESSION_SECRET || "change_this_secret",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false, // لو HTTPS فعل true
+    maxAge: 1000 * 60 * 60 * 24 * 7 // أسبوع
+  }
+}));
+
+// ===== In-memory store (موجود لديك، أبقيته كما هو) =====
 const sessions = new Map();
 
-// OpenAI client
+// ===== OpenAI client (كما هو) =====
 const openai = new OpenAI({
   apiKey:
     process.env.OPENAI_API_KEY ||
@@ -27,7 +62,7 @@ const openai = new OpenAI({
     "default_key",
 });
 
-// IDs لمساعد الشرح (Assistants + File Search)
+// ===== Assistants config (كما هو) =====
 const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
 const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
 
@@ -35,7 +70,6 @@ const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
    Helpers: logging + guards
    ========================= */
 
-// اجعل اللوجات تظهر فقط لو DEBUG_TEACH=1 (أو "true")
 function logTeach(tag, payload) {
   const dbg = (process.env.DEBUG_TEACH || "").toString().toLowerCase();
   if (dbg === "1" || dbg === "true" || dbg === "yes") {
@@ -70,7 +104,6 @@ function pushTranscript(session, item) {
   }
 }
 
-// محتفظين بيها كما هي (حتى لو مش مستخدمة حاليًا) لضمان عدم كسر أي تكامل لاحق
 function transcriptToMessages(transcript = []) {
   return transcript.map(t => {
     const role = t.from === "user" ? "user" : "assistant";
@@ -78,7 +111,6 @@ function transcriptToMessages(transcript = []) {
   });
 }
 
-// حراس قوية قبل أي retrieve
 function assertIds(threadId, runId) {
   if (!threadId || !runId) {
     throw new Error(`Missing IDs — threadId=${threadId}, runId=${runId}`);
@@ -94,7 +126,6 @@ function assertIds(threadId, runId) {
 async function safeRetrieveRun(threadId, runId) {
   assertIds(threadId, runId);
   logTeach("poll", { threadId, runId });
-  // ✅ توقيع v6: أول باراميتر runId، والثاني كائن فيه thread_id
   return openai.beta.threads.runs.retrieve(runId, { thread_id: threadId });
 }
 
@@ -109,7 +140,7 @@ async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 
   throw new Error("Run polling timeout");
 }
 
-// Intake order & opening
+// ===== Intake order (كما هو) =====
 const INTAKE_ORDER = [
   "name_full",
   "email",
@@ -127,7 +158,7 @@ const INTAKE_OPENING = {
   en: "Hi 👋 Before we start, I’ll need a few quick details so I can tailor the questions to your experience and goals. We’ll go step by step."
 };
 
-// ⚠️ كتالوج الـintake
+// ===== Intake catalog (كما هو) =====
 const intakeCatalogPath = join(__dirname, "intake_catalog.cache.json");
 let INTAKE_CATALOG;
 try {
@@ -196,34 +227,18 @@ try {
   };
 }
 
-// Levels (للتقرير فقط)
+// ===== Levels (كما هو) =====
 const LEVELS = {
-  L1: {
-    clusters: [
-      "central_tendency_foundations",      // Central Tendency (Mean/Median/Mode)
-      "dispersion_boxplot_foundations",    // Dispersion & Box Plot (Range/Variance/SD)
-    ],
-  },
-  L2: {
-    clusters: [
-      "distribution_shape_normality",      // Distribution Shape & Normality
-      "data_quality_outliers_iqr",         // Data Quality & Outliers (IQR, LB/UB)
-    ],
-  },
-  L3: {
-    clusters: [
-      "correlation_bivariate_patterns",    // Correlation & Bivariate Patterns
-      "non_normal_skew_kurtosis_z",        // Non-Normal Data (Skewness/Kurtosis/Z-Scores)
-    ],
-  },
+  L1: { clusters: ["central_tendency_foundations","dispersion_boxplot_foundations"] },
+  L2: { clusters: ["distribution_shape_normality","data_quality_outliers_iqr"] },
+  L3: { clusters: ["correlation_bivariate_patterns","non_normal_skew_kurtosis_z"] },
 };
 
-// ===== Build full teaching queue from evidence + fill missing topics =====
+// ===== Build teaching queue (كما هو) =====
 function buildTeachingQueueFromEvidence(session, lang = "ar") {
   const A = session.assessment || { evidence: [], currentLevel: "L1" };
   const ev = Array.isArray(A.evidence) ? A.evidence : [];
 
-  // 1) أولاً: من الـ evidence بالترتيب الحقيقي للأسئلة
   const queue = [];
   const seen = new Set();
   for (let i = 0; i < ev.length; i++) {
@@ -231,16 +246,12 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
     if (!e || !e.cluster) continue;
     const display = humanizeCluster(e.cluster, lang);
     const kind = e.correct ? "strength" : "gap";
-
-    // تجنّب تكرار نفس الكلاستر ورا بعض مباشرةً
     const prev = queue[queue.length - 1];
     if (prev && prev.display === display) continue;
-
     queue.push({ display, kind });
     seen.add(e.cluster);
   }
 
-  // 2) بعد كده: أي موضوعات ما ظهرتش في الأسئلة تتضاف كـ gap (بالترتيب المنطقي للمستويات)
   const catalogOrder = [
     ...((LEVELS.L1?.clusters) || []),
     ...((LEVELS.L2?.clusters) || []),
@@ -249,7 +260,6 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   for (const clusterKey of catalogOrder) {
     if (!seen.has(clusterKey)) {
       const display = humanizeCluster(clusterKey, lang);
-      // برضه تجنّب تكرار الاسم لو آخر عنصر نفس الـ display (لو حصل توافق أسماء)
       const prev = queue[queue.length - 1];
       if (prev && prev.display === display) continue;
       queue.push({ display, kind: "gap" });
@@ -259,7 +269,7 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   return queue;
 }
 
-// Init/get session
+// ===== In-memory session bootstrap (كما هو) =====
 function getSession(sessionId) {
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, {
@@ -271,8 +281,8 @@ function getSession(sessionId) {
       intake: {},
       assessment: {
         currentLevel: "L1",
-        attempts: 0, // 0 first attempt, 1 retry
-        evidence: [], // { level, cluster, correct, qid }
+        attempts: 0,
+        evidence: [],
         questionIndexInAttempt: 1,
         usedClustersCurrentAttempt: [],
         currentQuestion: null,
@@ -294,7 +304,7 @@ function getSession(sessionId) {
   return sessions.get(sessionId);
 }
 
-// Validation
+// ===== Intake validation (كما هو) =====
 function validateIntakeInput(stepKey, value) {
   if (stepKey === "name_full") {
     const words = value.trim().split(/\s+/);
@@ -313,7 +323,109 @@ function validateIntakeInput(stepKey, value) {
   return value && value.trim().length > 0;
 }
 
-// -------- Intake Flow --------
+// ===== AUTH ROUTES [ADDED] =====
+async function findUserByEmail(email) {
+  const r = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
+  return r.rows[0] || null;
+}
+
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { name, email, password, locale = "en" } = req.body || {};
+    if (!name || !email || !password) return res.status(400).json({ error: "name, email, password required" });
+
+    const exists = await findUserByEmail(email);
+    if (exists) return res.status(409).json({ error: "email already exists" });
+
+    const hash = await bcrypt.hash(password, 12);
+    const { rows } = await pool.query(
+      `INSERT INTO users (id, name, email, password_hash, locale)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4)
+       RETURNING id, name, email, locale, created_at`,
+      [name, email, hash, locale]
+    );
+    req.session.userId = rows[0].id;
+    res.json({ user: rows[0] });
+  } catch (e) {
+    console.error("signup error:", e);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "email, password required" });
+
+    const user = await findUserByEmail(email);
+    if (!user) return res.status(401).json({ error: "invalid credentials" });
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ error: "invalid credentials" });
+
+    req.session.userId = user.id;
+    res.json({ user: { id: user.id, name: user.name, email: user.email, locale: user.locale } });
+  } catch (e) {
+    console.error("login error:", e);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie(process.env.SESSION_COOKIE_NAME || "sid");
+    res.json({ ok: true });
+  });
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  const uid = req.session?.userId;
+  if (!uid) return res.status(401).json({ error: "unauthorized" });
+  const { rows } = await pool.query(
+    "SELECT id, name, email, locale, created_at FROM users WHERE id=$1",
+    [uid]
+  );
+  if (!rows[0]) return res.status(401).json({ error: "unauthorized" });
+  res.json({ user: rows[0] });
+});
+
+// ===== requireAuth [ADDED] =====
+function requireAuth(req, res, next) {
+  if (!req.session?.userId) return res.status(401).json({ error: "unauthorized" });
+  next();
+}
+
+// ===== Helpers DB للـ chat_session/chat_messages [ADDED] =====
+async function getOrCreateCurrentChatSession(userId) {
+  // آخر جلسة غير منتهية
+  const cur = await pool.query(
+    `SELECT * FROM chat_sessions
+     WHERE user_id=$1 AND status <> 'ended'
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+  if (cur.rows[0]) return cur.rows[0];
+
+  // إنشاء جلسة جديدة تبدأ assessment
+  const ins = await pool.query(
+    `INSERT INTO chat_sessions (id, user_id, status, intake_done)
+     VALUES (gen_random_uuid(), $1, 'assessment', FALSE)
+     RETURNING *`,
+    [userId]
+  );
+  return ins.rows[0];
+}
+
+async function insertChatMessage(sessionId, sender, content) {
+  await pool.query(
+    `INSERT INTO chat_messages (id, chat_session_id, sender, content)
+     VALUES (gen_random_uuid(), $1, $2, $3)`,
+    [sessionId, sender, content]
+  );
+}
+
+// ===== Intake Flow (كما هو) =====
 app.post("/api/intake/next", async (req, res) => {
   try {
     const { sessionId = randomUUID(), lang = "en", answer } = req.body;
@@ -372,7 +484,7 @@ app.post("/api/intake/next", async (req, res) => {
   }
 });
 
-// ===== Utilities =====
+// ===== Utilities (كما هو) =====
 function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   const arr = choices.map((text, idx) => ({ text, idx }));
   for (let i = arr.length - 1; i > 0; i--) {
@@ -384,7 +496,7 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
-// -------- Assessment: get ONE MCQ --------
+// ===== Assessment (كما هو) =====
 app.post("/api/assess/next", async (req, res) => {
   try {
     const { sessionId } = req.body;
@@ -477,7 +589,6 @@ app.post("/api/assess/next", async (req, res) => {
   }
 });
 
-// -------- Assessment: submit answer --------
 app.post("/api/assess/answer", async (req, res) => {
   try {
     const { sessionId, userChoiceIndex } = req.body;
@@ -557,7 +668,7 @@ app.post("/api/assess/answer", async (req, res) => {
   }
 });
 
-// -------- Final report --------
+// ===== Final report (كما هو، مع حفظ الحالة فقط) =====
 app.post("/api/report", async (req, res) => {
   try {
     const { sessionId } = req.body;
@@ -691,9 +802,7 @@ app.post("/api/report", async (req, res) => {
   }
 });
 
-/* =========================
-   Teaching: start (data-only)
-   ========================= */
+// ===== Teaching: start (مُكيّف لكتابة رسالة المعلّم في DB) =====
 app.post("/api/teach/start", async (req, res) => {
   try {
     const { sessionId } = req.body || {};
@@ -701,7 +810,6 @@ app.post("/api/teach/start", async (req, res) => {
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
 
-    // اجلب الموضوعات من التقرير (نقاط قوة وضعف بصيغة العرض البشرية)
     const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
     const strengthsDisplay = Array.isArray(session?.report?.strengths_display) ? session.report.strengths_display : [];
 
@@ -712,11 +820,8 @@ app.post("/api/teach/start", async (req, res) => {
       });
     }
 
-    // إن لم تكن قائمة مرتّبة مسبقًا، ابنِ قائمة "منهجية" بنفس المواضيع الواردة في التقرير فقط
     if (!Array.isArray(teaching.topics_queue) || !teaching.topics_queue.length) {
       const langForDisplay = teaching.lang || session.lang || "ar";
-
-      // 1) ابني ترتيب المنهج كأسماء "بشرية" بنفس لغة الجلسة
       const canonicalKeys = [
         ...((LEVELS.L1?.clusters) || []),
         ...((LEVELS.L2?.clusters) || []),
@@ -724,35 +829,22 @@ app.post("/api/teach/start", async (req, res) => {
       ];
       const canonicalDisplays = canonicalKeys.map(k => humanizeCluster(k, langForDisplay));
 
-      // 2) جهّز lookup سريع من القوائم القادمة من التقرير (من غير تعديل)
       const S = Array.isArray(strengthsDisplay) ? strengthsDisplay : [];
       const G = Array.isArray(gapsDisplay) ? gapsDisplay : [];
       const setS = new Set(S);
       const setG = new Set(G);
 
-      // 3) مرّ على المنهج بالترتيب: لو الموضوع موجود في strengths → ادفعه كـ strength،
-      //    وإلا لو موجود في gaps → ادفعه كـ gap. لا تضف أي موضوع غير موجود في التقرير.
       const ordered = [];
       for (const disp of canonicalDisplays) {
-        if (setS.has(disp)) {
-          ordered.push({ display: disp, kind: "strength" });
-          continue;
-        }
-        if (setG.has(disp)) {
-          ordered.push({ display: disp, kind: "gap" });
-          continue;
-        }
+        if (setS.has(disp)) { ordered.push({ display: disp, kind: "strength" }); continue; }
+        if (setG.has(disp)) { ordered.push({ display: disp, kind: "gap" }); continue; }
       }
-
       teaching.topics_queue = ordered;
     }
-
 
     teaching.mode = "active";
     teaching.current_topic_index = 0;
     teaching.transcript = teaching.transcript || [];
-
-    // اجمع سياق المستخدم من الـintake فقط (بيانات خام—لا تعليمات)
     teaching.profileContext = {
       job_nature: session.intake?.job_nature || "",
       experience_years_band: session.intake?.experience_years_band || "",
@@ -771,8 +863,13 @@ app.post("/api/teach/start", async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
+    // ===== [ADDED] اربط برسميًا chat_session في DB (لو المستخدم مسجل) =====
+    let dbChatSession = null;
+    if (req.session?.userId) {
+      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId);
+    }
+
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
-      // إنشاء Thread مرة واحدة
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
         const threadId = createdThread?.id;
@@ -782,7 +879,6 @@ app.post("/api/teach/start", async (req, res) => {
       }
       const threadId = teaching.assistant.threadId;
 
-      // رسالة افتتاحية "بيانات فقط"
       const topicsLine = teaching.topics_queue.map((t, i) => `${i + 1}) ${t.display} [${t.kind}]`).join(" | ");
       const openingMsg = (teaching.lang === "ar")
         ? [
@@ -798,7 +894,6 @@ app.post("/api/teach/start", async (req, res) => {
 
       await openai.beta.threads.messages.create(threadId, { role: "user", content: openingMsg });
 
-      // تشغيل الـAssistant وفق نظام teach.js فقط
       const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: TEACH_ASSISTANT_ID,
         instructions: getTeachingSystemPrompt({ lang: teaching.lang })
@@ -815,6 +910,8 @@ app.post("/api/teach/start", async (req, res) => {
         const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (text) {
           pushTranscript(session, { from: "tutor", text });
+          // [ADDED] خزّن رسالة المعلّم في DB
+          if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", text); }
           return res.json({ message: text });
         }
       }
@@ -823,10 +920,11 @@ app.post("/api/teach/start", async (req, res) => {
         ? "هنبدأ شرح أول موضوع بشكل بسيط خطوة بخطوة."
         : "Let’s start with the first topic, step by step.";
       pushTranscript(session, { from: "tutor", text: fb });
+      if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", fb); }
       return res.json({ message: fb });
     }
 
-    // ============= Fallback بدون Assistant =============
+    // ===== Fallback بدون Assistant =====
     const sys = getTeachingSystemPrompt({ lang: teaching.lang });
     const userSeed = (teaching.lang === "ar")
       ? [
@@ -850,6 +948,10 @@ app.post("/api/teach/start", async (req, res) => {
     });
     const text = (completion?.choices?.[0]?.message?.content || "").trim();
     pushTranscript(session, { from: "tutor", text });
+    if (req.session?.userId) {
+      const s = await getOrCreateCurrentChatSession(req.session.userId);
+      await insertChatMessage(s.id, "assistant", text);
+    }
     return res.json({ message: text });
 
   } catch (err) {
@@ -858,10 +960,7 @@ app.post("/api/teach/start", async (req, res) => {
   }
 });
 
-
-/* =================================
-   Teaching: user sends a chat message (data-only)
-   ================================= */
+// ===== Teaching: message (يحفظ رسائل المستخدم + المعلّم في DB) =====
 app.post("/api/teach/message", async (req, res) => {
   try {
     const { sessionId, text, userMessage } = req.body || {};
@@ -887,6 +986,13 @@ app.post("/api/teach/message", async (req, res) => {
 
     try { pushTranscript(session, { from: "user", text: userText }); } catch {}
 
+    // [ADDED] خزّن رسالة المستخدم في DB إن وُجد مستخدم مسجّل
+    let dbChatSession = null;
+    if (req.session?.userId) {
+      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId);
+      await insertChatMessage(dbChatSession.id, "user", userText);
+    }
+
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
@@ -898,7 +1004,6 @@ app.post("/api/teach/message", async (req, res) => {
 
       const threadId = teaching.assistant.threadId;
 
-      // Payload "بيانات فقط": بدون أي تذكيرات أسلوبية
       const userPayload = (lang === "ar")
         ? [
             `سياق المستخدم: ${JSON.stringify(teaching.profileContext || {})}`,
@@ -929,6 +1034,7 @@ app.post("/api/teach/message", async (req, res) => {
         const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (reply) {
           try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+          if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", reply); }
           return res.json({ message: reply });
         }
       }
@@ -937,10 +1043,11 @@ app.post("/api/teach/message", async (req, res) => {
         ? "تمام، خلّيني أوضّحها خطوة خطوة."
         : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
+      if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", fb); }
       return res.json({ message: fb });
     }
 
-    // ============= Fallback بدون Assistant =============
+    // ===== Fallback بدون Assistant =====
     const sys = getTeachingSystemPrompt({ lang });
     const userTurn = (lang === "ar")
       ? [
@@ -962,11 +1069,12 @@ app.post("/api/teach/message", async (req, res) => {
       ],
       temperature: 0.2,
       top_p: 1,
-      max_completion_tokens: 2000 // أطول قليلًا لتفادي الاختصار المخلّ
+      max_completion_tokens: 2000
     });
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
+    if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", reply); }
     return res.json({ message: reply });
 
   } catch (err) {
@@ -975,16 +1083,42 @@ app.post("/api/teach/message", async (req, res) => {
   }
 });
 
-// Health check
+// ===== [ADDED] GET /api/chat/current — محمية =====
+app.get("/api/chat/current", requireAuth, async (req, res) => {
+  const uid = req.session.userId;
+  const chatSession = await getOrCreateCurrentChatSession(uid);
+
+  const msgs = await pool.query(
+    `SELECT id, sender, content, created_at
+     FROM chat_messages
+     WHERE chat_session_id=$1
+     ORDER BY created_at ASC`,
+    [chatSession.id]
+  );
+
+  res.json({
+    session: {
+      id: chatSession.id,
+      status: chatSession.status,
+      intake_done: chatSession.intake_done,
+      started_at: chatSession.started_at,
+      finished_at: chatSession.finished_at
+    },
+    messages: msgs.rows
+  });
+});
+
+// ===== Health (كما هو) =====
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", sessions: sessions.size });
 });
 
-// SPA fallback
+// ===== SPA fallback (كما هو) =====
 app.get("*", (req, res) => {
   res.sendFile(join(__dirname, "../public/index.html"));
 });
 
+// ===== Listen (كما هو) =====
 const port = parseInt(process.env.PORT || "5000", 10);
 app.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
