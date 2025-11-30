@@ -1,0 +1,70 @@
+
+Create a dedicated FAQ page (EN/AR, RTL-ready) added as the last item in the main navigation. The page should follow the same overall dashboard editing pattern as the Training Program page, but with a cleaner, more modern FAQ design (not the current basic accordion style). Also add the contact form section at the bottom like the other pages.
+
+Key Ideas
+
+Keep it simple and robust: no drag & drop; ordering is via Sort Order integers.
+Each section has its own editor in the dashboard (don’t reuse a generic form).
+Bilingual fields for everything (EN/AR) and full RTL support for Arabic.
+Don’t touch existing pages or structures beyond adding this new page.
+Public Page (/faq.php)
+Design language = same family as Training Program (spacing, typography, soft shadows), but with a fresher FAQ layout:
+
+Hero / Intro
+Title + short subtitle; optional image/illustration.
+Visual style consistent with Training Program hero, but with a lighter feel.
+
+Top Questions (Featured)
+
+Optional section at the top with 3–6 featured Q&As in a two-column card grid.
+
+Each card shows the question; clicking expands the answer inline inside the card (smooth transition).
+
+Purpose: quick access to the most common questions.
+
+All Questions (Accordion – improved)
+
+A clean accordion list for all questions.
+
+Not the old pink block; use neutral cards, soft shadow, subtle hover, clear divider lines, and an expand chevron.
+
+Ordered by Sort Order.
+
+Works great on mobile (one column) and desktop (comfortable widths).
+
+
+
+Same contact form used elsewhere (reuse the existing submit handler).
+Keep the styling consistent with other pages.
+
+Admin – “FAQ Page” (same page-style as Training Program)
+Make one single admin page for FAQ  that contains tabs for all sections. Each tab has an editor that matches that section’s real structure (no unused fields). Keep everything else intact.
+Tab: Hero – fields for title, subtitle, optional image/alt, published.
+
+Tab: Top Questions – a simple list where I can Add/Edit/Delete featured Q&As; fields (question, answer), published, sort order.
+
+Tab: All Questions – full Q&A list with Add/Edit/Delete, published, sort order.
+ونفس الشكل لباقي ال taps لو فيه 
+
+Behavior & Constraints
+
+Respect existing site style (Bootstrap 5, responsive, EN/AR, RTL).
+
+Keep the structure modular; each section = its own tailored editor UI.
+
+Use the existing media picker where images are needed.
+
+Use prepared statements and the project’s existing CSRF approach as usual.
+
+Don’t rename or break existing tables/pages; just add what’s needed for this page.
+
+Acceptance (quick)
+
+New FAQ page appears as the last nav item and works in EN/AR with RTL.
+
+In dashboard, I can add/edit/delete & set sort order & publish for Top Questions and All Questions separately.
+
+The public page shows the featured grid (if items exist), then the clean accordion for all questions, then the contact form.
+
+
+Visual design looks fresher than the current basic accordion and matches the site’s aesthetic.
