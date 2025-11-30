@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  // يبني نفس بنية الهيدر القديم (نفس الكلاسات) علشان يرث CSS كما هو
   function buildLegacyHeader(mode) {
     const header = document.createElement("div");
     header.className = "chat-header";
