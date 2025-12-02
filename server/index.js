@@ -4,7 +4,6 @@
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import fs from "fs";
 import { getQuestionPromptSingle } from "./prompts/system.js";
@@ -53,6 +52,58 @@ app.use(session({
 
 // ===== In-memory store (موجود لديك، أبقيته كما هو) =====
 const sessions = new Map();
+
+function createInitialSessionState(sessionId = null) {
+  return {
+    sessionId,
+    lang: "en",
+    currentStep: "intake",
+    intakeStepIndex: 0,
+    openingShown: false,
+    intake: {},
+    assessment: {
+      currentLevel: "L1",
+      attempts: 0,
+      evidence: [],
+      questionIndexInAttempt: 1,
+      usedClustersCurrentAttempt: [],
+      currentQuestion: null,
+      stemsCurrentAttempt: [],
+      lastAttemptStems: {},
+    },
+    teaching: {
+      mode: "idle",
+      lang: "ar",
+      topics_queue: [],
+      current_topic_index: 0,
+      transcript: [],
+      assistant: { threadId: null }
+    },
+    finished: false,
+    report: null,
+    messages: [],
+  };
+}
+
+function normalizeSessionState(raw = {}, sessionId = null) {
+  const base = createInitialSessionState(sessionId || raw.sessionId || null);
+  const merged = { ...base, ...raw };
+  merged.sessionId = sessionId || merged.sessionId || null;
+  merged.intake = { ...base.intake, ...(raw.intake || {}) };
+  merged.assessment = { ...base.assessment, ...(raw.assessment || {}) };
+  merged.teaching = { ...base.teaching, ...(raw.teaching || {}) };
+  merged.messages = Array.isArray(raw.messages) ? raw.messages : (base.messages || []);
+  return merged;
+}
+
+function appendMessageToState(state, sender, content) {
+  const msg = { sender, content: String(content || ""), ts: Date.now() };
+  state.messages = Array.isArray(state.messages) ? state.messages : [];
+  state.messages.push(msg);
+  if (state.messages.length > 200) {
+    state.messages = state.messages.slice(-200);
+  }
+}
 
 // ===== OpenAI client (كما هو) =====
 const openai = new OpenAI({
@@ -269,39 +320,103 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   return queue;
 }
 
-// ===== In-memory session bootstrap (كما هو) =====
-function getSession(sessionId) {
-  if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, {
-      sessionId,
-      lang: "en",
-      currentStep: "intake",
-      intakeStepIndex: 0,
-      openingShown: false,
-      intake: {},
-      assessment: {
-        currentLevel: "L1",
-        attempts: 0,
-        evidence: [],
-        questionIndexInAttempt: 1,
-        usedClustersCurrentAttempt: [],
-        currentQuestion: null,
-        stemsCurrentAttempt: [],
-        lastAttemptStems: {},
-      },
-      teaching: {
-        mode: "idle",
-        lang: "ar",
-        topics_queue: [],
-        current_topic_index: 0,
-        transcript: [],
-        assistant: { threadId: null }
-      },
-      finished: false,
-      report: null,
-    });
+// ===== Session state persistence (DB + ذاكرة) =====
+async function mapDbMessagesToState(sessionId) {
+  const dbMsgs = await pool.query(
+    `SELECT sender, content, created_at
+     FROM chat_messages
+     WHERE chat_session_id=$1
+     ORDER BY created_at ASC`,
+    [sessionId]
+  );
+
+  return (dbMsgs.rows || []).map((m) => ({
+    sender: m.sender,
+    content: m.content,
+    ts: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+  }));
+}
+
+async function getSession(sessionId, userId = null) {
+  if (!sessionId) throw new Error("sessionId required");
+
+  if (sessions.has(sessionId)) {
+    return sessions.get(sessionId);
   }
-  return sessions.get(sessionId);
+
+  const params = [sessionId];
+  let query = "SELECT * FROM chat_sessions WHERE id=$1";
+  if (userId) {
+    query += " AND user_id=$2";
+    params.push(userId);
+  }
+
+  const found = await pool.query(query, params);
+  let row = found.rows[0];
+
+  if (!row) {
+    if (!userId) throw new Error("Session not found");
+    const initial = createInitialSessionState(sessionId);
+    const inserted = await pool.query(
+      `INSERT INTO chat_sessions (id, user_id, status, intake_done, session_state)
+       VALUES ($1, $2, 'assessment', FALSE, $3)
+       RETURNING *`,
+      [sessionId, userId, initial]
+    );
+    row = inserted.rows[0];
+  }
+
+  let normalized = normalizeSessionState(row.session_state || {}, sessionId);
+
+  // لو session_state كان فاضي أو الرسائل مش موجودة، حمّلها من chat_messages
+  const needsMessages = !Array.isArray(normalized.messages) || !normalized.messages.length;
+  if (!row.session_state || needsMessages) {
+    try {
+      const history = await mapDbMessagesToState(sessionId);
+      if (history.length) {
+        normalized.messages = history;
+      }
+    } catch (err) {
+      console.error("Failed to hydrate messages from DB", err);
+    }
+  }
+
+  // تأكد إننا بنسجّل session_state في قاعدة البيانات لو كانت null
+  if (!row.session_state) {
+    try {
+      await saveSessionState(sessionId, normalized);
+    } catch (err) {
+      console.error("Failed to backfill empty session_state", err);
+    }
+  }
+
+  sessions.set(sessionId, normalized);
+  return normalized;
+}
+
+function deriveChatStatus(state) {
+  if (!state) return "assessment";
+  if (state.currentStep === "report") return "report";
+  if (state.currentStep === "teaching") return "teaching";
+  if (state.currentStep === "intake") return "intake";
+  return "assessment";
+}
+
+function deriveIntakeDone(state) {
+  if (!state) return false;
+  return state.currentStep !== "intake" || (state.intakeStepIndex || 0) >= INTAKE_ORDER.length;
+}
+
+async function saveSessionState(sessionId, state) {
+  sessions.set(sessionId, state);
+  const status = deriveChatStatus(state);
+  const intake_done = deriveIntakeDone(state);
+  await pool.query(
+    `UPDATE chat_sessions
+     SET session_state=$2, status=$3, intake_done=$4, updated_at=NOW()
+     WHERE id=$1`,
+    [sessionId, state, status, intake_done]
+  );
 }
 
 // ===== Intake validation (كما هو) =====
@@ -405,16 +520,36 @@ async function getOrCreateCurrentChatSession(userId) {
      LIMIT 1`,
     [userId]
   );
-  if (cur.rows[0]) return cur.rows[0];
+  if (cur.rows[0]) {
+    const row = cur.rows[0];
+    if (!row.session_state) {
+      const initial = createInitialSessionState(row.id);
+      await pool.query(
+        `UPDATE chat_sessions SET session_state=$2 WHERE id=$1`,
+        [row.id, initial]
+      );
+      row.session_state = initial;
+    }
+    return row;
+  }
 
   // إنشاء جلسة جديدة تبدأ assessment
   const ins = await pool.query(
-    `INSERT INTO chat_sessions (id, user_id, status, intake_done)
-     VALUES (gen_random_uuid(), $1, 'assessment', FALSE)
+    `INSERT INTO chat_sessions (id, user_id, status, intake_done, session_state)
+     VALUES (gen_random_uuid(), $1, 'assessment', FALSE, $2)
      RETURNING *`,
-    [userId]
+    [userId, null]
   );
-  return ins.rows[0];
+  const newRow = ins.rows[0];
+  if (!newRow.session_state) {
+    const initial = createInitialSessionState(newRow.id);
+    await pool.query(
+      `UPDATE chat_sessions SET session_state=$2 WHERE id=$1`,
+      [newRow.id, initial]
+    );
+    newRow.session_state = initial;
+  }
+  return newRow;
 }
 
 async function insertChatMessage(sessionId, sender, content) {
@@ -425,11 +560,21 @@ async function insertChatMessage(sessionId, sender, content) {
   );
 }
 
+async function persistMessage(sessionRecord, state, sender, content) {
+  appendMessageToState(state, sender, content);
+  if (sessionRecord?.id) {
+    await insertChatMessage(sessionRecord.id, sender, content);
+  }
+}
+
 // ===== Intake Flow (كما هو) =====
-app.post("/api/intake/next", async (req, res) => {
+app.post("/api/intake/next", requireAuth, async (req, res) => {
   try {
-    const { sessionId = randomUUID(), lang = "en", answer } = req.body;
-    const session = getSession(sessionId);
+    const { sessionId: providedId, lang = "en", answer } = req.body;
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
+    const session = await getSession(sessionId, uid);
     session.lang = lang;
 
     if (answer !== undefined && answer !== null) {
@@ -439,14 +584,25 @@ app.post("/api/intake/next", async (req, res) => {
         const errorMessage =
           stepConfig.validation_error?.[lang] ||
           (lang === "ar" ? "يرجى إدخال إجابة صحيحة" : "Please enter a valid answer");
+        await saveSessionState(sessionId, session);
         return res.json({ error: true, message: errorMessage });
       }
       session.intake[currentStepKey] = answer;
+      await persistMessage(dbChatSession, session, "user", answer);
       session.intakeStepIndex++;
     }
 
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
+      await persistMessage(
+        dbChatSession,
+        session,
+        "assistant",
+        lang === "ar"
+          ? "تمام! كده عندي صورة أوضح عنك. هنبدأ أسئلة التقييم دلوقتي. الهدف مش نجاح ورسوب الهدف نفهم مستواك بدقة علشان نطلع لك خطة مناسبة"
+          : "Great! I now have a clearer picture of you. We’ll start the assessment now. There’s no pass or fail — the goal is to gauge your level accurately so we can give you a suitable plan."
+      );
+      await saveSessionState(sessionId, session);
       return res.json({
         done: true,
         message:
@@ -458,6 +614,8 @@ app.post("/api/intake/next", async (req, res) => {
 
     if ((answer === undefined || answer === null) && session.intakeStepIndex === 0 && !session.openingShown) {
       session.openingShown = true;
+      await persistMessage(dbChatSession, session, "assistant", INTAKE_OPENING[lang]);
+      await saveSessionState(sessionId, session);
       return res.json({
         sessionId,
         stepKey: "__opening__",
@@ -470,6 +628,8 @@ app.post("/api/intake/next", async (req, res) => {
 
     const nextStepKey = INTAKE_ORDER[session.intakeStepIndex];
     const nextStep = INTAKE_CATALOG[nextStepKey];
+    await persistMessage(dbChatSession, session, "assistant", nextStep.prompt[lang]);
+    await saveSessionState(sessionId, session);
     return res.json({
       sessionId,
       stepKey: nextStepKey,
@@ -497,10 +657,13 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
 }
 
 // ===== Assessment (كما هو) =====
-app.post("/api/assess/next", async (req, res) => {
+app.post("/api/assess/next", requireAuth, async (req, res) => {
   try {
-    const { sessionId } = req.body;
-    const session = getSession(sessionId);
+    const { sessionId: providedId } = req.body;
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
+    const session = await getSession(sessionId, uid);
     if (session.currentStep !== "assessment") {
       return res.status(400).json({ error: "Not in assessment phase" });
     }
@@ -582,6 +745,8 @@ app.post("/api/assess/next", async (req, res) => {
       totalQuestions: 2,
     };
 
+    await persistMessage(dbChatSession, session, "assistant", `${current.prompt}\n${current.choices.map((c, i) => `${String.fromCharCode(65 + i)}) ${c}`).join("\n")}`);
+    await saveSessionState(sessionId, session);
     return res.json(mcqPayload);
   } catch (err) {
     console.error("Assessment next error:", err);
@@ -589,10 +754,13 @@ app.post("/api/assess/next", async (req, res) => {
   }
 });
 
-app.post("/api/assess/answer", async (req, res) => {
+app.post("/api/assess/answer", requireAuth, async (req, res) => {
   try {
-    const { sessionId, userChoiceIndex } = req.body;
-    const session = getSession(sessionId);
+    const { sessionId: providedId, userChoiceIndex } = req.body;
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
+    const session = await getSession(sessionId, uid);
     const A = session.assessment;
 
     if (session.currentStep !== "assessment" || !A.currentQuestion) {
@@ -613,6 +781,7 @@ app.post("/api/assess/answer", async (req, res) => {
       correct: isCorrect,
       qid: q.qid,
     });
+    await persistMessage(dbChatSession, session, "user", `choice_${userChoiceIndex}`);
 
     let nextAction = "continue";
 
@@ -656,6 +825,7 @@ app.post("/api/assess/answer", async (req, res) => {
 
     A.currentQuestion = null;
 
+    await saveSessionState(sessionId, session);
     return res.json({
       correct: isCorrect,
       nextAction,
@@ -669,10 +839,13 @@ app.post("/api/assess/answer", async (req, res) => {
 });
 
 // ===== Final report (كما هو، مع حفظ الحالة فقط) =====
-app.post("/api/report", async (req, res) => {
+app.post("/api/report", requireAuth, async (req, res) => {
   try {
-    const { sessionId } = req.body;
-    const session = getSession(sessionId);
+    const { sessionId: providedId } = req.body;
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
+    const session = await getSession(sessionId, uid);
     const lang = session.lang || "en";
 
     const A = session.assessment || { evidence: [], currentLevel: "L1" };
@@ -783,6 +956,8 @@ app.post("/api/report", async (req, res) => {
     session.report = report;
     session.finished = true;
     session.currentStep = "report";
+    await persistMessage(dbChatSession, session, "assistant", report.message || "");
+    await saveSessionState(sessionId, session);
 
     return res.json(report);
   } catch (err) {
@@ -803,12 +978,16 @@ app.post("/api/report", async (req, res) => {
 });
 
 // ===== Teaching: start (مُكيّف لكتابة رسالة المعلّم في DB) =====
-app.post("/api/teach/start", async (req, res) => {
+app.post("/api/teach/start", requireAuth, async (req, res) => {
   try {
-    const { sessionId } = req.body || {};
-    const session = getSession(sessionId);
+    const { sessionId: providedId } = req.body || {};
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
+    const session = await getSession(sessionId, uid);
     const teaching = ensureTeachingState(session);
     teaching.lang = session.lang || teaching.lang || "ar";
+    session.currentStep = "teaching";
 
     const gapsDisplay = Array.isArray(session?.report?.gaps_display) ? session.report.gaps_display : [];
     const strengthsDisplay = Array.isArray(session?.report?.strengths_display) ? session.report.strengths_display : [];
@@ -863,12 +1042,6 @@ app.post("/api/teach/start", async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
 
-    // ===== [ADDED] اربط برسميًا chat_session في DB (لو المستخدم مسجل) =====
-    let dbChatSession = null;
-    if (req.session?.userId) {
-      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId);
-    }
-
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       if (!teaching.assistant?.threadId) {
         const createdThread = await openai.beta.threads.create();
@@ -910,8 +1083,8 @@ app.post("/api/teach/start", async (req, res) => {
         const text = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (text) {
           pushTranscript(session, { from: "tutor", text });
-          // [ADDED] خزّن رسالة المعلّم في DB
-          if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", text); }
+          await persistMessage(dbChatSession, session, "assistant", text);
+          await saveSessionState(sessionId, session);
           return res.json({ message: text });
         }
       }
@@ -920,7 +1093,8 @@ app.post("/api/teach/start", async (req, res) => {
         ? "هنبدأ شرح أول موضوع بشكل بسيط خطوة بخطوة."
         : "Let’s start with the first topic, step by step.";
       pushTranscript(session, { from: "tutor", text: fb });
-      if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", fb); }
+      await persistMessage(dbChatSession, session, "assistant", fb);
+      await saveSessionState(sessionId, session);
       return res.json({ message: fb });
     }
 
@@ -948,10 +1122,8 @@ app.post("/api/teach/start", async (req, res) => {
     });
     const text = (completion?.choices?.[0]?.message?.content || "").trim();
     pushTranscript(session, { from: "tutor", text });
-    if (req.session?.userId) {
-      const s = await getOrCreateCurrentChatSession(req.session.userId);
-      await insertChatMessage(s.id, "assistant", text);
-    }
+    await persistMessage(dbChatSession, session, "assistant", text);
+    await saveSessionState(sessionId, session);
     return res.json({ message: text });
 
   } catch (err) {
@@ -961,11 +1133,14 @@ app.post("/api/teach/start", async (req, res) => {
 });
 
 // ===== Teaching: message (يحفظ رسائل المستخدم + المعلّم في DB) =====
-app.post("/api/teach/message", async (req, res) => {
+app.post("/api/teach/message", requireAuth, async (req, res) => {
   try {
-    const { sessionId, text, userMessage } = req.body || {};
+    const { sessionId: providedId, text, userMessage } = req.body || {};
+    const uid = req.session.userId;
+    const dbChatSession = await getOrCreateCurrentChatSession(uid);
+    const sessionId = providedId || dbChatSession.id;
     const userText = (text ?? userMessage ?? "").toString().trim();
-    const session = getSession(sessionId);
+    const session = await getSession(sessionId, uid);
     const teaching = ensureTeachingState(session);
 
     if (!userText) {
@@ -986,12 +1161,7 @@ app.post("/api/teach/message", async (req, res) => {
 
     try { pushTranscript(session, { from: "user", text: userText }); } catch {}
 
-    // [ADDED] خزّن رسالة المستخدم في DB إن وُجد مستخدم مسجّل
-    let dbChatSession = null;
-    if (req.session?.userId) {
-      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId);
-      await insertChatMessage(dbChatSession.id, "user", userText);
-    }
+    await persistMessage(dbChatSession, session, "user", userText);
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
       if (!teaching.assistant?.threadId) {
@@ -1034,7 +1204,8 @@ app.post("/api/teach/message", async (req, res) => {
         const reply = (assistantMsg?.content?.[0]?.text?.value || "").trim();
         if (reply) {
           try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
-          if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", reply); }
+          await persistMessage(dbChatSession, session, "assistant", reply);
+          await saveSessionState(sessionId, session);
           return res.json({ message: reply });
         }
       }
@@ -1043,7 +1214,8 @@ app.post("/api/teach/message", async (req, res) => {
         ? "تمام، خلّيني أوضّحها خطوة خطوة."
         : "Okay, let me break it down step by step.";
       try { pushTranscript(session, { from: "tutor", text: fb, topic: currentTopic }); } catch {}
-      if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", fb); }
+      await persistMessage(dbChatSession, session, "assistant", fb);
+      await saveSessionState(sessionId, session);
       return res.json({ message: fb });
     }
 
@@ -1074,7 +1246,8 @@ app.post("/api/teach/message", async (req, res) => {
 
     const reply = (completion?.choices?.[0]?.message?.content || "").trim();
     try { pushTranscript(session, { from: "tutor", text: reply, topic: currentTopic }); } catch {}
-    if (dbChatSession) { await insertChatMessage(dbChatSession.id, "assistant", reply); }
+    await persistMessage(dbChatSession, session, "assistant", reply);
+    await saveSessionState(sessionId, session);
     return res.json({ message: reply });
 
   } catch (err) {
@@ -1087,6 +1260,7 @@ app.post("/api/teach/message", async (req, res) => {
 app.get("/api/chat/current", requireAuth, async (req, res) => {
   const uid = req.session.userId;
   const chatSession = await getOrCreateCurrentChatSession(uid);
+  const state = await getSession(chatSession.id, uid);
 
   const msgs = await pool.query(
     `SELECT id, sender, content, created_at
@@ -1096,15 +1270,31 @@ app.get("/api/chat/current", requireAuth, async (req, res) => {
     [chatSession.id]
   );
 
+  let persistedMessages = msgs.rows || [];
+
+  // لو قاعدة البيانات راجعة فاضية لأي سبب، نستخدم النسخة المحفوظة في session_state
+  if (!persistedMessages.length && Array.isArray(state.messages)) {
+    persistedMessages = [...state.messages]
+      .filter(m => m && m.content)
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+      .map((m, idx) => ({
+        id: `state-${idx}`,
+        sender: m.sender || "assistant",
+        content: m.content,
+        created_at: m.ts ? new Date(m.ts).toISOString() : null,
+      }));
+  }
+
   res.json({
     session: {
       id: chatSession.id,
       status: chatSession.status,
       intake_done: chatSession.intake_done,
       started_at: chatSession.started_at,
-      finished_at: chatSession.finished_at
+      finished_at: chatSession.finished_at,
+      state,
     },
-    messages: msgs.rows
+    messages: persistedMessages
   });
 });
 

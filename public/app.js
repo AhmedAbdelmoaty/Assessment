@@ -33,81 +33,63 @@
     const sendBtn = document.getElementById("sendBtn");
     // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
     async function authGuardAndLoad() {
-      // 1) تأكد المستخدم مسجّل (لو مش مسجّل → Login)
-      try {
-        const meResp = await fetch("/api/auth/me");
-        const me = await meResp.json();
-        if (!meResp.ok || !me?.ok || !me?.user) {
-          window.location.href = "/login.html";
-          return false;
+        try {
+            const meResp = await fetch("/api/auth/me");
+            const me = await meResp.json();
+            if (!meResp.ok || !me?.user) {
+                window.location.href = "/login.html";
+                return false;
+            }
+            if (window.LA_I18N && me.user.locale) {
+                window.LA_I18N.setLocale(me.user.locale);
+            }
+        } catch {
+            window.location.href = "/login.html";
+            return false;
         }
-        // طبّق اللغة المحفوظة (لو بتستخدم i18n.js)
-        if (window.LA_I18N && me.user.locale) {
-          window.LA_I18N.setLocale(me.user.locale);
-        }
-      } catch {
-        window.location.href = "/login.html";
-        return false;
-      }
 
-      // 2) حمّل الجلسة والرسائل المحفوظة
-      try {
-        const chatResp = await fetch("/api/chat/current");
-        if (chatResp.ok) {
-          const data = await chatResp.json();
-          if (Array.isArray(data.messages)) {
-            renderPersistedMessages(data.messages);
-            // لو السيرفر رجّع sessionId ممكن نخزّنه
-            if (data.session?.id && !sessionId) sessionId = data.session.id;
-          }
+        try {
+            const chatResp = await fetch("/api/chat/current");
+            if (chatResp.ok) {
+                const data = await chatResp.json();
+                if (Array.isArray(data.messages)) {
+                    renderPersistedMessages(data.messages);
+                }
+                if (data.session?.id) {
+                    sessionId = data.session.id;
+                }
+                if (data.session?.state) {
+                    hydrateStateFromServer(data.session.state);
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to load persisted chat:", e);
         }
-      } catch (e) {
-        console.warn("Failed to load persisted chat:", e);
-      }
 
-      return true;
+        return true;
     }
 
     function renderPersistedMessages(messages) {
-      (messages || []).forEach((m) => {
-        const txt = (m?.content || "").toString();
-        if (!txt) return;
-        if ((m?.sender || "") === "user") addUserMessage(txt);
-        else addSystemMessage(txt);
-      });
+        (messages || []).forEach((m) => {
+            const txt = (m?.content || "").toString();
+            if (!txt) return;
+            if ((m?.sender || "") === "user") addUserMessage(txt);
+            else addSystemMessage(txt);
+        });
     }
 
-    // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
-    async function authGuardAndLoad() {
-      // 1) تحقق من تسجيل الدخول
-      const meResp = await fetch("/api/auth/me");
-      if (!meResp.ok) {
-        // غير مسجل → روح لصفحة اللوجين
-        window.location.href = "/login.html";
-        return false;
-      }
-
-      // 2) حمّل الجلسة والرسائل المحفوظة
-      const chatResp = await fetch("/api/chat/current");
-      if (chatResp.ok) {
-        const data = await chatResp.json();
-        // لو فيه رسائل محفوظة، اعرضها بالترتيب
-        if (Array.isArray(data.messages)) {
-          renderPersistedMessages(data.messages);
+    function hydrateStateFromServer(state) {
+        if (!state) return;
+        if (state.sessionId && !sessionId) sessionId = state.sessionId;
+        if (state.lang) {
+            currentLang = state.lang;
+            switchLanguage(currentLang);
         }
-      }
-
-      return true;
-    }
-
-    // تعرض الرسائل المحفوظة باستخدام دوال العرض الحالية
-    function renderPersistedMessages(messages) {
-      (messages || []).forEach(m => {
-        const txt = (m?.content || "").toString();
-        if (!txt) return;
-        if ((m?.sender || "") === "user") addUserMessage(txt);
-        else addSystemMessage(txt);
-      });
+        if (state.currentStep) {
+            currentStep = state.currentStep;
+            if (currentStep === "assessment") updateProgress(1);
+            if (currentStep === "report" || currentStep === "teaching") updateProgress(2);
+        }
     }
 
 
