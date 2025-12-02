@@ -1,0 +1,19 @@
+{
+  "name": "learning-advisor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "db:init": "node server/db/init.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^9.0.1",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "express-session": "^1.18.2",
+    "openai": "^4.104.0",
+    "pg": "^8.16.3"
+  }
+}

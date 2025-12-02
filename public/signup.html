@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Learning Advisor – Sign up</title>
+
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- الأسلوب العام -->
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- تنسيق محلي محدود -->
+  <style>
+    .auth-wrap {
+      min-height: 88vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .auth-card {
+      width: 100%; max-width: 520px;
+      background: var(--card, #fff); border: 1px solid var(--border, #eee);
+      border-radius: var(--radius, 14px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      padding: 28px;
+    }
+    .auth-brand { display:flex; align-items:center; gap:10px; margin-bottom: 16px; }
+    .auth-brand img { height: 28px; }
+    .auth-title { margin: 0 0 18px 0; font-size: 22px; font-weight: 700; }
+    .auth-field { margin-bottom: 12px; }
+    .auth-field label { display:block; font-weight:600; margin-bottom:6px; }
+    .auth-field input {
+      width:100%; height:40px; padding:0 12px; border-radius:10px;
+      border:1px solid var(--border, #e5e7eb); outline: none;
+      background: var(--input-bg, #fff);
+    }
+    .auth-actions { margin-top: 14px; }
+    .auth-footer { margin-top: 10px; font-size: 14px; }
+    .auth-footer a { text-decoration: underline; }
+
+    .lang-ar .auth-card { direction: rtl; text-align: right; }
+    .lang-ar .auth-field input { text-align: right; }
+  </style>
+</head>
+
+<!-- جاهزة للهيدر الموحّد لاحقًا كـ public-auth -->
+<body data-header="public-auth">
+  <!-- لا هيدر الآن؛ هنضيف الهيدر الخفيف لاحقًا -->
+
+  <main class="auth-wrap">
+    <section class="auth-card">
+      <div class="auth-brand">
+        <img src="assets/imp-logo.jpeg" alt="IMP">
+      </div>
+
+      <h1 class="auth-title">
+        <span data-lang-content="en">Create an account</span>
+        <span class="hidden" data-lang-content="ar">إنشاء حساب</span>
+      </h1>
+
+      <form id="signupForm" novalidate>
+        <div class="auth-field">
+          <label>
+            <span data-lang-content="en">Full name</span>
+            <span class="hidden" data-lang-content="ar">الاسم الكامل</span>
+          </label>
+          <input type="text" name="name" required />
+        </div>
+
+        <div class="auth-field">
+          <label>
+            <span data-lang-content="en">Email</span>
+            <span class="hidden" data-lang-content="ar">البريد الإلكتروني</span>
+          </label>
+          <input type="email" name="email" required />
+        </div>
+
+        <div class="auth-field">
+          <label>
+            <span data-lang-content="en">Phone</span>
+            <span class="hidden" data-lang-content="ar">رقم الهاتف</span>
+          </label>
+          <input type="tel" name="phone" required />
+        </div>
+
+        <div class="auth-field">
+          <label>
+            <span data-lang-content="en">Password</span>
+            <span class="hidden" data-lang-content="ar">كلمة المرور</span>
+          </label>
+          <input type="password" name="password" required minlength="8" />
+        </div>
+
+        <div class="auth-field">
+          <label>
+            <span data-lang-content="en">Confirm password</span>
+            <span class="hidden" data-lang-content="ar">تأكيد كلمة المرور</span>
+          </label>
+          <input type="password" name="confirm" required minlength="8" />
+        </div>
+
+        <div class="auth-actions">
+          <button type="submit" class="cta-button" disabled>
+            <span data-lang-content="en">Create account</span>
+            <span class="hidden" data-lang-content="ar">إنشاء حساب</span>
+          </button>
+        </div>
+
+        <p class="auth-footer">
+          <span data-lang-content="en">Already have an account?</span>
+          <span class="hidden" data-lang-content="ar">لديك حساب بالفعل؟</span>
+          <a href="login.html">
+            <span data-lang-content="en">Log in</span>
+            <span class="hidden" data-lang-content="ar">سجّل الدخول</span>
+          </a>
+        </p>
+
+        <div style="margin-top:12px;">
+          <a href="index.html" class="cta-button secondary">
+            <span data-lang-content="en">Back to Home</span>
+            <span class="hidden" data-lang-content="ar">العودة للصفحة الرئيسية</span>
+          </a>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script src="js/common/header.js"></script>
+  <script src="js/common/i18n.js"></script>
+  <script src="/js/auth.js"></script>
+
+</body>
+</html>

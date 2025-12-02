@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Advisor - Assessment Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body data-header="public-home">
+
+    <!-- Landing Section -->
+    <section class="landing-section" id="landingSection">
+        <div class="container">
+            <div class="landing-content">
+                <!-- Logo Placeholder -->
+                <div class="logo-placeholder">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                
+                <!-- English Content -->
+                <div class="lang-content" data-lang-content="en">
+                    <h1 class="hero-title">Welcome! I'm your learning advisor.</h1>
+                    <p class="hero-subtitle">We'll assess your data-analysis level step by step, and you'll get a clear learning plan tailored to your goal.</p>
+                </div>
+                
+                <!-- Arabic Content -->
+                <div class="lang-content hidden" data-lang-content="ar">
+                    <h1 class="hero-title">مرحبًا بك! أنا مستشارك التعليمي.</h1>
+                    <p class="hero-subtitle">هدفي مساعدتك في تعلم تحليل البيانات، سنقيّم مستواك خطوة بخطوة، وفي النهاية ستحصل على خطة تعلم واضحة تناسب هدفك.</p>
+                </div>
+                
+                <div class="cta-buttons">
+  <a class="cta-button" id="loginBtn" href="login.html">
+    <span class="cta-text" data-lang-content="en">Login</span>
+    <span class="cta-text hidden" data-lang-content="ar">تسجيل الدخول</span>
+    <i class="fas fa-right-to-bracket"></i>
+  </a>
+  <a class="cta-button secondary" id="signupBtn" href="signup.html">
+    <span class="cta-text" data-lang-content="en">Sign up</span>
+    <span class="cta-text hidden" data-lang-content="ar">إنشاء حساب</span>
+    <i class="fas fa-user-plus"></i>
+  </a>
+</div>
+
+            </div>
+        </div>
+    </section>
+    <script src="js/common/i18n.js"></script>
+    <script src="js/common/header.js"></script>
+    
+</body>
+</html>
