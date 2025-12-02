@@ -1222,6 +1222,21 @@ app.get("/api/chat/current", requireAuth, async (req, res) => {
     [chatSession.id]
   );
 
+  let persistedMessages = msgs.rows || [];
+
+  // لو قاعدة البيانات راجعة فاضية لأي سبب، نستخدم النسخة المحفوظة في session_state
+  if (!persistedMessages.length && Array.isArray(state.messages)) {
+    persistedMessages = [...state.messages]
+      .filter(m => m && m.content)
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+      .map((m, idx) => ({
+        id: `state-${idx}`,
+        sender: m.sender || "assistant",
+        content: m.content,
+        created_at: m.ts ? new Date(m.ts).toISOString() : null,
+      }));
+  }
+
   res.json({
     session: {
       id: chatSession.id,
@@ -1231,7 +1246,7 @@ app.get("/api/chat/current", requireAuth, async (req, res) => {
       finished_at: chatSession.finished_at,
       state,
     },
-    messages: msgs.rows
+    messages: persistedMessages
   });
 });
 
