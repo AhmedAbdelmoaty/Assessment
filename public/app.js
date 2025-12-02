@@ -31,83 +31,171 @@
     const chatMessages = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput");
     const sendBtn = document.getElementById("sendBtn");
-    // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
-    async function authGuardAndLoad() {
-      // 1) تأكد المستخدم مسجّل (لو مش مسجّل → Login)
-      try {
-        const meResp = await fetch("/api/auth/me");
-        const me = await meResp.json();
-        if (!meResp.ok || !me?.ok || !me?.user) {
-          window.location.href = "/login.html";
-          return false;
+    function setSessionId(id) {
+        if (!id) return;
+        sessionId = id;
+        try {
+            localStorage.setItem("chatSessionId", id);
+        } catch (e) {
+            console.warn("Failed to persist sessionId", e);
         }
-        // طبّق اللغة المحفوظة (لو بتستخدم i18n.js)
-        if (window.LA_I18N && me.user.locale) {
-          window.LA_I18N.setLocale(me.user.locale);
-        }
-      } catch {
-        window.location.href = "/login.html";
-        return false;
-      }
+    }
 
-      // 2) حمّل الجلسة والرسائل المحفوظة
-      try {
-        const chatResp = await fetch("/api/chat/current");
-        if (chatResp.ok) {
-          const data = await chatResp.json();
-          if (Array.isArray(data.messages)) {
-            renderPersistedMessages(data.messages);
-            // لو السيرفر رجّع sessionId ممكن نخزّنه
-            if (data.session?.id && !sessionId) sessionId = data.session.id;
-          }
+    function getStoredSessionId() {
+        try {
+            return localStorage.getItem("chatSessionId");
+        } catch (e) {
+            return null;
         }
-      } catch (e) {
-        console.warn("Failed to load persisted chat:", e);
-      }
+    }
 
-      return true;
+    function parsePersistedContent(raw) {
+        if (typeof raw !== "string") return { _type: "text", text: "" };
+        try {
+            const obj = JSON.parse(raw);
+            if (obj && obj._type) return obj;
+        } catch (_) {
+            // plain text
+        }
+        return { _type: "text", text: raw };
     }
 
     function renderPersistedMessages(messages) {
-      (messages || []).forEach((m) => {
-        const txt = (m?.content || "").toString();
-        if (!txt) return;
-        if ((m?.sender || "") === "user") addUserMessage(txt);
-        else addSystemMessage(txt);
-      });
+        (messages || []).forEach((m) => {
+            const parsed = parsePersistedContent(m?.content || "");
+            if (parsed._type === "mcq" && parsed.payload) {
+                currentMCQ = parsed.payload;
+                addMCQQuestion(parsed.payload);
+                return;
+            }
+
+            const txt = (parsed.text || "").toString();
+            if (!txt) return;
+            if ((m?.sender || "") === "user") addUserMessage(txt);
+            else addSystemMessage(txt);
+        });
+
+        const mcqs = chatMessages.querySelectorAll(".mcq-container");
+        mcqs.forEach((el, idx) => {
+            if (idx !== mcqs.length - 1) {
+                el.classList.add("mcq-locked");
+            }
+        });
     }
 
-    // === AUTH GUARD + LOAD PERSISTED CHAT (NEW) ===
-    async function authGuardAndLoad() {
-      // 1) تحقق من تسجيل الدخول
-      const meResp = await fetch("/api/auth/me");
-      if (!meResp.ok) {
-        // غير مسجل → روح لصفحة اللوجين
-        window.location.href = "/login.html";
-        return false;
-      }
-
-      // 2) حمّل الجلسة والرسائل المحفوظة
-      const chatResp = await fetch("/api/chat/current");
-      if (chatResp.ok) {
-        const data = await chatResp.json();
-        // لو فيه رسائل محفوظة، اعرضها بالترتيب
-        if (Array.isArray(data.messages)) {
-          renderPersistedMessages(data.messages);
+    function renderPendingIntakeInteraction(step) {
+        if (!step) return;
+        removeInteractiveUI();
+        if (step.autoNext) {
+            (async () => {
+                showTypingIndicator();
+                try {
+                    const resp = await fetch("/api/intake/next", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            sessionId,
+                            lang: currentLang,
+                        }),
+                    });
+                    const nextData = await resp.json();
+                    hideTypingIndicator();
+                    renderIntakeStep(nextData);
+                } catch (err) {
+                    hideTypingIndicator();
+                    console.error("Failed to auto-advance intake", err);
+                }
+            })();
+            return;
         }
-      }
-
-      return true;
+        if (step.type === "chips" && step.options) {
+            addChoiceChips(step.options);
+        } else if (step.type === "country" && step.options) {
+            addDropdown(step.options);
+        }
     }
 
-    // تعرض الرسائل المحفوظة باستخدام دوال العرض الحالية
-    function renderPersistedMessages(messages) {
-      (messages || []).forEach(m => {
-        const txt = (m?.content || "").toString();
-        if (!txt) return;
-        if ((m?.sender || "") === "user") addUserMessage(txt);
-        else addSystemMessage(txt);
-      });
+    function applyStateFromServer(state) {
+        if (!state) return;
+        if (state.sessionId) setSessionId(state.sessionId);
+        currentStep = state.currentStep || currentStep;
+        if (state.lang) {
+            currentLang = state.lang;
+            switchLanguage(currentLang);
+        }
+
+        if (currentStep === "intake") {
+            if (state.pendingIntakeStep) {
+                renderPendingIntakeInteraction(state.pendingIntakeStep);
+            } else if (!chatMessages.children.length) {
+                startIntakeFlow();
+            }
+            return;
+        }
+
+        if (currentStep === "assessment" && state.assessment?.currentQuestion) {
+            if (!chatMessages.querySelector(".mcq-container")) {
+                currentMCQ = state.assessment.currentQuestion;
+                addMCQQuestion(currentMCQ);
+            }
+            return;
+        }
+
+        if (currentStep === "report" && state.report?.message) {
+            if (!chatMessages.textContent.includes(state.report.message)) {
+                addSystemMessage(state.report.message);
+            }
+            currentStep = "report";
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            return;
+        }
+
+        if (currentStep === "teaching") {
+            teachingActive = true;
+        }
+
+        if (currentStep !== "assessment") {
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+        }
+    }
+
+    // === AUTH GUARD + LOAD PERSISTED CHAT ===
+    async function authGuardAndLoad() {
+        try {
+            const meResp = await fetch("/api/auth/me");
+            if (!meResp.ok) {
+                window.location.href = "/login.html";
+                return false;
+            }
+            const me = await meResp.json();
+            const langFromProfile = me?.user?.locale;
+            if (window.LA_I18N && langFromProfile) {
+                window.LA_I18N.setLocale(langFromProfile);
+            }
+            if (langFromProfile) {
+                currentLang = langFromProfile;
+                switchLanguage(currentLang);
+            }
+        } catch (err) {
+            window.location.href = "/login.html";
+            return false;
+        }
+
+        try {
+            const chatResp = await fetch("/api/chat/current");
+            if (chatResp.ok) {
+                const data = await chatResp.json();
+                if (data.session?.id) setSessionId(data.session.id);
+                if (Array.isArray(data.messages)) {
+                    renderPersistedMessages(data.messages);
+                }
+                applyStateFromServer(data.state);
+            }
+        } catch (e) {
+            console.warn("Failed to load persisted chat:", e);
+        }
+
+        return true;
     }
 
 
@@ -133,8 +221,8 @@
       currentSection = "chat";
       updateProgress(0);
 
-      // لو ما عندناش sessionId من /api/chat/current نبدأ intake لتوليدها
-      if (!sessionId) {
+      // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
+      if (!chatMessages.children.length && currentStep === "intake") {
         startIntakeFlow();
       }
     })();
@@ -242,16 +330,20 @@
     async function startIntakeFlow() {
         showTypingIndicator();
         try {
+            const existingSession = sessionId || getStoredSessionId();
             const response = await fetch("/api/intake/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ lang: currentLang }),
+                body: JSON.stringify({
+                    lang: currentLang,
+                    sessionId: existingSession || undefined,
+                }),
             });
 
             const data = await response.json();
             console.log("[CLIENT] Initial intake response:", data);
 
-            sessionId = data.sessionId;
+            if (data.sessionId) setSessionId(data.sessionId);
             hideTypingIndicator();
 
             renderIntakeStep(data);
@@ -300,6 +392,7 @@
 
             const data = await response.json();
             console.log("[CLIENT] Intake response:", data);
+            if (data.sessionId) setSessionId(data.sessionId);
 
             hideTypingIndicator();
 
@@ -419,6 +512,8 @@
     }
 
     async function handleMCQSelection(choice) {
+        const container = choice.closest(".mcq-container");
+        if (container && container.classList.contains("mcq-locked")) return;
         // Visual feedback
         const siblings = choice.parentElement.querySelectorAll(".mcq-choice");
         siblings.forEach((c) => c.classList.remove("selected"));
