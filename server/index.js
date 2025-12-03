@@ -288,6 +288,7 @@ function createDefaultSessionState(sessionId, lang = "en") {
       currentQuestion: null,
       stemsCurrentAttempt: [],
       lastAttemptStems: {},
+      awaitingNextQuestion: false,
     },
     teaching: {
       mode: "idle",
@@ -526,6 +527,18 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
         const errorMessage =
           stepConfig.validation_error?.[lang] ||
           (lang === "ar" ? "يرجى إدخال إجابة صحيحة" : "Please enter a valid answer");
+        // احفظ رسالة الخطأ في السجل علشان تظهر بعد أي reload
+        await insertChatMessage(sessionId, "assistant", errorMessage);
+        // ثبّت الخطوة الحالية في الحالة علشان الواجهة ترجع تعرض نفس المدخلات
+        session.pendingIntakeStep = session.pendingIntakeStep || {
+          sessionId,
+          stepKey: currentStepKey,
+          type: stepConfig.type,
+          prompt: stepConfig.prompt?.[lang] || "",
+          options: stepConfig.options?.[lang] || null,
+          lang,
+        };
+        await persistSessionState(sessionId, session, { status: "intake" });
         return res.json({ error: true, message: errorMessage });
       }
       session.intake[currentStepKey] = answer;
@@ -692,6 +705,7 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       lang: session.lang || "en",
     };
 
+    A.awaitingNextQuestion = false;
     await persistSessionState(sessionId, session, { status: "assessment" });
     await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
     return res.json(mcqPayload);
@@ -773,6 +787,10 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
     }
 
     A.currentQuestion = null;
+    A.awaitingNextQuestion = ["continue", "advance", "retry_same_level"].includes(nextAction);
+    if (nextAction === "stop" || nextAction === "complete") {
+      A.awaitingNextQuestion = false;
+    }
     await persistSessionState(sessionId, session, { status: session.currentStep });
 
     return res.json({

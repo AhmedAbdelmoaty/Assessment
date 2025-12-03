@@ -141,6 +141,13 @@
             return;
         }
 
+        if (currentStep === "assessment" && state.assessment?.awaitingNextQuestion) {
+            if (!isProcessing) {
+                startAssessment();
+            }
+            return;
+        }
+
         if (currentStep === "report" && state.report?.message) {
             if (!chatMessages.textContent.includes(state.report.message)) {
                 addSystemMessage(state.report.message);
