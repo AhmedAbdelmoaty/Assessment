@@ -700,6 +700,7 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       choices: current.choices,
       correct_answer: "__hidden__",
       rationale: "",
+      qid: current.qid,
       questionNumber: question_index,
       totalQuestions: 2,
       lang: session.lang || "en",
@@ -718,7 +719,7 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
 app.post("/api/assess/answer", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
-    let { sessionId, userChoiceIndex } = req.body;
+    let { sessionId, userChoiceIndex, questionId = null } = req.body;
     const session = await getSession(sessionId, userId);
     const A = session.assessment;
 
@@ -727,6 +728,17 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
     }
 
     const q = A.currentQuestion;
+
+    if (questionId && q.qid && q.qid !== questionId) {
+      return res.status(409).json({
+        error: "stale_question",
+        message: "Stale question id",
+        currentQuestion: {
+          ...q,
+          correct_index: undefined,
+        },
+      });
+    }
 
     const isCorrect =
       Number.isInteger(userChoiceIndex) &&

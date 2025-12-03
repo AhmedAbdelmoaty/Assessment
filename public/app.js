@@ -83,6 +83,12 @@
         });
     }
 
+    function lockAllMCQs() {
+        document.querySelectorAll(".mcq-container").forEach((el) => {
+            el.classList.add("mcq-locked");
+        });
+    }
+
     function renderPendingIntakeInteraction(step) {
         if (!step) return;
         removeInteractiveUI();
@@ -142,8 +148,13 @@
         }
 
         if (currentStep === "assessment" && state.assessment?.awaitingNextQuestion) {
+            lockAllMCQs();
+            currentMCQ = null;
             if (!isProcessing) {
-                startAssessment();
+                isProcessing = true;
+                startAssessment().finally(() => {
+                    isProcessing = false;
+                });
             }
             return;
         }
@@ -521,6 +532,9 @@
     async function handleMCQSelection(choice) {
         const container = choice.closest(".mcq-container");
         if (container && container.classList.contains("mcq-locked")) return;
+        if (currentMCQ?.qid && container && container.dataset.qid && container.dataset.qid !== currentMCQ.qid) {
+            return; // سؤال قديم غير متزامن
+        }
         // Visual feedback
         const siblings = choice.parentElement.querySelectorAll(".mcq-choice");
         siblings.forEach((c) => c.classList.remove("selected"));
@@ -534,6 +548,11 @@
 
         // اللي يظهر للمستخدم في فقاعة الشات = نص الاختيار فقط (بدون A/B)
         addUserMessage(choiceLabelOnly);
+
+        // اقفل السؤال الحالي فورًا لتفادي ضغطات متكررة أو احتسابها على سؤال آخر
+        if (container) {
+            container.classList.add("mcq-locked");
+        }
 
         // اللي يتبعت للسيرفر = فهرس الاختيار فقط (رقم)
         await submitMCQAnswer(idx);
@@ -564,7 +583,13 @@
     }
 
     async function startAssessment() {
+        // قفل كل الأسئلة القديمة عشان ما تتضغطش أثناء التحميل
+        lockAllMCQs();
         showTypingIndicator();
+
+        // امنع أي تفاعل أثناء جلب السؤال الجديد
+        const prevProcessing = isProcessing;
+        isProcessing = true;
 
         try {
             const response = await fetch("/api/assess/next", {
@@ -587,6 +612,9 @@
                     : "Sorry, an error occurred during assessment.",
             );
         }
+
+        // رجع حالة المعالجة لما كانت عليه
+        isProcessing = prevProcessing;
     }
 
     async function submitMCQAnswer(userAnswer) {
@@ -602,11 +630,21 @@
                 body: JSON.stringify({
                     sessionId,
                     userChoiceIndex: userAnswer, // ← نبعت الفهرس فقط
+                    questionId: currentMCQ?.qid || null,
                 }),
             });
 
             const result = await response.json();
             hideTypingIndicator();
+
+            if (response.status === 409 && result?.error === "stale_question") {
+                lockAllMCQs();
+                if (result.currentQuestion) {
+                    currentMCQ = result.currentQuestion;
+                    addMCQQuestion(result.currentQuestion);
+                }
+                return;
+            }
 
             // لا نعرض "صح/غلط" للمستخدم؛ فقط نكمل التدفق
             if (result.nextAction === "complete") {
@@ -853,8 +891,14 @@
     }
 
     function addMCQQuestion(mcq) {
+        // اقفل أي أسئلة قديمة قبل عرض السؤال الجديد
+        lockAllMCQs();
+
         const container = document.createElement("div");
         container.className = "mcq-container";
+        if (mcq.qid) {
+            container.dataset.qid = mcq.qid;
+        }
 
         const levelNames = {
             L1:
