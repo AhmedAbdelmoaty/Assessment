@@ -661,7 +661,13 @@
             }
 
             if (!response.ok) {
-                throw new Error("answer failed");
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "السؤال الحالي غير متاح، سنجلب لك السؤال النشط الآن."
+                        : "The current question is not available; fetching the active one now."
+                );
+                await requestNextAssessmentQuestion();
+                return;
             }
 
             currentMCQ = currentMCQ

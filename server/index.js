@@ -751,7 +751,15 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
     const A = session.assessment;
 
     if (session.currentStep !== "assessment" || !A.currentQuestion) {
-      return res.status(400).json({ error: "No active question" });
+      return res.status(409).json({ error: "No active question" });
+    }
+
+    const { qid, answered } = A.currentQuestion;
+    if (!qid || A.currentQuestion.qid !== questionId) {
+      return res.status(409).json({ error: "Mismatched question" });
+    }
+    if (answered) {
+      return res.status(409).json({ error: "Question already answered" });
     }
 
     const { qid, answered } = A.currentQuestion;
