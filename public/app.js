@@ -10,6 +10,7 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
+    let assessmentRequestInFlight = false;
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -133,10 +134,17 @@
             return;
         }
 
-        if (currentStep === "assessment" && state.assessment?.currentQuestion) {
-            if (!chatMessages.querySelector(".mcq-container")) {
-                currentMCQ = state.assessment.currentQuestion;
-                addMCQQuestion(currentMCQ);
+        if (currentStep === "assessment") {
+            if (state.assessment?.currentQuestion) {
+                if (!chatMessages.querySelector(".mcq-container")) {
+                    currentMCQ = state.assessment.currentQuestion;
+                    addMCQQuestion(currentMCQ);
+                }
+                return;
+            }
+
+            if (state.assessment?.inProgress) {
+                requestNextAssessmentQuestion();
             }
             return;
         }
@@ -556,7 +564,9 @@
         isProcessing = false;
     }
 
-    async function startAssessment() {
+    async function requestNextAssessmentQuestion() {
+        if (assessmentRequestInFlight) return;
+        assessmentRequestInFlight = true;
         showTypingIndicator();
 
         try {
@@ -579,7 +589,13 @@
                     ? "عذراً، حدث خطأ في التقييم."
                     : "Sorry, an error occurred during assessment.",
             );
+        } finally {
+            assessmentRequestInFlight = false;
         }
+    }
+
+    async function startAssessment() {
+        await requestNextAssessmentQuestion();
     }
 
     async function submitMCQAnswer(userAnswer) {
