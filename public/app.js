@@ -65,6 +65,9 @@
         (messages || []).forEach((m) => {
             const parsed = parsePersistedContent(m?.content || "");
             if (parsed._type === "mcq" && parsed.payload) {
+                if (parsed.text) {
+                    addSystemMessage(parsed.text);
+                }
                 currentMCQ = parsed.payload;
                 addMCQQuestion(parsed.payload);
                 return;
