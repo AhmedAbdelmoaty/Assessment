@@ -62,11 +62,14 @@
     }
 
     function renderPersistedMessages(messages) {
+        let renderedCount = 0;
+
         (messages || []).forEach((m) => {
             const parsed = parsePersistedContent(m?.content || "");
             if (parsed._type === "mcq" && parsed.payload) {
                 currentMCQ = parsed.payload;
                 addMCQQuestion(parsed.payload);
+                renderedCount++;
                 return;
             }
 
@@ -74,6 +77,7 @@
             if (!txt) return;
             if ((m?.sender || "") === "user") addUserMessage(txt);
             else addSystemMessage(txt);
+            renderedCount++;
         });
 
         const mcqs = chatMessages.querySelectorAll(".mcq-container");
@@ -82,6 +86,8 @@
                 el.classList.add("mcq-locked");
             }
         });
+
+        return renderedCount > 0;
     }
 
     function renderPendingIntakeInteraction(step) {
@@ -201,7 +207,10 @@
         }
 
         try {
-            const chatResp = await fetch("/api/chat/current");
+            const storedSessionId = getStoredSessionId();
+            const chatResp = await fetch(
+                `/api/chat/current${storedSessionId ? `?sessionId=${storedSessionId}` : ""}`,
+            );
             if (chatResp.ok) {
                 const data = await chatResp.json();
                 if (data.session?.id) setSessionId(data.session.id);

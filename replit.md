@@ -101,3 +101,7 @@ Preferred communication style: Simple, everyday language.
 - clsx + tailwind-merge: Conditional className composition
 - cmdk: Command palette functionality
 - nanoid: Unique ID generation
+
+## Manual QA checklist
+
+- Intake validation: أدخل قيمة خاطئة في أول سؤال، تأكد أن رسالة الخطأ من المساعد تظهر في الشات، ثم أعد تحميل الصفحة وتحقق أن نفس الرسالة تظهر فور التحميل بدون بدء تدفق جديد.

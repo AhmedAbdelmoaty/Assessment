@@ -540,6 +540,20 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
         const errorMessage =
           stepConfig.validation_error?.[lang] ||
           (lang === "ar" ? "يرجى إدخال إجابة صحيحة" : "Please enter a valid answer");
+
+        const payload = {
+          sessionId,
+          stepKey: currentStepKey,
+          type: stepConfig.type,
+          prompt: stepConfig.prompt[lang],
+          options: stepConfig.options?.[lang] || null,
+          lang,
+          autoNext: stepConfig.autoNext || false,
+        };
+
+        session.pendingIntakeStep = payload;
+        await persistSessionState(sessionId, session, { status: "intake" });
+        await insertChatMessage(sessionId, "assistant", errorMessage);
         return res.json({ error: true, message: errorMessage });
       }
       session.intake[currentStepKey] = answer;
@@ -1278,7 +1292,8 @@ app.post("/api/teach/message", requireAuth, async (req, res) => {
 // ===== [ADDED] GET /api/chat/current — محمية =====
 app.get("/api/chat/current", requireAuth, async (req, res) => {
   const uid = req.session.userId;
-  const chatSession = await getOrCreateCurrentChatSession(uid);
+  const requestedSessionId = req.query?.sessionId || null;
+  const chatSession = await getOrCreateCurrentChatSession(uid, requestedSessionId);
   const state = await getSession(chatSession.id, uid);
 
   const msgs = await pool.query(
