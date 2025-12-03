@@ -286,6 +286,8 @@ function createDefaultSessionState(sessionId, lang = "en") {
       questionIndexInAttempt: 1,
       usedClustersCurrentAttempt: [],
       currentQuestion: null,
+      inProgress: false,
+      completed: false,
       stemsCurrentAttempt: [],
       lastAttemptStems: {},
     },
@@ -324,6 +326,18 @@ async function getSession(sessionId, userId = null) {
     ...loaded,
     sessionId,
   };
+
+  // لو الحالة تشير أننا في التقييم لكن العلم غير محفوظ، فعل العلم تلقائيًا
+  if (normalized.currentStep === "assessment") {
+    normalized.assessment = normalized.assessment || {};
+    if (normalized.assessment.inProgress === undefined) {
+      normalized.assessment.inProgress = true;
+    }
+    if (normalized.assessment.completed === undefined) {
+      normalized.assessment.completed = false;
+    }
+  }
+
   sessions.set(sessionId, normalized);
   return normalized;
 }
@@ -537,6 +551,9 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
       session.pendingIntakeStep = null;
+      session.assessment = session.assessment || {};
+      session.assessment.inProgress = true;
+      session.assessment.completed = false;
       await persistSessionState(sessionId, session, { status: "assessment", intakeDone: true });
       await insertChatMessage(
         sessionId,
@@ -615,6 +632,8 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     session.currentStep = "assessment";
 
     const A = session.assessment;
+    A.inProgress = true;
+    A.completed = false;
 
     const profile = {
       job_nature: session.intake.job_nature || "",
@@ -772,6 +791,8 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
       }
     }
 
+    A.inProgress = session.currentStep === "assessment";
+    A.completed = session.currentStep !== "assessment";
     A.currentQuestion = null;
     await persistSessionState(sessionId, session, { status: session.currentStep });
 
