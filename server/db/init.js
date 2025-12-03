@@ -74,6 +74,7 @@ async function run() {
         teaching_state JSONB,
         session_state JSONB,
         started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         finished_at TIMESTAMPTZ
       );
       CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id);
