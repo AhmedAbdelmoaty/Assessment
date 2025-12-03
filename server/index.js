@@ -762,6 +762,14 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
       return res.status(409).json({ error: "Question already answered" });
     }
 
+    const { qid, answered } = A.currentQuestion;
+    if (!qid || A.currentQuestion.qid !== questionId) {
+      return res.status(409).json({ error: "Mismatched question" });
+    }
+    if (answered) {
+      return res.status(409).json({ error: "Question already answered" });
+    }
+
     const q = A.currentQuestion;
 
     const isCorrect =
