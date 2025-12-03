@@ -635,6 +635,26 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     A.inProgress = true;
     A.completed = false;
 
+    if (A.currentQuestion && !A.currentQuestion.answered) {
+      const existing = A.currentQuestion;
+      const payload = {
+        kind: "question",
+        level: existing.level,
+        cluster: existing.cluster,
+        prompt: existing.prompt,
+        choices: existing.choices,
+        correct_answer: "__hidden__",
+        rationale: "",
+        questionNumber: A.questionIndexInAttempt || 1,
+        totalQuestions: 2,
+        lang: session.lang || "en",
+        qid: existing.qid,
+        answered: !!existing.answered,
+        userChoiceIndex: existing.userChoiceIndex,
+      };
+      return res.json(payload);
+    }
+
     const profile = {
       job_nature: session.intake.job_nature || "",
       experience_years_band: session.intake.experience_years_band || "",
@@ -684,6 +704,7 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       choices: newChoices,
       correct_index: newCorrectIndex,
       qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      answered: false,
     };
     A.currentQuestion = current;
 
@@ -709,6 +730,8 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       questionNumber: question_index,
       totalQuestions: 2,
       lang: session.lang || "en",
+      qid: current.qid,
+      answered: !!current.answered,
     };
 
     await persistSessionState(sessionId, session, { status: "assessment" });
@@ -723,12 +746,20 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
 app.post("/api/assess/answer", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
-    let { sessionId, userChoiceIndex } = req.body;
+    let { sessionId, userChoiceIndex, questionId } = req.body;
     const session = await getSession(sessionId, userId);
     const A = session.assessment;
 
     if (session.currentStep !== "assessment" || !A.currentQuestion) {
       return res.status(400).json({ error: "No active question" });
+    }
+
+    const { qid, answered } = A.currentQuestion;
+    if (!qid || A.currentQuestion.qid !== questionId) {
+      return res.status(409).json({ error: "Mismatched question" });
+    }
+    if (answered) {
+      return res.status(409).json({ error: "Question already answered" });
     }
 
     const q = A.currentQuestion;
@@ -793,7 +824,7 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
 
     A.inProgress = session.currentStep === "assessment";
     A.completed = session.currentStep !== "assessment";
-    A.currentQuestion = null;
+    A.currentQuestion = { ...q, answered: true, userChoiceIndex };
     await persistSessionState(sessionId, session, { status: session.currentStep });
 
     return res.json({
