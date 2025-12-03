@@ -540,7 +540,18 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
         const errorMessage =
           stepConfig.validation_error?.[lang] ||
           (lang === "ar" ? "يرجى إدخال إجابة صحيحة" : "Please enter a valid answer");
-        return res.json({ error: true, message: errorMessage });
+        const payload = {
+          sessionId,
+          stepKey: currentStepKey,
+          type: stepConfig.type,
+          prompt: stepConfig.prompt[lang],
+          options: stepConfig.options?.[lang] || null,
+          lang,
+        };
+        session.pendingIntakeStep = payload;
+        await persistSessionState(sessionId, session, { status: "intake" });
+        await insertChatMessage(sessionId, "assistant", errorMessage);
+        return res.json({ error: true, message: errorMessage, sessionId });
       }
       session.intake[currentStepKey] = answer;
       session.intakeStepIndex++;
