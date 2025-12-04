@@ -612,27 +612,9 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     sessionId = chatSession.id;
 
     const session = await getSession(sessionId, userId);
-    const A = session.assessment;
-
-    if (A?.currentQuestion) {
-      const existing = A.currentQuestion;
-      const mcqPayload = {
-        kind: "question",
-        level: existing.level || A.currentLevel,
-        cluster: existing.cluster,
-        prompt: existing.prompt,
-        choices: existing.choices,
-        correct_answer: "__hidden__",
-        rationale: "",
-        questionNumber: A.questionIndexInAttempt || 1,
-        totalQuestions: 2,
-        lang: session.lang || "en",
-      };
-
-      return res.json(mcqPayload);
-    }
-
     session.currentStep = "assessment";
+
+    const A = session.assessment;
 
     const profile = {
       job_nature: session.intake.job_nature || "",
