@@ -342,6 +342,81 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
   return queue;
 }
 
+function computeAssessmentScore(evidence = []) {
+  const levels = ["L1", "L2", "L3"];
+  let correctCount = 0;
+  const levelBreakdown = {};
+
+  for (const lvl of levels) {
+    const entries = (evidence || []).filter((e) => e && e.level === lvl);
+    if (!entries.length) {
+      levelBreakdown[lvl] = { total: 0, correct: 0 };
+      continue;
+    }
+
+    const attempts = [];
+    let bucket = [];
+    for (const e of entries) {
+      bucket.push(e);
+      if (bucket.length === 2) {
+        attempts.push(bucket);
+        bucket = [];
+      }
+    }
+    if (bucket.length) attempts.push(bucket);
+
+    const finalAttempt = attempts[attempts.length - 1] || [];
+    const lvlCorrect = finalAttempt.filter((e) => e.correct).length;
+    correctCount += lvlCorrect;
+    levelBreakdown[lvl] = { total: finalAttempt.length, correct: lvlCorrect };
+  }
+
+  const percent = Math.round((correctCount / 6) * 100);
+  return { correctCount, percent, levelBreakdown };
+}
+
+async function upsertAssessmentRecord(userId, sessionId, evidence = []) {
+  if (!userId || !sessionId) return null;
+  const { correctCount, percent, levelBreakdown } = computeAssessmentScore(evidence);
+
+  const payload = {
+    L1: levelBreakdown.L1 || { total: 0, correct: 0 },
+    L2: levelBreakdown.L2 || { total: 0, correct: 0 },
+    L3: levelBreakdown.L3 || { total: 0, correct: 0 },
+  };
+
+  const res = await pool.query(
+    `INSERT INTO assessments (id, user_id, chat_session_id, correct_count, percent, levels_summary, finished_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now())
+     ON CONFLICT (chat_session_id)
+     DO UPDATE SET correct_count=EXCLUDED.correct_count, percent=EXCLUDED.percent, levels_summary=EXCLUDED.levels_summary, finished_at=EXCLUDED.finished_at
+     RETURNING *`,
+    [userId, sessionId, correctCount, percent, payload]
+  );
+
+  return res.rows[0];
+}
+
+async function recordTutorialSession(sessionId, userId, sessionState = null) {
+  if (!sessionId || !userId) return;
+  try {
+    const teachingState = sessionState?.teaching || sessionState?.teaching_state || {};
+    const hasTranscript = Array.isArray(teachingState?.transcript) && teachingState.transcript.length > 0;
+    const mode = teachingState?.mode || sessionState?.currentStep;
+    if (!hasTranscript && mode !== "teaching") return;
+
+    await pool.query(
+      `INSERT INTO tutorials (id, user_id, chat_session_id, deleted, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, FALSE, now(), now())
+       ON CONFLICT (chat_session_id)
+       DO UPDATE SET deleted=FALSE, updated_at=now()` ,
+      [userId, sessionId]
+    );
+  } catch (err) {
+    console.warn("recordTutorialSession failed", err?.message || err);
+  }
+}
+
 // ===== In-memory + DB-backed session state =====
 function createDefaultSessionState(sessionId, lang = "en", overrides = {}) {
   const base = {
@@ -672,6 +747,14 @@ async function insertChatMessage(sessionId, sender, content) {
 async function endChatSession(sessionId, userId) {
   if (!sessionId) return;
   try {
+    let stateRow = null;
+    try {
+      const { rows } = await pool.query(`SELECT session_state FROM chat_sessions WHERE id=$1 AND user_id=$2 LIMIT 1`, [sessionId, userId]);
+      stateRow = rows[0]?.session_state || sessions.get(sessionId);
+    } catch (_) {}
+
+    await recordTutorialSession(sessionId, userId, stateRow || sessions.get(sessionId));
+
     await pool.query(
       `UPDATE chat_sessions
        SET status='ended', finished_at=now(), updated_at=now()
@@ -1098,6 +1181,12 @@ app.post("/api/report", requireAuth, async (req, res) => {
     session.finished = true;
     session.currentStep = "report";
 
+    try {
+      await upsertAssessmentRecord(userId, sessionId, evidence);
+    } catch (err) {
+      console.warn("Failed to upsert assessment", err?.message || err);
+    }
+
     await persistSessionState(sessionId, session, { status: "report", reportState: report });
     await insertChatMessage(sessionId, "assistant", report.message || "");
 
@@ -1182,6 +1271,7 @@ app.post("/api/teach/start", requireAuth, async (req, res) => {
 
     logTeach("start.data", { sessionId, lang: teaching.lang, first });
     await persistSessionState(sessionId, session, { status: "teaching", teachingState: teaching });
+    try { await recordTutorialSession(sessionId, userId, session); } catch (_) {}
 
     // ===== [ADDED] اربط برسميًا chat_session في DB (لو المستخدم مسجل) =====
     let dbChatSession = null;
@@ -1434,6 +1524,193 @@ app.post("/api/chat/new", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("/api/chat/new error", err?.message || err);
     return res.status(500).json({ error: true, message: "Failed to start new assessment" });
+  }
+});
+
+async function fetchDashboardProfile(userId) {
+  const { rows } = await pool.query(
+    "SELECT id, name, email, phone, locale FROM users WHERE id=$1 LIMIT 1",
+    [userId]
+  );
+  return { user: rows[0] || null, intake: await loadUserIntakeProfile(userId) };
+}
+
+async function applyProfileToActiveSession(userId, intakeProfile = null, locale = null) {
+  const { rows } = await pool.query(
+    `SELECT id FROM chat_sessions WHERE user_id=$1 AND status <> 'ended' ORDER BY started_at DESC LIMIT 1`,
+    [userId]
+  );
+  const activeId = rows[0]?.id;
+  if (!activeId) return;
+  try {
+    const session = await getSession(activeId, userId);
+    if (intakeProfile) {
+      session.intake = { ...session.intake, ...intakeProfile };
+      session.intakeStepIndex = INTAKE_ORDER.length;
+      session.currentStep = session.currentStep === "intake" ? "assessment" : session.currentStep;
+    }
+    if (locale) session.lang = locale;
+    await persistSessionState(activeId, session, { status: session.currentStep });
+  } catch (err) {
+    console.warn("applyProfileToActiveSession failed", err?.message || err);
+  }
+}
+
+app.get("/api/dashboard/profile", requireAuth, async (req, res) => {
+  try {
+    const data = await fetchDashboardProfile(req.session.userId);
+    res.json(data);
+  } catch (err) {
+    console.error("dashboard/profile", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.put("/api/dashboard/profile", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { name, email, phone, locale, intake } = req.body || {};
+
+    if (name || email || phone || locale) {
+      await pool.query(
+        `UPDATE users SET
+           name=COALESCE($1, name),
+           email=COALESCE($2, email),
+           phone=COALESCE($3, phone),
+           locale=COALESCE($4, locale)
+         WHERE id=$5`,
+        [name || null, email || null, phone || null, locale || null, userId]
+      );
+    }
+
+    if (intake) {
+      await saveUserIntakeProfile(userId, intake);
+    }
+
+    await applyProfileToActiveSession(userId, intake || null, locale || null);
+
+    const data = await fetchDashboardProfile(userId);
+    res.json({ saved: true, ...data });
+  } catch (err) {
+    console.error("dashboard/profile update", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.get("/api/dashboard/assessments", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const sort = (req.query?.sort || "newest").toString();
+    const order = {
+      newest: "finished_at DESC",
+      oldest: "finished_at ASC",
+      highest: "percent DESC",
+      lowest: "percent ASC",
+    }[sort] || "finished_at DESC";
+
+    const { rows } = await pool.query(
+      `SELECT id, chat_session_id, correct_count, percent, levels_summary, finished_at
+       FROM assessments
+       WHERE user_id=$1
+       ORDER BY ${order}`,
+      [userId]
+    );
+    res.json({ items: rows });
+  } catch (err) {
+    console.error("dashboard/assessments", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.get("/api/dashboard/tutorials", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const sort = (req.query?.sort || "newest").toString();
+    const order = sort === "oldest" ? "created_at ASC" : "created_at DESC";
+    const { rows } = await pool.query(
+      `SELECT t.chat_session_id, t.created_at, t.updated_at, cs.finished_at
+       FROM tutorials t
+       JOIN chat_sessions cs ON cs.id = t.chat_session_id
+       WHERE t.user_id=$1 AND t.deleted=FALSE
+       ORDER BY ${order}`,
+      [userId]
+    );
+    res.json({ items: rows });
+  } catch (err) {
+    console.error("dashboard/tutorials", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.get("/api/dashboard/tutorials/:sessionId", requireAuth, async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId;
+    const userId = req.session.userId;
+
+    const owner = await pool.query(
+      `SELECT 1 FROM tutorials WHERE chat_session_id=$1 AND user_id=$2 AND deleted=FALSE LIMIT 1`,
+      [sessionId, userId]
+    );
+    if (!owner.rows[0]) return res.status(404).json({ error: true });
+
+    const msgs = await pool.query(
+      `SELECT sender, content, created_at
+       FROM chat_messages
+       WHERE chat_session_id=$1
+       ORDER BY created_at ASC`,
+      [sessionId]
+    );
+    res.json({ messages: msgs.rows });
+  } catch (err) {
+    console.error("dashboard/tutorial detail", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.delete("/api/dashboard/tutorials/:sessionId", requireAuth, async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId;
+    const userId = req.session.userId;
+    await pool.query(
+      `UPDATE tutorials SET deleted=TRUE, updated_at=now() WHERE chat_session_id=$1 AND user_id=$2`,
+      [sessionId, userId]
+    );
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error("dashboard/tutorial delete", err?.message || err);
+    res.status(500).json({ error: true });
+  }
+});
+
+app.get("/api/dashboard/overview", requireAuth, async (req, res) => {
+  try {
+    const [profile, assessments, tutorials] = await Promise.all([
+      fetchDashboardProfile(req.session.userId),
+      (async () => {
+        const { rows } = await pool.query(
+          `SELECT id, chat_session_id, correct_count, percent, levels_summary, finished_at
+           FROM assessments
+           WHERE user_id=$1
+           ORDER BY finished_at DESC`,
+          [req.session.userId]
+        );
+        return rows;
+      })(),
+      (async () => {
+        const { rows } = await pool.query(
+          `SELECT chat_session_id, created_at, updated_at, deleted FROM tutorials
+           WHERE user_id=$1 AND deleted=FALSE
+           ORDER BY created_at DESC`,
+          [req.session.userId]
+        );
+        return rows;
+      })(),
+    ]);
+
+    res.json({ ...profile, assessments, tutorials });
+  } catch (err) {
+    console.error("dashboard/overview", err?.message || err);
+    res.status(500).json({ error: true });
   }
 });
 

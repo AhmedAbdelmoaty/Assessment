@@ -100,6 +100,17 @@ async function run() {
       );
       CREATE INDEX IF NOT EXISTS idx_assessments_session ON assessments(chat_session_id);
 
+      CREATE TABLE IF NOT EXISTS tutorials (
+        id UUID PRIMARY KEY DEFAULT ${uuidFn},
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (chat_session_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tutorials_user ON tutorials(user_id, created_at DESC);
+
       CREATE TABLE IF NOT EXISTS idempotency_ops (
         id UUID PRIMARY KEY DEFAULT ${uuidFn},
         chat_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
