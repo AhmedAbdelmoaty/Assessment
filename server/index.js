@@ -62,9 +62,6 @@ const openai = new OpenAI({
     "default_key",
 });
 
-// تخزين وعود بناء الأسئلة لكل جلسة حتى لا نكرر الإنشاء لنفس السؤال
-const assessmentGenerationTasks = new Map();
-
 // ===== Assistants config (كما هو) =====
 const TEACH_ASSISTANT_ID = process.env.TEACH_ASSISTANT_ID || "";
 const TEACH_VECTOR_STORE_ID = process.env.TEACH_VECTOR_STORE_ID || "";
@@ -288,7 +285,6 @@ function createDefaultSessionState(sessionId, lang = "en") {
       evidence: [],
       questionIndexInAttempt: 1,
       usedClustersCurrentAttempt: [],
-      generatingQuestion: false,
       currentQuestion: null,
       stemsCurrentAttempt: [],
       lastAttemptStems: {},
@@ -616,152 +612,91 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     sessionId = chatSession.id;
 
     const session = await getSession(sessionId, userId);
-    session.assessment = session.assessment || {};
+    session.currentStep = "assessment";
+
     const A = session.assessment;
 
-    if (assessmentGenerationTasks.has(sessionId)) {
-      try {
-        const pending = await assessmentGenerationTasks.get(sessionId);
-        return res.json(pending);
-      } catch (pendingErr) {
-        console.error("Assessment generation pending task failed:", pendingErr);
-        assessmentGenerationTasks.delete(sessionId);
+    const profile = {
+      job_nature: session.intake.job_nature || "",
+      experience_years_band: session.intake.experience_years_band || "",
+      job_title_exact: session.intake.job_title_exact || "",
+      sector: session.intake.sector || "",
+      learning_reason: session.intake.learning_reason || "",
+    };
+
+    const attempt_type = A.attempts === 0 ? "first" : "retry";
+    const question_index = A.questionIndexInAttempt || 1;
+    const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
+    const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems[A.currentLevel] || []) : [];
+
+    const systemPrompt = getQuestionPromptSingle({
+      lang: session.lang,
+      level: A.currentLevel,
+      profile,
+      attempt_type,
+      question_index,
+      used_clusters_current_attempt,
+      avoid_stems,
+    });
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "system", content: systemPrompt }],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      top_p: 1,
+      max_completion_tokens: 2048,
+    });
+
+    const q = JSON.parse(response.choices[0].message.content);
+
+    if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
+      console.error("Invalid question schema from model:", q);
+      return res.status(500).json({ error: "Invalid question format from model" });
+    }
+
+    const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
+
+    const current = {
+      level: q.level || A.currentLevel,
+      cluster: q.cluster,
+      difficulty: q.difficulty || (question_index === 1 ? "easy" : "harder"),
+      prompt: q.prompt,
+      choices: newChoices,
+      correct_index: newCorrectIndex,
+      qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    };
+    A.currentQuestion = current;
+
+    if (attempt_type === "first") {
+      A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
+      A.stemsCurrentAttempt.push(current.prompt);
+    }
+
+    if (question_index === 1 && current.cluster) {
+      if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
+        A.usedClustersCurrentAttempt.push(current.cluster);
       }
     }
 
-    if (A.currentQuestion) {
-      const existing = A.currentQuestion;
-      const mcqPayload = {
-        kind: "question",
-        level: existing.level || A.currentLevel,
-        cluster: existing.cluster,
-        prompt: existing.prompt,
-        choices: existing.choices,
-        correct_answer: "__hidden__",
-        rationale: "",
-        questionNumber: A.questionIndexInAttempt || 1,
-        totalQuestions: 2,
-        lang: session.lang || "en",
-        qid: existing.qid,
-      };
+    const mcqPayload = {
+      kind: "question",
+      level: current.level,
+      cluster: current.cluster,
+      prompt: current.prompt,
+      choices: current.choices,
+      correct_answer: "__hidden__",
+      rationale: "",
+      questionNumber: question_index,
+      totalQuestions: 2,
+      lang: session.lang || "en",
+    };
 
-      return res.json(mcqPayload);
-    }
-
-    if (A.generatingQuestion) {
-      console.warn(`Stale generatingQuestion flag for session ${sessionId}, resetting.`);
-      A.generatingQuestion = false;
-    }
-
-    const generationPromise = (async () => {
-      try {
-        session.currentStep = "assessment";
-        A.generatingQuestion = true;
-        await persistSessionState(sessionId, session, { status: "assessment" });
-
-        const profile = {
-          job_nature: session.intake.job_nature || "",
-          experience_years_band: session.intake.experience_years_band || "",
-          job_title_exact: session.intake.job_title_exact || "",
-          sector: session.intake.sector || "",
-          learning_reason: session.intake.learning_reason || "",
-        };
-
-        const attempt_type = A.attempts === 0 ? "first" : "retry";
-        const question_index = A.questionIndexInAttempt || 1;
-        const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
-        const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems?.[A.currentLevel] || []) : [];
-
-        const systemPrompt = getQuestionPromptSingle({
-          lang: session.lang,
-          level: A.currentLevel,
-          profile,
-          attempt_type,
-          question_index,
-          used_clusters_current_attempt,
-          avoid_stems,
-        });
-
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [{ role: "system", content: systemPrompt }],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-          top_p: 1,
-          max_completion_tokens: 2048,
-        });
-
-        const q = JSON.parse(response.choices[0].message.content);
-
-        if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
-          console.error("Invalid question schema from model:", q);
-          throw new Error("Invalid question format from model");
-        }
-
-        const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
-
-        const current = {
-          level: q.level || A.currentLevel,
-          cluster: q.cluster,
-          difficulty: q.difficulty || (question_index === 1 ? "easy" : "harder"),
-          prompt: q.prompt,
-          choices: newChoices,
-          correct_index: newCorrectIndex,
-          qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        };
-        A.currentQuestion = current;
-
-        if (attempt_type === "first") {
-          A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
-          A.stemsCurrentAttempt.push(current.prompt);
-        }
-
-        if (question_index === 1 && current.cluster) {
-          if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
-            A.usedClustersCurrentAttempt.push(current.cluster);
-          }
-        }
-
-        const mcqPayload = {
-          kind: "question",
-          level: current.level,
-          cluster: current.cluster,
-          prompt: current.prompt,
-          choices: current.choices,
-          correct_answer: "__hidden__",
-          rationale: "",
-          questionNumber: question_index,
-          totalQuestions: 2,
-          lang: session.lang || "en",
-          qid: current.qid,
-        };
-
-        A.generatingQuestion = false;
-        await persistSessionState(sessionId, session, { status: "assessment" });
-        await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
-
-        return mcqPayload;
-      } catch (err) {
-        A.generatingQuestion = false;
-        await persistSessionState(sessionId, session, { status: session.currentStep || "assessment" });
-        throw err;
-      }
-    })();
-
-    assessmentGenerationTasks.set(sessionId, generationPromise);
-    generationPromise.finally(() => assessmentGenerationTasks.delete(sessionId));
-
-    const mcqPayload = await generationPromise;
+    await persistSessionState(sessionId, session, { status: "assessment" });
+    await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
     return res.json(mcqPayload);
   } catch (err) {
     console.error("Assessment next error:", err);
-    try {
-      const { sessionId } = req.body || {};
-      const session = sessionId ? await getSession(sessionId, req.session.userId) : null;
-      if (session?.assessment) {
-        session.assessment.generatingQuestion = false;
-      }
-    } catch {}
     res.status(500).json({ error: "Server error during assessment" });
   }
 });
@@ -838,7 +773,6 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
     }
 
     A.currentQuestion = null;
-    A.generatingQuestion = false;
     await persistSessionState(sessionId, session, { status: session.currentStep });
 
     return res.json({
