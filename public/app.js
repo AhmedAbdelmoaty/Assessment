@@ -10,7 +10,6 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
-    let assessmentRequestInFlight = false;
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -134,28 +133,10 @@
             return;
         }
 
-        if (currentStep === "assessment") {
-            const serverQ = state.assessment?.currentQuestion;
-            if (serverQ) {
-                currentMCQ = serverQ;
-                const existingContainer = serverQ.qid
-                    ? chatMessages.querySelector(`.mcq-container[data-qid="${serverQ.qid}"]`)
-                    : chatMessages.querySelector(".mcq-container:last-of-type");
-
-                if (!existingContainer) {
-                    addMCQQuestion(serverQ);
-                } else if (serverQ.answered) {
-                    lockMCQ(existingContainer, serverQ.userChoiceIndex);
-                }
-
-                if (serverQ.answered && state.assessment?.inProgress) {
-                    requestNextAssessmentQuestion();
-                }
-                return;
-            }
-
-            if (state.assessment?.inProgress) {
-                requestNextAssessmentQuestion();
+        if (currentStep === "assessment" && state.assessment?.currentQuestion) {
+            if (!chatMessages.querySelector(".mcq-container")) {
+                currentMCQ = state.assessment.currentQuestion;
+                addMCQQuestion(currentMCQ);
             }
             return;
         }
@@ -533,12 +514,6 @@
     async function handleMCQSelection(choice) {
         const container = choice.closest(".mcq-container");
         if (container && container.classList.contains("mcq-locked")) return;
-
-        const qid = container?.getAttribute("data-qid") || null;
-        if (!currentMCQ || (currentMCQ.qid && qid && currentMCQ.qid !== qid)) {
-            return;
-        }
-        if (currentMCQ && currentMCQ.answered) return;
         // Visual feedback
         const siblings = choice.parentElement.querySelectorAll(".mcq-choice");
         siblings.forEach((c) => c.classList.remove("selected"));
@@ -581,9 +556,7 @@
         isProcessing = false;
     }
 
-    async function requestNextAssessmentQuestion() {
-        if (assessmentRequestInFlight) return;
-        assessmentRequestInFlight = true;
+    async function startAssessment() {
         showTypingIndicator();
 
         try {
@@ -593,26 +566,11 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            if (!response.ok) {
-                throw new Error(`status ${response.status}`);
-            }
-
             const mcq = await response.json();
             currentMCQ = mcq;
 
             hideTypingIndicator();
-
-            const existing = mcq.qid
-                ? chatMessages.querySelector(`.mcq-container[data-qid="${mcq.qid}"]`)
-                : null;
-
-            if (existing) {
-                if (mcq.answered) {
-                    lockMCQ(existing, mcq.userChoiceIndex);
-                }
-            } else {
-                addMCQQuestion(mcq);
-            }
+            addMCQQuestion(mcq);
         } catch (error) {
             console.error("Error getting assessment question:", error);
             hideTypingIndicator();
@@ -621,13 +579,7 @@
                     ? "عذراً، حدث خطأ في التقييم."
                     : "Sorry, an error occurred during assessment.",
             );
-        } finally {
-            assessmentRequestInFlight = false;
         }
-    }
-
-    async function startAssessment() {
-        await requestNextAssessmentQuestion();
     }
 
     async function submitMCQAnswer(userAnswer) {
@@ -642,42 +594,12 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     sessionId,
-                    questionId: currentMCQ?.qid,
                     userChoiceIndex: userAnswer, // ← نبعت الفهرس فقط
                 }),
             });
 
             const result = await response.json();
             hideTypingIndicator();
-
-            if (response.status === 409) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "السؤال تغيّر، سنجلب السؤال الحالي لك."
-                        : "The active question changed. Fetching the current one."
-                );
-                await requestNextAssessmentQuestion();
-                return;
-            }
-
-            if (!response.ok) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "السؤال الحالي غير متاح، سنجلب لك السؤال النشط الآن."
-                        : "The current question is not available; fetching the active one now."
-                );
-                await requestNextAssessmentQuestion();
-                return;
-            }
-
-            currentMCQ = currentMCQ
-                ? { ...currentMCQ, answered: true, userChoiceIndex: userAnswer }
-                : null;
-
-            const activeMCQ = chatMessages.querySelector(".mcq-container:last-of-type");
-            if (activeMCQ) {
-                lockMCQ(activeMCQ, userAnswer);
-            }
 
             // لا نعرض "صح/غلط" للمستخدم؛ فقط نكمل التدفق
             if (result.nextAction === "complete") {
@@ -923,21 +845,9 @@
         scrollToBottom();
     }
 
-    function lockMCQ(container, selectedIdx) {
-        container.classList.add("mcq-locked");
-        if (selectedIdx === undefined || selectedIdx === null) return;
-        const choiceEl = container.querySelector(
-            `.mcq-choice[data-idx="${selectedIdx}"]`
-        );
-        if (choiceEl) {
-            choiceEl.classList.add("selected");
-        }
-    }
-
     function addMCQQuestion(mcq) {
         const container = document.createElement("div");
         container.className = "mcq-container";
-        if (mcq.qid) container.setAttribute("data-qid", mcq.qid);
 
         const levelNames = {
             L1:
@@ -986,9 +896,6 @@ ${mcq.choices
         });
 
         chatMessages.appendChild(container);
-        if (mcq.answered) {
-            lockMCQ(container, mcq.userChoiceIndex);
-        }
         scrollToBottom();
     }
 
