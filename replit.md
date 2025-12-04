@@ -10,12 +10,6 @@ The platform uses an adaptive assessment engine that dynamically adjusts questio
 
 Preferred communication style: Simple, everyday language.
 
-## Manual test (validation error persistence)
-
-1. Start the chat and answer the first intake step with an invalid value (for example, a malformed email or phone number).
-2. Confirm the assistant replies with the validation error message.
-3. Reload the page: the same assistant validation message should appear immediately, and the intake step should remain ready for a corrected answer.
-
 ## System Architecture
 
 ### Frontend Architecture
