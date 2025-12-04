@@ -302,7 +302,7 @@ function createDefaultSessionState(sessionId, lang = "en") {
   };
 }
 
-async function getSession(sessionId, userId = null, defaultLang = "en") {
+async function getSession(sessionId, userId = null) {
   if (!sessionId) throw new Error("sessionId is required");
 
   if (sessions.has(sessionId)) {
@@ -318,9 +318,9 @@ async function getSession(sessionId, userId = null, defaultLang = "en") {
 
   const { rows } = await pool.query(query, params);
   const row = rows[0];
-  const loaded = row?.session_state || createDefaultSessionState(sessionId, defaultLang);
+  const loaded = row?.session_state || createDefaultSessionState(sessionId);
   const normalized = {
-    ...createDefaultSessionState(sessionId, loaded.lang || defaultLang || "en"),
+    ...createDefaultSessionState(sessionId, loaded.lang || "en"),
     ...loaded,
     sessionId,
   };
@@ -466,9 +466,9 @@ app.post("/api/lang", requireAuth, async (req, res) => {
       console.warn("Failed to persist user locale", e?.message || e);
     }
 
-    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId, safeLang);
+    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId);
     sessionId = chatSession.id;
-    const session = await getSession(sessionId, userId, safeLang);
+    const session = await getSession(sessionId, userId);
     session.lang = safeLang;
     const teaching = ensureTeachingState(session);
     teaching.lang = safeLang;
@@ -484,15 +484,7 @@ app.post("/api/lang", requireAuth, async (req, res) => {
 });
 
 // ===== Helpers DB للـ chat_session/chat_messages [ADDED] =====
-async function getUserLocale(userId) {
-  const { rows } = await pool.query(
-    "SELECT locale FROM users WHERE id=$1",
-    [userId]
-  );
-  return rows[0]?.locale || "en";
-}
-
-async function getOrCreateCurrentChatSession(userId, requestedSessionId = null, defaultLang = "en") {
+async function getOrCreateCurrentChatSession(userId, requestedSessionId = null) {
   if (requestedSessionId) {
     const { rows } = await pool.query(
       `SELECT * FROM chat_sessions WHERE id=$1 AND user_id=$2 LIMIT 1`,
@@ -501,7 +493,7 @@ async function getOrCreateCurrentChatSession(userId, requestedSessionId = null, 
     if (rows[0]) {
       // تأكد أن session_state موجودة
       if (!rows[0].session_state) {
-        const fallback = createDefaultSessionState(rows[0].id, defaultLang);
+        const fallback = createDefaultSessionState(rows[0].id);
         await pool.query(
           `UPDATE chat_sessions SET session_state=$2, status=$3, updated_at=now() WHERE id=$1`,
           [rows[0].id, fallback, "intake"]
@@ -523,7 +515,7 @@ async function getOrCreateCurrentChatSession(userId, requestedSessionId = null, 
   if (cur.rows[0]) return cur.rows[0];
 
   // إنشاء جلسة جديدة تبدأ intake
-  const initialState = createDefaultSessionState(randomUUID(), defaultLang);
+  const initialState = createDefaultSessionState(randomUUID());
   const ins = await pool.query(
     `INSERT INTO chat_sessions (id, user_id, status, intake_done, session_state)
      VALUES ($1, $2, 'intake', FALSE, $3)
@@ -549,10 +541,10 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
     const userId = req.session.userId;
     let { sessionId = null, lang = "en", answer } = req.body || {};
 
-    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId, lang);
+    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId);
     sessionId = chatSession.id;
 
-    const session = await getSession(sessionId, userId, lang);
+    const session = await getSession(sessionId, userId);
     session.currentStep = "intake";
     session.lang = lang || session.lang || "en";
 
@@ -645,12 +637,11 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
     let { sessionId } = req.body || {};
-    const preferredLang = await getUserLocale(userId);
 
-    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId, preferredLang);
+    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId);
     sessionId = chatSession.id;
 
-    const session = await getSession(sessionId, userId, preferredLang);
+    const session = await getSession(sessionId, userId);
     session.currentStep = "assessment";
 
     const A = session.assessment;
@@ -1031,8 +1022,7 @@ app.post("/api/teach/start", requireAuth, async (req, res) => {
     // ===== [ADDED] اربط برسميًا chat_session في DB (لو المستخدم مسجل) =====
     let dbChatSession = null;
     if (req.session?.userId) {
-      const langForSession = teaching.lang || session.lang || "en";
-      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId, sessionId, langForSession);
+      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId, sessionId);
     }
 
     if (TEACH_ASSISTANT_ID && TEACH_VECTOR_STORE_ID) {
@@ -1117,8 +1107,7 @@ app.post("/api/teach/start", requireAuth, async (req, res) => {
     pushTranscript(session, { from: "tutor", text });
     await persistSessionState(sessionId, session, { status: "teaching", teachingState: teaching });
     if (req.session?.userId) {
-      const langForSession = teaching.lang || session.lang || "en";
-      const s = await getOrCreateCurrentChatSession(req.session.userId, sessionId, langForSession);
+      const s = await getOrCreateCurrentChatSession(req.session.userId, sessionId);
       await insertChatMessage(s.id, "assistant", text);
     }
     return res.json({ message: text });
@@ -1159,7 +1148,7 @@ app.post("/api/teach/message", requireAuth, async (req, res) => {
     // [ADDED] خزّن رسالة المستخدم في DB إن وُجد مستخدم مسجّل
     let dbChatSession = null;
     if (req.session?.userId) {
-      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId, sessionId, lang);
+      dbChatSession = await getOrCreateCurrentChatSession(req.session.userId, sessionId);
       await insertChatMessage(dbChatSession.id, "user", userText);
     }
 
@@ -1259,9 +1248,8 @@ app.post("/api/teach/message", requireAuth, async (req, res) => {
 // ===== [ADDED] GET /api/chat/current — محمية =====
 app.get("/api/chat/current", requireAuth, async (req, res) => {
   const uid = req.session.userId;
-  const userLocale = await getUserLocale(uid);
-  const chatSession = await getOrCreateCurrentChatSession(uid, null, userLocale);
-  const state = await getSession(chatSession.id, uid, userLocale);
+  const chatSession = await getOrCreateCurrentChatSession(uid);
+  const state = await getSession(chatSession.id, uid);
 
   const msgs = await pool.query(
     `SELECT id, sender, content, created_at
