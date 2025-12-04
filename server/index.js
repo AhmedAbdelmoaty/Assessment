@@ -126,7 +126,7 @@ function assertIds(threadId, runId) {
 async function safeRetrieveRun(threadId, runId) {
   assertIds(threadId, runId);
   logTeach("poll", { threadId, runId });
-  return openai.beta.threads.runs.retrieve(runId, { thread_id: threadId });
+  return openai.beta.threads.runs.retrieve(threadId, runId);
 }
 
 async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 } = {}) {
