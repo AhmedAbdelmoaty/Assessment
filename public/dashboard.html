@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-header="private" class="dashboard-body">
+  <div class="dashboard-shell">
+    <div class="dashboard-loading" id="dashLoading">
+      <div class="loader"></div>
+      <div class="loading-text" data-lang-content="en">Loading your dashboard...</div>
+      <div class="loading-text hidden" data-lang-content="ar">جاري تحميل لوحتك...</div>
+    </div>
+
+    <header class="dashboard-hero">
+      <div class="hero-left">
+        <p class="hero-kicker" data-lang-content="en">Personalized learning hub</p>
+        <p class="hero-kicker hidden" data-lang-content="ar">مركز تعلم مخصص لك</p>
+        <h1 class="hero-title" data-lang-content="en">Your smart dashboard</h1>
+        <h1 class="hero-title hidden" data-lang-content="ar">لوحتك الذكية</h1>
+        <p class="hero-sub" data-lang-content="en">Update your info, track assessments, revisit tutorials, and restart a fresh assessment anytime.</p>
+        <p class="hero-sub hidden" data-lang-content="ar">حدّث بياناتك، تابع تقييماتك، ارجع لشروحاتك، وابدأ تقييم جديد في أي لحظة.</p>
+        <button class="primary-btn" id="startAssessmentBtn">
+          <span data-lang-content="en">New Assessment</span>
+          <span class="hidden" data-lang-content="ar">تقييم جديد</span>
+        </button>
+      </div>
+      <div class="hero-right">
+        <div class="hero-cards">
+          <div class="hero-card gradient">
+            <div class="hero-card-label" data-lang-content="en">Assessments</div>
+            <div class="hero-card-label hidden" data-lang-content="ar">تقييماتي</div>
+            <div class="hero-card-value" id="heroAssessments">0</div>
+          </div>
+          <div class="hero-card">
+            <div class="hero-card-label" data-lang-content="en">Tutorials</div>
+            <div class="hero-card-label hidden" data-lang-content="ar">شروحاتي</div>
+            <div class="hero-card-value" id="heroTutorials">0</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="dashboard-nav" role="tablist">
+      <button class="dash-tab active" data-tab="info">
+        <i class="fa-solid fa-user"></i>
+        <span data-lang-content="en">My Info</span>
+        <span class="hidden" data-lang-content="ar">معلوماتي</span>
+      </button>
+      <button class="dash-tab" data-tab="assessments">
+        <i class="fa-solid fa-chart-line"></i>
+        <span data-lang-content="en">My Assessments</span>
+        <span class="hidden" data-lang-content="ar">تقييماتي</span>
+      </button>
+      <button class="dash-tab" data-tab="tutorials">
+        <i class="fa-solid fa-book-open"></i>
+        <span data-lang-content="en">My Tutorials</span>
+        <span class="hidden" data-lang-content="ar">شروحاتي</span>
+      </button>
+      <button class="dash-tab" data-tab="videos">
+        <i class="fa-solid fa-video"></i>
+        <span data-lang-content="en">My Videos</span>
+        <span class="hidden" data-lang-content="ar">فيديوهاتي</span>
+      </button>
+    </div>
+
+    <main class="dashboard-panels">
+      <section class="dash-panel active" id="panel-info">
+        <div class="panel-header">
+          <h2 data-lang-content="en">My Info</h2>
+          <h2 class="hidden" data-lang-content="ar">معلوماتي</h2>
+          <p data-lang-content="en">All fields auto-save and sync with your next assessments and tutorials.</p>
+          <p class="hidden" data-lang-content="ar">كل الحقول تُحفظ تلقائياً وتؤثر فوراً على تقييماتك وشروحاتك القادمة.</p>
+        </div>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3 data-lang-content="en">Registration</h3>
+            <h3 class="hidden" data-lang-content="ar">بيانات التسجيل</h3>
+            <div class="form-group">
+              <label data-lang-content="en">Full Name</label>
+              <label class="hidden" data-lang-content="ar">الاسم الكامل</label>
+              <input type="text" id="fieldName" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Email</label>
+              <label class="hidden" data-lang-content="ar">البريد الإلكتروني</label>
+              <input type="email" id="fieldEmail" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Phone</label>
+              <label class="hidden" data-lang-content="ar">الهاتف</label>
+              <input type="text" id="fieldPhone" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Language</label>
+              <label class="hidden" data-lang-content="ar">اللغة</label>
+              <select id="fieldLocale">
+                <option value="en">English</option>
+                <option value="ar">العربية</option>
+              </select>
+            </div>
+          </div>
+          <div class="info-card">
+            <h3 data-lang-content="en">Intake</h3>
+            <h3 class="hidden" data-lang-content="ar">بيانات التعريف</h3>
+            <div class="form-group">
+              <label data-lang-content="en">Country</label>
+              <label class="hidden" data-lang-content="ar">الدولة</label>
+              <input type="text" id="fieldCountry" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Age Band</label>
+              <label class="hidden" data-lang-content="ar">الفئة العمرية</label>
+              <input type="text" id="fieldAge" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Job Nature</label>
+              <label class="hidden" data-lang-content="ar">طبيعة العمل</label>
+              <input type="text" id="fieldJobNature" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Experience</label>
+              <label class="hidden" data-lang-content="ar">الخبرة</label>
+              <input type="text" id="fieldExperience" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Job Title</label>
+              <label class="hidden" data-lang-content="ar">المسمى الوظيفي</label>
+              <input type="text" id="fieldJobTitle" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Sector</label>
+              <label class="hidden" data-lang-content="ar">القطاع</label>
+              <input type="text" id="fieldSector" />
+            </div>
+            <div class="form-group">
+              <label data-lang-content="en">Learning Reason</label>
+              <label class="hidden" data-lang-content="ar">سبب التعلم</label>
+              <input type="text" id="fieldReason" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dash-panel" id="panel-assessments">
+        <div class="panel-header">
+          <div>
+            <h2 data-lang-content="en">My Assessments</h2>
+            <h2 class="hidden" data-lang-content="ar">تقييماتي</h2>
+            <p data-lang-content="en">Only completed assessments are shown. Filters keep all cards visible.</p>
+            <p class="hidden" data-lang-content="ar">يتم عرض التقييمات المكتملة فقط. الفلاتر تظهر كل البطاقات.</p>
+          </div>
+          <div class="filter-group">
+            <select id="assessmentFilter">
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="high">Highest score</option>
+              <option value="low">Lowest score</option>
+            </select>
+          </div>
+        </div>
+        <div class="cards-grid" id="assessmentsGrid"></div>
+      </section>
+
+      <section class="dash-panel" id="panel-tutorials">
+        <div class="panel-header">
+          <div>
+            <h2 data-lang-content="en">My Tutorials</h2>
+            <h2 class="hidden" data-lang-content="ar">شروحاتي</h2>
+            <p data-lang-content="en">Every tutorial chat is saved. Open any card or delete unwanted ones.</p>
+            <p class="hidden" data-lang-content="ar">كل جلسات الشرح محفوظة. افتح البطاقة أو احذف أي جلسة لا تريدها.</p>
+          </div>
+          <div class="filter-group">
+            <select id="tutorialFilter">
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+            </select>
+          </div>
+        </div>
+        <div class="cards-grid" id="tutorialsGrid"></div>
+      </section>
+
+      <section class="dash-panel" id="panel-videos">
+        <div class="placeholder-card">
+          <div class="placeholder-icon"><i class="fa-solid fa-tv"></i></div>
+          <h3 data-lang-content="en">My Videos</h3>
+          <h3 class="hidden" data-lang-content="ar">فيديوهاتي</h3>
+          <p data-lang-content="en">Video library will live here soon. Stay tuned!</p>
+          <p class="hidden" data-lang-content="ar">مكتبة الفيديو ستكون هنا قريباً. ترقب!</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal hidden" id="tutorialModal">
+    <div class="modal-content">
+      <button class="modal-close" id="closeTutorialModal"><i class="fa-solid fa-xmark"></i></button>
+      <div class="modal-body">
+        <h3 id="modalTitle"></h3>
+        <div class="modal-messages" id="modalMessages"></div>
+      </div>
+    </div>
+  </div>
+
+  <script defer src="/js/common/i18n.js"></script>
+  <script defer src="/js/common/header.js"></script>
+  <script defer src="/js/dashboard.js"></script>
+</body>
+</html>
