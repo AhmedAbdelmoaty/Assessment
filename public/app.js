@@ -12,6 +12,7 @@
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
+    let initialStateHydrated = false;
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -33,6 +34,7 @@
     const chatMessages = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput");
     const sendBtn = document.getElementById("sendBtn");
+    const newAssessmentBtn = document.getElementById("newAssessmentBtn");
     function setSessionId(id) {
         if (!id) return;
         sessionId = id;
@@ -60,6 +62,16 @@
             // plain text
         }
         return { _type: "text", text: raw };
+    }
+
+    function resetChatState() {
+        chatMessages.innerHTML = "";
+        currentStep = "assessment";
+        currentMCQ = null;
+        reportRequested = false;
+        assessmentFetchInFlight = false;
+        awaitingCustomInput = false;
+        teachingActive = false;
     }
 
     function renderPersistedMessages(messages) {
@@ -149,6 +161,7 @@
         if (state.lang && state.lang !== currentLang) {
             requestLanguageChange(state.lang);
         }
+        initialStateHydrated = true;
 
         if (currentStep === "intake") {
             if (state.pendingIntakeStep) {
@@ -294,6 +307,8 @@
             console.warn("Failed to load persisted chat:", e);
         }
 
+        initialStateHydrated = true;
+
         return true;
     }
 
@@ -308,6 +323,7 @@
       setupLanguageToggle();
       setupSendButton();
       setupInputHandlers();
+      setupNewAssessmentButton();
       syncLanguageWithServer(currentLang);
 
       // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
@@ -322,7 +338,7 @@
       updateProgress(0);
 
       // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
-      if (!chatMessages.children.length && currentStep === "intake") {
+      if (!chatMessages.children.length && currentStep === "intake" && initialStateHydrated) {
         startIntakeFlow();
       }
     })();
@@ -436,7 +452,13 @@
         });
     }
 
+    function setupNewAssessmentButton() {
+        if (!newAssessmentBtn) return;
+        newAssessmentBtn.addEventListener("click", startNewAssessmentSession);
+    }
+
     async function startIntakeFlow() {
+        if (!initialStateHydrated) return;
         showTypingIndicator();
         try {
             const existingSession = sessionId || getStoredSessionId();
@@ -455,6 +477,13 @@
             if (data.sessionId) setSessionId(data.sessionId);
             hideTypingIndicator();
 
+            if (data.done && data.skipTo === "assessment") {
+                currentStep = "assessment";
+                updateProgress(1);
+                startAssessment();
+                return;
+            }
+
             renderIntakeStep(data);
         } catch (error) {
             console.error("Error starting intake:", error);
@@ -464,6 +493,50 @@
                     ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
                     : "Sorry, an error occurred. Please try again.",
             );
+        }
+    }
+
+    async function startNewAssessmentSession() {
+        if (isProcessing) return;
+        isProcessing = true;
+        showTypingIndicator();
+        try {
+            const resp = await fetch("/api/chat/new", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId }),
+            });
+
+            const data = await resp.json();
+            hideTypingIndicator();
+
+            if (!resp.ok || !data?.session?.id) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "تعذر بدء تقييم جديد حالياً."
+                        : "Could not start a new assessment right now.",
+                );
+                return;
+            }
+
+            resetChatState();
+            setSessionId(data.session.id);
+            applyStateFromServer(data.state || {});
+            updateProgress(currentStep === "assessment" ? 1 : 0);
+
+            if (currentStep === "assessment" && !(data.state?.assessment?.currentQuestion)) {
+                startAssessment();
+            }
+        } catch (err) {
+            hideTypingIndicator();
+            console.error("Failed to start new assessment", err);
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "حصلت مشكلة في فتح تقييم جديد."
+                    : "There was a problem starting a new assessment.",
+            );
+        } finally {
+            isProcessing = false;
         }
     }
 
@@ -522,6 +595,12 @@
             if (data.done) {
                 if (data.message) {
                     addSystemMessage(data.message);
+                }
+                if (data.skipTo === "assessment") {
+                    currentStep = "assessment";
+                    updateProgress(1);
+                    setTimeout(() => startAssessment(), 500);
+                    return;
                 }
                 currentStep = "assessment";
                 updateProgress(1);

@@ -1145,3 +1145,39 @@ body.has-topbar{ padding-top: 72px; }
   .chat-header .header-logout{ height: 32px; padding: 0 12px; }
 }
 
+
+/* Floating action for New Assessment */
+.floating-action {
+    position: fixed;
+    bottom: 96px;
+    right: 24px;
+    z-index: 900;
+    padding: 14px 18px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border: none;
+    border-radius: 999px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.floating-action:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+    background: #8f1c21;
+}
+
+.floating-action:active {
+    transform: translateY(0);
+}
+
+[dir="rtl"] .floating-action {
+    right: auto;
+    left: 24px;
+}
