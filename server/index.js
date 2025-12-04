@@ -29,6 +29,20 @@ app.use(express.static(join(__dirname, "../public")));
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+async function ensureIntakeProfileSchema() {
+  try {
+    await pool.query(`
+      ALTER TABLE intake_profiles ADD COLUMN IF NOT EXISTS raw JSONB;
+      ALTER TABLE intake_profiles ADD COLUMN IF NOT EXISTS experience_band TEXT;
+      ALTER TABLE intake_profiles ADD COLUMN IF NOT EXISTS age_band TEXT;
+    `);
+  } catch (err) {
+    console.warn("ensureIntakeProfileSchema failed", err?.message || err);
+  }
+}
+
+ensureIntakeProfileSchema();
+
 // Replit/Proxy
 app.set("trust proxy", 1);
 
@@ -140,11 +154,70 @@ async function pollRunUntilDone(threadId, runId, { maxTries = 40, sleepMs = 900 
   throw new Error("Run polling timeout");
 }
 
-// ===== Intake order (كما هو) =====
+async function loadUserIntakeProfile(userId) {
+  const { rows } = await pool.query(
+    `SELECT country_code, sector_code, role_code, learning_goal_code, job_title, age, raw, experience_band, age_band
+     FROM intake_profiles
+     WHERE user_id=$1
+     LIMIT 1`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row) return null;
+
+  const raw = row.raw || {};
+  return {
+    country: raw.country || row.country_code || "",
+    age_band: raw.age_band || row.age_band || "",
+    job_nature: raw.job_nature || row.role_code || "",
+    experience_years_band: raw.experience_years_band || row.experience_band || "",
+    job_title_exact: raw.job_title_exact || row.job_title || "",
+    sector: raw.sector || row.sector_code || "",
+    learning_reason: raw.learning_reason || row.learning_goal_code || "",
+  };
+}
+
+async function saveUserIntakeProfile(userId, intake = {}) {
+  const payload = {
+    country: intake.country || "",
+    age_band: intake.age_band || "",
+    job_nature: intake.job_nature || "",
+    experience_years_band: intake.experience_years_band || "",
+    job_title_exact: intake.job_title_exact || "",
+    sector: intake.sector || "",
+    learning_reason: intake.learning_reason || "",
+  };
+
+  await pool.query(
+    `INSERT INTO intake_profiles (user_id, country_code, sector_code, role_code, learning_goal_code, job_title, age, raw, experience_band, age_band, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, now())
+     ON CONFLICT (user_id)
+     DO UPDATE SET
+       country_code=EXCLUDED.country_code,
+       sector_code=EXCLUDED.sector_code,
+       role_code=EXCLUDED.role_code,
+       learning_goal_code=EXCLUDED.learning_goal_code,
+       job_title=EXCLUDED.job_title,
+       raw=EXCLUDED.raw,
+       experience_band=EXCLUDED.experience_band,
+       age_band=EXCLUDED.age_band,
+       updated_at=now()`,
+    [
+      userId,
+      payload.country || null,
+      payload.sector || null,
+      payload.job_nature || null,
+      payload.learning_reason || null,
+      payload.job_title_exact || null,
+      payload,
+      payload.experience_years_band || null,
+      payload.age_band || null,
+    ]
+  );
+}
+
+// ===== Intake order (بعد حذف الاسم/الإيميل/الهاتف) =====
 const INTAKE_ORDER = [
-  "name_full",
-  "email",
-  "phone_number",
   "country",
   "age_band",
   "job_nature",
@@ -154,8 +227,8 @@ const INTAKE_ORDER = [
   "learning_reason",
 ];
 const INTAKE_OPENING = {
-  ar: "أهلاً 👋 قبل ما نبدأ، هحتاج منك بعض التفاصيل البسيطة علشان نخصّص الاسئلة حسب خبرتك وهدفك. هنكملها خطوة بخطوة",
-  en: "Hi 👋 Before we start, I’ll need a few quick details so I can tailor the questions to your experience and goals. We’ll go step by step."
+  ar: "أهلاً 👋 قبل ما نبدأ، هحتاج منك بعض التفاصيل البسيطة علشان نخصّص الأسئلة حسب خبرتك وهدفك. هنكملها خطوة بخطوة",
+  en: "Hi 👋 Before we start, I’ll need a few quick details so I can tailor the questions to your experience and goals. We’ll go step by step.",
 };
 
 // ===== Intake catalog (كما هو) =====
@@ -270,8 +343,8 @@ function buildTeachingQueueFromEvidence(session, lang = "ar") {
 }
 
 // ===== In-memory + DB-backed session state =====
-function createDefaultSessionState(sessionId, lang = "en") {
-  return {
+function createDefaultSessionState(sessionId, lang = "en", overrides = {}) {
+  const base = {
     sessionId,
     lang,
     currentStep: "intake",
@@ -300,6 +373,14 @@ function createDefaultSessionState(sessionId, lang = "en") {
     finished: false,
     report: null,
   };
+
+  return {
+    ...base,
+    ...overrides,
+    assessment: { ...base.assessment, ...(overrides.assessment || {}) },
+    teaching: { ...base.teaching, ...(overrides.teaching || {}) },
+    intake: { ...base.intake, ...(overrides.intake || {}) },
+  };
 }
 
 async function getSession(sessionId, userId = null) {
@@ -310,7 +391,7 @@ async function getSession(sessionId, userId = null) {
   }
 
   const params = [sessionId];
-  let query = "SELECT session_state FROM chat_sessions WHERE id=$1";
+  let query = "SELECT session_state, user_id, intake_done FROM chat_sessions WHERE id=$1";
   if (userId) {
     params.push(userId);
     query += " AND user_id=$2";
@@ -324,6 +405,18 @@ async function getSession(sessionId, userId = null) {
     ...loaded,
     sessionId,
   };
+
+  // لو عنده بروفايل محفوظ وجلسة لسه في intake، ابدأ التقييم مباشرة بالبروفايل
+  try {
+    if ((normalized.intakeStepIndex || 0) < INTAKE_ORDER.length && row?.intake_done) {
+      const profile = await loadUserIntakeProfile(userId || row?.user_id);
+      if (profile) {
+        hydrateSessionWithProfile(normalized, profile, normalized.lang || "en");
+      }
+    }
+  } catch (err) {
+    console.warn("hydrateSessionWithProfile failed", err?.message || err);
+  }
   sessions.set(sessionId, normalized);
   return normalized;
 }
@@ -362,6 +455,50 @@ async function persistSessionState(sessionId, state, { status, intakeDone, repor
   );
 }
 
+function hydrateSessionWithProfile(session, profile = null, lang = "en") {
+  if (!profile) return session;
+  const teaching = ensureTeachingState(session);
+  teaching.lang = lang || session.lang || "en";
+
+  session.intake = { ...session.intake, ...profile };
+  session.intakeStepIndex = INTAKE_ORDER.length;
+  session.openingShown = true;
+  session.currentStep = "assessment";
+  session.lang = lang || session.lang || "en";
+  session.teaching = teaching;
+
+  return session;
+}
+
+async function createNewChatSession(userId, { lang: langOverride = null } = {}) {
+  const lang = langOverride || (await getUserLocale(userId)) || "en";
+  const profile = await loadUserIntakeProfile(userId);
+
+  const initialState = profile
+    ? createDefaultSessionState(randomUUID(), lang, {
+        currentStep: "assessment",
+        intakeStepIndex: INTAKE_ORDER.length,
+        openingShown: true,
+        pendingIntakeStep: null,
+        intake: profile,
+        teaching: { lang },
+        lang,
+      })
+    : createDefaultSessionState(randomUUID(), lang, { teaching: { lang }, lang });
+
+  const status = profile ? "assessment" : "intake";
+  const intakeDone = Boolean(profile);
+
+  const ins = await pool.query(
+    `INSERT INTO chat_sessions (id, user_id, status, intake_done, session_state)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [initialState.sessionId, userId, status, intakeDone, initialState]
+  );
+  sessions.set(initialState.sessionId, initialState);
+  return ins.rows[0];
+}
+
 // ===== Intake validation (كما هو) =====
 function validateIntakeInput(stepKey, value) {
   if (stepKey === "name_full") {
@@ -385,6 +522,11 @@ function validateIntakeInput(stepKey, value) {
 async function findUserByEmail(email) {
   const r = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
   return r.rows[0] || null;
+}
+
+async function getUserLocale(userId) {
+  const { rows } = await pool.query("SELECT locale FROM users WHERE id=$1", [userId]);
+  return rows[0]?.locale || "en";
 }
 
 app.post("/api/auth/signup", async (req, res) => {
@@ -514,16 +656,8 @@ async function getOrCreateCurrentChatSession(userId, requestedSessionId = null) 
   );
   if (cur.rows[0]) return cur.rows[0];
 
-  // إنشاء جلسة جديدة تبدأ intake
-  const initialState = createDefaultSessionState(randomUUID());
-  const ins = await pool.query(
-    `INSERT INTO chat_sessions (id, user_id, status, intake_done, session_state)
-     VALUES ($1, $2, 'intake', FALSE, $3)
-     RETURNING *`,
-    [initialState.sessionId, userId, initialState]
-  );
-  sessions.set(initialState.sessionId, initialState);
-  return ins.rows[0];
+  // إنشاء جلسة جديدة (تستخدم بروفايل المستخدم إن وجد)
+  return createNewChatSession(userId);
 }
 
 async function insertChatMessage(sessionId, sender, content) {
@@ -533,6 +667,21 @@ async function insertChatMessage(sessionId, sender, content) {
      VALUES (gen_random_uuid(), $1, $2, $3)`,
     [sessionId, sender, normalizedContent]
   );
+}
+
+async function endChatSession(sessionId, userId) {
+  if (!sessionId) return;
+  try {
+    await pool.query(
+      `UPDATE chat_sessions
+       SET status='ended', finished_at=now(), updated_at=now()
+       WHERE id=$1 AND user_id=$2`,
+      [sessionId, userId]
+    );
+  } catch (err) {
+    console.warn("endChatSession failed", err?.message || err);
+  }
+  sessions.delete(sessionId);
 }
 
 // ===== Intake Flow (كما هو) =====
@@ -547,6 +696,20 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
     const session = await getSession(sessionId, userId);
     session.currentStep = "intake";
     session.lang = lang || session.lang || "en";
+
+    const savedProfile = await loadUserIntakeProfile(userId);
+    if (savedProfile && (session.intakeStepIndex || 0) < INTAKE_ORDER.length) {
+      hydrateSessionWithProfile(session, savedProfile, session.lang);
+      await persistSessionState(sessionId, session, { status: "assessment", intakeDone: true });
+      return res.json({
+        done: true,
+        sessionId,
+        skipTo: "assessment",
+        message: session.lang === "ar"
+          ? "هنبدأ التقييم مباشرة باستخدام بياناتك المحفوظة."
+          : "Starting assessment directly using your saved profile.",
+      });
+    }
 
     if (answer !== undefined && answer !== null) {
       await insertChatMessage(sessionId, "user", String(answer));
@@ -567,6 +730,7 @@ app.post("/api/intake/next", requireAuth, async (req, res) => {
     if (session.intakeStepIndex >= INTAKE_ORDER.length) {
       session.currentStep = "assessment";
       session.pendingIntakeStep = null;
+      await saveUserIntakeProfile(userId, session.intake);
       await persistSessionState(sessionId, session, { status: "assessment", intakeDone: true });
       await insertChatMessage(
         sessionId,
@@ -1242,6 +1406,34 @@ app.post("/api/teach/message", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("/api/teach/message error:", err?.message || err, err?.stack);
     return res.status(500).json({ error: true, message: "Teaching message failed." });
+  }
+});
+
+// ===== فتح جلسة تقييم جديدة =====
+app.post("/api/chat/new", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { sessionId = null } = req.body || {};
+
+    if (sessionId) {
+      await endChatSession(sessionId, userId);
+    }
+
+    const newSession = await createNewChatSession(userId);
+    const state = await getSession(newSession.id, userId);
+
+    return res.json({
+      session: {
+        id: newSession.id,
+        status: newSession.status,
+        intake_done: newSession.intake_done,
+        started_at: newSession.started_at,
+      },
+      state,
+    });
+  } catch (err) {
+    console.error("/api/chat/new error", err?.message || err);
+    return res.status(500).json({ error: true, message: "Failed to start new assessment" });
   }
 });
 
