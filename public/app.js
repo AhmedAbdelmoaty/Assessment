@@ -25,7 +25,7 @@
     }
 
     // DOM elements
-    const langButtons = document.querySelectorAll(".lang-btn");
+    const langButtons = document.querySelectorAll(".lang-btn[data-lang]");
     const html = document.documentElement;
     const startBtn = document.getElementById("startBtn");
     const landingSection = document.getElementById("landingSection");
@@ -146,9 +146,8 @@
         if (!state) return;
         if (state.sessionId) setSessionId(state.sessionId);
         currentStep = state.currentStep || currentStep;
-        if (state.lang) {
-            currentLang = state.lang;
-            switchLanguage(currentLang);
+        if (state.lang && state.lang !== currentLang) {
+            requestLanguageChange(state.lang);
         }
 
         if (currentStep === "intake") {
@@ -213,6 +212,51 @@
     }
 
     // === AUTH GUARD + LOAD PERSISTED CHAT ===
+    function getPreferredLocale() {
+        try {
+            if (window.LA_I18N && typeof window.LA_I18N.getLocale === "function") {
+                return window.LA_I18N.getLocale();
+            }
+        } catch (e) {
+            console.warn("Unable to read preferred locale", e);
+        }
+        return currentLang || "en";
+    }
+
+    let lastSyncedLang = null;
+
+    async function syncLanguageWithServer(lang) {
+        const safeLang = lang === "ar" ? "ar" : "en";
+        if (lastSyncedLang === safeLang) return;
+        try {
+            const resp = await fetch("/api/lang", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ lang: safeLang, sessionId }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data.sessionId) {
+                setSessionId(data.sessionId);
+            }
+            if (resp.ok) {
+                lastSyncedLang = safeLang;
+            }
+        } catch (err) {
+            console.warn("Failed to sync language", err);
+        }
+    }
+
+    function requestLanguageChange(lang) {
+        const safeLang = lang === "ar" ? "ar" : "en";
+        if (window.LA_I18N && typeof window.LA_I18N.setLocale === "function") {
+            window.LA_I18N.setLocale(safeLang);
+            return;
+        }
+
+        switchLanguage(safeLang);
+        syncLanguageWithServer(safeLang);
+    }
+
     async function authGuardAndLoad() {
         try {
             const meResp = await fetch("/api/auth/me");
@@ -222,11 +266,13 @@
             }
             const me = await meResp.json();
             const langFromProfile = me?.user?.locale;
-            if (window.LA_I18N && langFromProfile) {
-                window.LA_I18N.setLocale(langFromProfile);
+            const preferred = getPreferredLocale();
+            const resolvedLang = preferred || langFromProfile || "en";
+            if (window.LA_I18N && resolvedLang) {
+                window.LA_I18N.setLocale(resolvedLang);
             }
-            if (langFromProfile) {
-                currentLang = langFromProfile;
+            if (resolvedLang) {
+                currentLang = resolvedLang;
                 switchLanguage(currentLang);
             }
         } catch (err) {
@@ -262,6 +308,7 @@
       setupLanguageToggle();
       setupSendButton();
       setupInputHandlers();
+      syncLanguageWithServer(currentLang);
 
       // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
       if (startBtn && landingSection) {
@@ -284,17 +331,18 @@
         langButtons.forEach((btn) => {
             btn.addEventListener("click", function () {
                 const lang = this.getAttribute("data-lang");
-                switchLanguage(lang);
+                requestLanguageChange(lang);
             });
         });
     }
 
     function switchLanguage(lang) {
-        currentLang = lang;
+        const safeLang = lang === "ar" ? "ar" : "en";
+        currentLang = safeLang;
 
         // Update button states
         langButtons.forEach((btn) => {
-            if (btn.getAttribute("data-lang") === lang) {
+            if (btn.getAttribute("data-lang") === safeLang) {
                 btn.classList.add("active");
             } else {
                 btn.classList.remove("active");
@@ -302,14 +350,14 @@
         });
 
         // Keep layout LTR always; just switch language attribute and helper class
-        html.setAttribute("lang", lang === "ar" ? "ar" : "en");
-        html.classList.toggle("lang-ar", lang === "ar");
-        html.classList.toggle("lang-en", lang !== "ar");
+        html.setAttribute("lang", safeLang === "ar" ? "ar" : "en");
+        html.classList.toggle("lang-ar", safeLang === "ar");
+        html.classList.toggle("lang-en", safeLang !== "ar");
 
         // Toggle content visibility
         const allContent = document.querySelectorAll("[data-lang-content]");
         allContent.forEach((el) => {
-            if (el.getAttribute("data-lang-content") === lang) {
+            if (el.getAttribute("data-lang-content") === safeLang) {
                 el.classList.remove("hidden");
             } else {
                 el.classList.add("hidden");
@@ -319,11 +367,19 @@
         // Update input placeholder
         if (chatInput) {
             chatInput.placeholder =
-                lang === "ar"
+                safeLang === "ar"
                     ? chatInput.getAttribute("data-placeholder-ar")
                     : chatInput.getAttribute("data-placeholder-en");
         }
     }
+
+    window.addEventListener("la:locale-changed", function (ev) {
+        const lang = ev?.detail?.lang || "en";
+        const safeLang = lang === "ar" ? "ar" : "en";
+        if (safeLang === currentLang) return;
+        switchLanguage(safeLang);
+        syncLanguageWithServer(safeLang);
+    });
 
     function setupStartButton() {
       if (!startBtn) return;

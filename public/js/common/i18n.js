@@ -15,10 +15,19 @@
     }
   }
 
+  function broadcastLocale(lang) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("la:locale-changed", { detail: { lang } })
+      );
+    } catch (_) {}
+  }
+
   function setLocale(lang) {
     if (!SUPPORTED.has(lang)) lang = DEFAULT_LOCALE;
     try { localStorage.setItem(STORAGE_KEY, lang); } catch (_) {}
     applyLocaleToPage(lang);
+    broadcastLocale(lang);
   }
 
   function applyLocaleToPage(langArg) {
@@ -55,6 +64,8 @@
 
   // Auto-apply on DOM ready (for pages that only include i18n.js)
   document.addEventListener("DOMContentLoaded", function () {
-    applyLocaleToPage(getLocale());
+    const initial = getLocale();
+    applyLocaleToPage(initial);
+    broadcastLocale(initial);
   });
 })();

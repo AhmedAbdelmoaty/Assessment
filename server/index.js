@@ -453,6 +453,36 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// ===== Language sync (يوحّد لغة المستخدم والجلسة) =====
+app.post("/api/lang", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    let { lang = "en", sessionId = null } = req.body || {};
+    const safeLang = lang === "ar" ? "ar" : "en";
+
+    try {
+      await pool.query("UPDATE users SET locale=$1 WHERE id=$2", [safeLang, userId]);
+    } catch (e) {
+      console.warn("Failed to persist user locale", e?.message || e);
+    }
+
+    const chatSession = await getOrCreateCurrentChatSession(userId, sessionId);
+    sessionId = chatSession.id;
+    const session = await getSession(sessionId, userId);
+    session.lang = safeLang;
+    const teaching = ensureTeachingState(session);
+    teaching.lang = safeLang;
+    session.teaching = teaching;
+
+    await persistSessionState(sessionId, session, { status: session.currentStep || "intake", teachingState: teaching });
+
+    return res.json({ ok: true, lang: safeLang, sessionId });
+  } catch (err) {
+    console.error("/api/lang error", err);
+    return res.status(500).json({ error: true, message: "Failed to update language" });
+  }
+});
+
 // ===== Helpers DB للـ chat_session/chat_messages [ADDED] =====
 async function getOrCreateCurrentChatSession(userId, requestedSessionId = null) {
   if (requestedSessionId) {
