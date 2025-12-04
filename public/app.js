@@ -7,6 +7,8 @@
     let sessionId = null;
     let currentStep = "intake";
     let currentMCQ = null;
+    let reportRequested = false;
+    let assessmentFetchInFlight = false;
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
@@ -83,6 +85,31 @@
         });
     }
 
+    function getMCQSignature(mcq) {
+        if (!mcq) return "";
+        if (mcq.qid) return mcq.qid;
+        const parts = [mcq.level || "", mcq.questionNumber || "", (mcq.prompt || "").trim()];
+        return parts.join("::");
+    }
+
+    function lockAllMcqsExcept(signature) {
+        const mcqs = chatMessages.querySelectorAll(".mcq-container");
+        mcqs.forEach((el, idx) => {
+            const id = el.getAttribute("data-mcq-id") || "";
+            const isLast = idx === mcqs.length - 1;
+            if (!signature) {
+                el.classList.add("mcq-locked");
+                return;
+            }
+
+            if (id === signature && isLast) {
+                el.classList.remove("mcq-locked");
+            } else {
+                el.classList.add("mcq-locked");
+            }
+        });
+    }
+
     function renderPendingIntakeInteraction(step) {
         if (!step) return;
         removeInteractiveUI();
@@ -134,9 +161,25 @@
         }
 
         if (currentStep === "assessment" && state.assessment?.currentQuestion) {
-            if (!chatMessages.querySelector(".mcq-container")) {
+            const signature = getMCQSignature(state.assessment.currentQuestion);
+            const mcqWithSignature = signature
+                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
+                : null;
+
+            if (!mcqWithSignature) {
                 currentMCQ = state.assessment.currentQuestion;
                 addMCQQuestion(currentMCQ);
+            }
+
+            lockAllMcqsExcept(signature);
+            return;
+        }
+
+        if (currentStep === "assessment" && !state.assessment?.currentQuestion) {
+            lockAllMcqsExcept(null);
+
+            if (!assessmentFetchInFlight) {
+                startAssessment();
             }
             return;
         }
@@ -146,7 +189,17 @@
                 addSystemMessage(state.report.message);
             }
             currentStep = "report";
+            reportRequested = true;
             chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            return;
+        }
+
+        if (currentStep === "report" && !state.report?.message) {
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            if (!reportRequested) {
+                reportRequested = true;
+                generateReport();
+            }
             return;
         }
 
@@ -557,6 +610,8 @@
     }
 
     async function startAssessment() {
+        if (assessmentFetchInFlight) return;
+        assessmentFetchInFlight = true;
         showTypingIndicator();
 
         try {
@@ -570,7 +625,17 @@
             currentMCQ = mcq;
 
             hideTypingIndicator();
-            addMCQQuestion(mcq);
+
+            const signature = getMCQSignature(mcq);
+            const exists = signature
+                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
+                : null;
+
+            if (!exists) {
+                addMCQQuestion(mcq);
+            }
+
+            lockAllMcqsExcept(signature);
         } catch (error) {
             console.error("Error getting assessment question:", error);
             hideTypingIndicator();
@@ -579,6 +644,8 @@
                     ? "عذراً، حدث خطأ في التقييم."
                     : "Sorry, an error occurred during assessment.",
             );
+        } finally {
+            assessmentFetchInFlight = false;
         }
     }
 
@@ -848,6 +915,8 @@
     function addMCQQuestion(mcq) {
         const container = document.createElement("div");
         container.className = "mcq-container";
+        const signature = getMCQSignature(mcq);
+        if (signature) container.setAttribute("data-mcq-id", signature);
 
         const levelNames = {
             L1:
