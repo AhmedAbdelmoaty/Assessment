@@ -285,6 +285,7 @@ function createDefaultSessionState(sessionId, lang = "en") {
       evidence: [],
       questionIndexInAttempt: 1,
       usedClustersCurrentAttempt: [],
+      generatingQuestion: false,
       currentQuestion: null,
       stemsCurrentAttempt: [],
       lastAttemptStems: {},
@@ -612,9 +613,33 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     sessionId = chatSession.id;
 
     const session = await getSession(sessionId, userId);
-    session.currentStep = "assessment";
-
     const A = session.assessment;
+
+    if (A?.currentQuestion) {
+      const existing = A.currentQuestion;
+      const mcqPayload = {
+        kind: "question",
+        level: existing.level || A.currentLevel,
+        cluster: existing.cluster,
+        prompt: existing.prompt,
+        choices: existing.choices,
+        correct_answer: "__hidden__",
+        rationale: "",
+        questionNumber: A.questionIndexInAttempt || 1,
+        totalQuestions: 2,
+        lang: session.lang || "en",
+      };
+
+      return res.json(mcqPayload);
+    }
+
+    if (A?.generatingQuestion) {
+      return res.status(202).json({ status: "pending" });
+    }
+
+    session.currentStep = "assessment";
+    A.generatingQuestion = true;
+    await persistSessionState(sessionId, session, { status: "assessment" });
 
     const profile = {
       job_nature: session.intake.job_nature || "",
@@ -692,11 +717,19 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       lang: session.lang || "en",
     };
 
+    A.generatingQuestion = false;
     await persistSessionState(sessionId, session, { status: "assessment" });
     await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
     return res.json(mcqPayload);
   } catch (err) {
     console.error("Assessment next error:", err);
+    try {
+      const { sessionId } = req.body || {};
+      const session = sessionId ? await getSession(sessionId, req.session.userId) : null;
+      if (session?.assessment) {
+        session.assessment.generatingQuestion = false;
+      }
+    } catch {}
     res.status(500).json({ error: "Server error during assessment" });
   }
 });
@@ -773,6 +806,7 @@ app.post("/api/assess/answer", requireAuth, async (req, res) => {
     }
 
     A.currentQuestion = null;
+    A.generatingQuestion = false;
     await persistSessionState(sessionId, session, { status: session.currentStep });
 
     return res.json({
