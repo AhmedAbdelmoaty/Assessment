@@ -248,14 +248,10 @@
 
     function requestLanguageChange(lang) {
         const safeLang = lang === "ar" ? "ar" : "en";
-
-        // حدّث الحالة داخليًا أولًا
-        currentLang = safeLang;
-
-        // لو مكتبة الترجمة موجودة، خليها تحدث اللغة (هي تحفظها محليًا أيضًا)
         if (window.LA_I18N && typeof window.LA_I18N.setLocale === "function") {
             window.LA_I18N.setLocale(safeLang);
-            }
+            return;
+        }
 
         switchLanguage(safeLang);
         syncLanguageWithServer(safeLang);
@@ -270,34 +266,32 @@
             }
             const me = await meResp.json();
             const langFromProfile = me?.user?.locale;
-            // حمّل جلسة الشات قبل تثبيت اللغة
-            let chatData = null;
-            try {
-                const chatResp = await fetch("/api/chat/current");
-                if (chatResp.ok) {
-                    chatData = await chatResp.json();
-                }
-            } catch (e) {
-                console.warn("Failed to load persisted chat:", e);
-            }
-
-            const langFromState = chatData?.state?.lang;
             const preferred = getPreferredLocale();
-            const resolvedLang = langFromState || langFromProfile || preferred || "en";
-
-            // ثبت اللغة النهائية قبل تشغيل أي تدفق
-            requestLanguageChange(resolvedLang);
-
-            if (chatData?.session?.id) setSessionId(chatData.session.id);
-            if (Array.isArray(chatData?.messages)) {
-                renderPersistedMessages(chatData.messages);
+            const resolvedLang = preferred || langFromProfile || "en";
+            if (window.LA_I18N && resolvedLang) {
+                window.LA_I18N.setLocale(resolvedLang);
             }
-            if (chatData?.state) {
-                applyStateFromServer(chatData.state);
+            if (resolvedLang) {
+                currentLang = resolvedLang;
+                switchLanguage(currentLang);
             }
         } catch (err) {
             window.location.href = "/login.html";
             return false;
+        }
+
+        try {
+            const chatResp = await fetch("/api/chat/current");
+            if (chatResp.ok) {
+                const data = await chatResp.json();
+                if (data.session?.id) setSessionId(data.session.id);
+                if (Array.isArray(data.messages)) {
+                    renderPersistedMessages(data.messages);
+                }
+                applyStateFromServer(data.state);
+            }
+        } catch (e) {
+            console.warn("Failed to load persisted chat:", e);
         }
 
         return true;
