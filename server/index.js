@@ -118,12 +118,6 @@ function pushTranscript(session, item) {
   }
 }
 
-function normalizeMessageContent(raw) {
-  if (!raw) return "";
-  if (typeof raw === "string") return raw;
-  try { return JSON.stringify(raw); } catch { return String(raw); }
-}
-
 function transcriptToMessages(transcript = []) {
   return transcript.map(t => {
     const role = t.from === "user" ? "user" : "assistant";
@@ -601,104 +595,6 @@ function requireAuth(req, res, next) {
   next();
 }
 
-async function getProfile(userId) {
-  const { rows } = await pool.query(
-    "SELECT id, name, email, phone, locale FROM users WHERE id=$1",
-    [userId]
-  );
-  const user = rows[0] || {};
-  const intake = await loadUserIntakeProfile(userId);
-  return { user, intake: intake || {} };
-}
-
-async function updateProfile(userId, payload = {}) {
-  const { name, email, phone, locale } = payload;
-  const safeLocale = locale === "ar" ? "ar" : "en";
-  await pool.query(
-    `UPDATE users SET
-       name = COALESCE($1, name),
-       email = COALESCE($2, email),
-       phone = COALESCE($3, phone),
-       locale = COALESCE($4, locale)
-     WHERE id=$5`,
-    [name || null, email || null, phone || null, safeLocale, userId]
-  );
-  if (payload.intake) {
-    await saveUserIntakeProfile(userId, payload.intake);
-  }
-  return getProfile(userId);
-}
-
-function computeAssessmentSummary(evidence = []) {
-  const levelOrder = ["L1", "L2", "L3"];
-  const summary = [];
-  let totalCorrect = 0;
-
-  for (const level of levelOrder) {
-    const items = (evidence || []).filter(e => e.level === level);
-    const lastTwo = items.slice(-2);
-    const correct = lastTwo.filter(e => e.correct).length;
-    summary.push({ level, correct, total: 2 });
-    totalCorrect += correct;
-  }
-
-  const percent = Math.round((totalCorrect / 6) * 100);
-  return { totalCorrect, percent, summary };
-}
-
-async function persistAssessmentIfMissing(userId, sessionId, assessmentState = {}) {
-  const existing = await pool.query(
-    `SELECT id FROM assessments WHERE chat_session_id=$1 LIMIT 1`,
-    [sessionId]
-  );
-  if (existing.rows[0]) return existing.rows[0];
-
-  const evidence = Array.isArray(assessmentState.evidence) ? assessmentState.evidence : [];
-  const { totalCorrect, percent, summary } = computeAssessmentSummary(evidence);
-
-  const ins = await pool.query(
-    `INSERT INTO assessments (user_id, chat_session_id, correct_count, percent, levels_summary)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id`,
-    [userId, sessionId, totalCorrect, percent, summary]
-  );
-  return ins.rows[0];
-}
-
-async function fetchMessagesForSession(sessionId) {
-  const { rows } = await pool.query(
-    `SELECT sender, content, created_at
-     FROM chat_messages
-     WHERE chat_session_id=$1
-     ORDER BY created_at ASC`,
-    [sessionId]
-  );
-  return rows.map(r => ({
-    sender: r.sender,
-    content: normalizeMessageContent(r.content),
-    created_at: r.created_at,
-  }));
-}
-
-async function archiveSessionAsTutorial(userId, sessionId) {
-  if (!sessionId) return null;
-  const messages = await fetchMessagesForSession(sessionId);
-  if (!messages.length) return null;
-  const preview = messages
-    .map(m => (m.content || "").toString())
-    .join(" \u2022 ")
-    .slice(0, 220);
-
-  const title = messages[0]?.content?.slice(0, 80) || "Tutorial";
-  const { rows } = await pool.query(
-    `INSERT INTO tutorials (user_id, chat_session_id, title, preview, messages)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id`,
-    [userId, sessionId, title, preview, messages]
-  );
-  return rows[0];
-}
-
 // ===== Language sync (يوحّد لغة المستخدم والجلسة) =====
 app.post("/api/lang", requireAuth, async (req, res) => {
   try {
@@ -726,45 +622,6 @@ app.post("/api/lang", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("/api/lang error", err);
     return res.status(500).json({ error: true, message: "Failed to update language" });
-  }
-});
-
-// ===== Profile (GET/PUT) =====
-app.get("/api/profile", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const data = await getProfile(userId);
-    return res.json({
-      user: data.user,
-      intake: data.intake,
-    });
-  } catch (err) {
-    console.error("/api/profile GET error", err?.message || err);
-    return res.status(500).json({ error: true, message: "Failed to load profile" });
-  }
-});
-
-app.put("/api/profile", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const payload = req.body || {};
-    const updated = await updateProfile(userId, payload);
-
-    try {
-      const chatSession = await getOrCreateCurrentChatSession(userId);
-      const state = await getSession(chatSession.id, userId);
-      state.intake = { ...state.intake, ...(payload.intake || {}) };
-      state.lang = payload.locale === "ar" ? "ar" : state.lang;
-      ensureTeachingState(state).lang = state.lang;
-      await persistSessionState(chatSession.id, state, { status: state.currentStep });
-    } catch (e) {
-      console.warn("Failed to sync session with profile", e?.message || e);
-    }
-
-    return res.json(updated);
-  } catch (err) {
-    console.error("/api/profile PUT error", err?.message || err);
-    return res.status(500).json({ error: true, message: "Failed to update profile" });
   }
 });
 
@@ -1242,7 +1099,6 @@ app.post("/api/report", requireAuth, async (req, res) => {
     session.currentStep = "report";
 
     await persistSessionState(sessionId, session, { status: "report", reportState: report });
-    try { await persistAssessmentIfMissing(userId, sessionId, A); } catch (e) { console.warn("persistAssessmentIfMissing", e?.message || e); }
     await insertChatMessage(sessionId, "assistant", report.message || "");
 
     return res.json(report);
@@ -1260,24 +1116,6 @@ app.post("/api/report", requireAuth, async (req, res) => {
       gaps_display: [],
       stats_level: "Beginner",
     });
-  }
-});
-
-// ===== Assessments listing =====
-app.get("/api/assessments", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const { rows } = await pool.query(
-      `SELECT id, percent, correct_count, levels_summary, finished_at
-       FROM assessments
-       WHERE user_id=$1
-       ORDER BY finished_at DESC`,
-      [userId]
-    );
-    res.json({ assessments: rows });
-  } catch (err) {
-    console.error("/api/assessments error", err?.message || err);
-    res.status(500).json({ error: true, message: "Failed to load assessments" });
   }
 });
 
@@ -1571,58 +1409,6 @@ app.post("/api/teach/message", requireAuth, async (req, res) => {
   }
 });
 
-// ===== Tutorials =====
-app.get("/api/tutorials", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const { rows } = await pool.query(
-      `SELECT id, title, preview, created_at
-       FROM tutorials
-       WHERE user_id=$1
-       ORDER BY created_at DESC`,
-      [userId]
-    );
-    res.json({ tutorials: rows });
-  } catch (err) {
-    console.error("/api/tutorials GET", err?.message || err);
-    res.status(500).json({ error: true, message: "Failed to load tutorials" });
-  }
-});
-
-app.get("/api/tutorials/:id", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const { id } = req.params;
-    const { rows } = await pool.query(
-      `SELECT id, title, preview, messages, created_at
-       FROM tutorials
-       WHERE id=$1 AND user_id=$2
-       LIMIT 1`,
-      [id, userId]
-    );
-    if (!rows[0]) return res.status(404).json({ error: true, message: "Not found" });
-    res.json({ tutorial: rows[0] });
-  } catch (err) {
-    console.error("/api/tutorials/:id", err?.message || err);
-    res.status(500).json({ error: true, message: "Failed to load tutorial" });
-  }
-});
-
-app.delete("/api/tutorials/:id", requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const { id } = req.params;
-    await pool.query(
-      `DELETE FROM tutorials WHERE id=$1 AND user_id=$2`,
-      [id, userId]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("/api/tutorials DELETE", err?.message || err);
-    res.status(500).json({ error: true, message: "Failed to delete tutorial" });
-  }
-});
-
 // ===== فتح جلسة تقييم جديدة =====
 app.post("/api/chat/new", requireAuth, async (req, res) => {
   try {
@@ -1630,7 +1416,6 @@ app.post("/api/chat/new", requireAuth, async (req, res) => {
     const { sessionId = null } = req.body || {};
 
     if (sessionId) {
-      try { await archiveSessionAsTutorial(userId, sessionId); } catch (e) { console.warn("archiveSessionAsTutorial", e?.message || e); }
       await endChatSession(sessionId, userId);
     }
 
