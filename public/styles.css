@@ -2,6 +2,8 @@
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-arabic: 'Noto Sans Arabic', system-ui, -apple-system, sans-serif;
     --radius: 12px;
+    --header-height: 72px;
+    --header-offset: calc(var(--header-height) + 16px);
 
     /* Light theme */
     --background: hsl(210, 20%, 98%);
@@ -42,6 +44,10 @@ body {
     color: var(--foreground);
     line-height: 1.6;
     overflow-x: hidden;
+}
+
+body.has-topbar {
+    padding-top: var(--header-offset);
 }
 
 [dir="rtl"] body {
@@ -277,7 +283,7 @@ body {
 .chat-section {
     display: none;
     min-height: 100vh;
-    padding-top: 80px;
+    padding-top: 32px;
     padding-bottom: 120px;
 }
 
@@ -286,38 +292,187 @@ body {
 }
 
 .chat-header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: 20px 24px;
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    z-index: 100;
+    min-height: var(--header-height);
+    padding: 10px 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.05);
+    z-index: 120;
+}
+
+.chat-header .header-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 100%;
+    padding: 0 24px;
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 20px;
 }
 
-/* Logo size: أكبر على الديسكتوب، متوازن على الموبايل */
+.brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .brand-logo {
-  height: 48px;     /* كان صغير – الآن أوضح على اللاب/الديسكتوب */
-  width: auto;
-  display: block;
+    height: 44px;
+    width: auto;
+    display: block;
+    border-radius: 10px;
 }
 
-/* شاشات متوسطة */
-@media (max-width: 1024px) {
-  .brand-logo {
-    height: 42px;
-  }
+.brand-wordmark {
+    font-size: 17px;
+    letter-spacing: 0.3px;
 }
 
-/* موبايل */
-@media (max-width: 480px) {
-  .brand-logo {
-    height: 36px;
-  }
+.header-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid var(--border);
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.header-link:hover {
+    background: var(--muted);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.header-login,
+.header-signup,
+.header-logout {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.header-signup {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.header-login:hover,
+.header-logout:hover,
+.header-link:hover {
+    background: var(--muted);
+    transform: translateY(-1px);
+}
+
+.header-signup:hover {
+    filter: brightness(0.95);
+    box-shadow: 0 8px 18px rgba(165, 32, 37, 0.18);
+}
+
+.lang-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: filter 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.lang-btn:hover {
+    filter: brightness(0.95);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(165, 32, 37, 0.18);
+}
+
+.chat-header[dir="rtl"] .header-inner {
+    direction: rtl;
+}
+
+.chat-header[dir="rtl"] .header-nav {
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+}
+
+.chat-header[dir="rtl"] .header-actions {
+    flex-direction: row-reverse;
+}
+
+@media (max-width: 768px) {
+    .chat-header {
+        min-height: 64px;
+        padding: 8px 0;
+    }
+
+    .chat-header .header-inner {
+        padding: 0 16px;
+        gap: 12px;
+    }
+
+    .brand-logo {
+        height: 32px;
+    }
+
+    .brand-wordmark {
+        display: none;
+    }
+
+    .header-link,
+    .header-login,
+    .header-signup,
+    .header-logout,
+    .lang-btn {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+}
+
+body.has-topbar .dashboard-layout,
+body.has-topbar .landing-section,
+body.has-topbar .auth-wrap {
+    padding-top: var(--header-offset);
 }
 
 
@@ -1066,85 +1221,6 @@ html.lang-ar body {
 /* تحسين طفيف لشكل المائل والعريض داخل رسائل المعلّم */
 .message-bubble.system .message-content em { font-style: italic; }
 .message-bubble.system .message-content strong { font-weight: 700; }
-/* === Harmonize Unified Header with old look === */
-.chat-header{
-  position: fixed; /* نفس سلوك القديم */
-  top: 0; left: 0; right: 0;
-  width: 100%;
-  background: var(--card, #fff);
-  border-bottom: 1px solid var(--border, #e5e7eb);
-  z-index: 50;
-}
-
-/* نفس عرض الحاوية والفراغات */
-.chat-header .header-inner{
-  max-width: 1120px;          /* قريب من الهوم القديم */
-  margin: 0 auto;
-  height: 64px;               /* ارتفاع الهيدر */
-  padding: 0 24px;            /* نفس الهوامش الجانبية */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-/* الشعار بنفس المقاس */
-.chat-header .brand-link{ display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
-.chat-header .brand-logo{ height: 48px; display: block; }
-
-/* مجموعة الأزرار يمين الهيدر */
-.chat-header .header-right{
-  margin-inline-start: auto;
-  display: flex; align-items: center; gap: 10px;
-}
-
-/* شكل الأزرار العامة (Chat/Dashboard/Login/Logout) */
-.chat-header .header-link,
-.chat-header .header-login,
-.chat-header .header-logout{
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 36px; padding: 0 14px;
-  border-radius: 999px;
-  background: #fff;
-  border: 1px solid var(--border, #e5e7eb);
-  color: inherit; text-decoration: none; cursor: pointer;
-  font-weight: 600;
-}
-.chat-header .header-link:hover,
-.chat-header .header-login:hover,
-.chat-header .header-logout:hover{
-  background: var(--muted, #f6f7f8);
-}
-
-/* زر اللغة بالنبيتي (نفس شكل زر English القديم) */
-.chat-header .lang-toggle .lang-btn{
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 36px; padding: 0 14px;
-  border-radius: 999px;
-  background: var(--primary, #981b1e); color: #fff;
-  border: 1px solid var(--primary, #981b1e);
-  font-weight: 600; cursor: pointer; text-decoration: none;
-}
-.chat-header .lang-toggle .lang-btn:hover{ filter: brightness(.95); }
-
-/* دعم العربية */
-.lang-ar .chat-header .header-inner{ direction: rtl; }
-.lang-ar .chat-header .header-right{ flex-direction: row-reverse; }
-.lang-ar .chat-header .header-nav{ flex-direction: row-reverse; }
-
-/* منع تداخل الهيدر الثابت مع المحتوى */
-body.has-topbar{ padding-top: 72px; }
-
-/* Responsive — نفس تقليص الارتفاع على الشاشات الصغيرة */
-@media (max-width: 640px){
-  .chat-header .header-inner{ height: 56px; padding: 0 12px; }
-  .chat-header .brand-logo{ height: 24px; }
-  .chat-header .lang-toggle .lang-btn,
-  .chat-header .header-link,
-  .chat-header .header-login,
-  .chat-header .header-logout{ height: 32px; padding: 0 12px; }
-}
-
 
 /* Floating action for New Assessment */
 .floating-action {
