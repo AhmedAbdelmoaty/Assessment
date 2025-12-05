@@ -43,6 +43,59 @@ async function ensureIntakeProfileSchema() {
 
 ensureIntakeProfileSchema();
 
+async function ensureAssessmentsSchema() {
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS assessments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        correct_count INT NOT NULL,
+        percent INT NOT NULL,
+        levels_summary JSONB NOT NULL,
+        finished_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_assessments_session_unique ON assessments(chat_session_id);
+      CREATE INDEX IF NOT EXISTS idx_assessments_user ON assessments(user_id, finished_at DESC);
+    `);
+  } catch (err) {
+    console.warn("ensureAssessmentsSchema failed", err?.message || err);
+  }
+}
+
+async function ensureTutorialsSchema() {
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tutorials (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        messages JSONB NOT NULL,
+        source_session_id UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_tutorials_user ON tutorials(user_id, created_at DESC);
+    `);
+  } catch (err) {
+    console.warn("ensureTutorialsSchema failed", err?.message || err);
+  }
+}
+
+async function ensureUsersPhoneColumn() {
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
+  } catch (err) {
+    console.warn("ensureUsersPhoneColumn failed", err?.message || err);
+  }
+}
+
+ensureAssessmentsSchema();
+ensureTutorialsSchema();
+ensureUsersPhoneColumn();
+
 // Replit/Proxy
 app.set("trust proxy", 1);
 
@@ -470,6 +523,99 @@ function hydrateSessionWithProfile(session, profile = null, lang = "en") {
   return session;
 }
 
+function computeAssessmentScore(assessmentState = {}) {
+  const evidence = Array.isArray(assessmentState.evidence)
+    ? assessmentState.evidence.map(e => ({
+        level: (e.level || "").toUpperCase(),
+        correct: !!e.correct,
+      }))
+    : [];
+
+  const levels = ["L1", "L2", "L3"];
+  const summary = {};
+  let correctTotal = 0;
+
+  for (const lvl of levels) {
+    const levelEvidence = evidence.filter(e => e.level === lvl);
+    const finalTwo = levelEvidence.slice(-2);
+    const correctCount = finalTwo.filter(e => e.correct).length;
+    const answered = finalTwo.length;
+    const missingAsWrong = Math.max(0, 2 - answered);
+    const totalCorrectForLevel = correctCount;
+    const totalWrongForLevel = missingAsWrong + (2 - missingAsWrong - correctCount);
+
+    summary[lvl] = {
+      correct: totalCorrectForLevel,
+      wrong: totalWrongForLevel,
+    };
+    correctTotal += totalCorrectForLevel;
+  }
+
+  const percent = Math.round((correctTotal / 6) * 100);
+  return { correctTotal, percent, summary };
+}
+
+async function persistAssessmentResult(userId, sessionId) {
+  const session = await getSession(sessionId, userId);
+  if (!session || session.currentStep !== "report") {
+    throw new Error("Session is not completed yet");
+  }
+
+  const { correctTotal, percent, summary } = computeAssessmentScore(session.assessment || {});
+
+  const result = await pool.query(
+    `INSERT INTO assessments (user_id, chat_session_id, correct_count, percent, levels_summary, finished_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (chat_session_id)
+     DO UPDATE SET correct_count = EXCLUDED.correct_count,
+                   percent = EXCLUDED.percent,
+                   levels_summary = EXCLUDED.levels_summary,
+                   finished_at = EXCLUDED.finished_at
+     RETURNING id, chat_session_id, correct_count, percent, levels_summary, finished_at`,
+    [userId, sessionId, correctTotal, percent, summary]
+  );
+
+  return result.rows[0];
+}
+
+async function listAssessments(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, chat_session_id, correct_count, percent, levels_summary, finished_at
+     FROM assessments
+     WHERE user_id=$1
+     ORDER BY finished_at DESC`,
+    [userId]
+  );
+  return rows;
+}
+
+function buildProfileResponse(userRow = {}, intake = {}) {
+  return {
+    full_name: userRow.name || "",
+    email: userRow.email || "",
+    phone: userRow.phone || "",
+    country: intake.country || "",
+    age_band: intake.age_band || "",
+    job_nature: intake.job_nature || "",
+    experience: intake.experience_years_band || intake.experience_band || "",
+    job_title: intake.job_title_exact || "",
+    sector: intake.sector || "",
+    learning_reason: intake.learning_reason || "",
+  };
+}
+
+async function updateSessionIntake(sessionId, userId, intakePayload) {
+  if (!sessionId) return;
+  try {
+    const session = await getSession(sessionId, userId);
+    session.intake = { ...session.intake, ...intakePayload };
+    session.currentStep = session.currentStep || "assessment";
+    await persistSessionState(sessionId, session, { status: session.currentStep });
+  } catch (err) {
+    console.warn("updateSessionIntake skipped", err?.message || err);
+  }
+}
+
 async function createNewChatSession(userId, { lang: langOverride = null } = {}) {
   const lang = langOverride || (await getUserLocale(userId)) || "en";
   const profile = await loadUserIntakeProfile(userId);
@@ -589,6 +735,85 @@ app.get("/api/auth/me", async (req, res) => {
   res.json({ user: rows[0] });
 });
 
+app.get("/api/profile", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const userRow = await pool
+      .query("SELECT id, name, email, phone FROM users WHERE id=$1", [userId])
+      .then(r => r.rows[0] || {});
+
+    const intake = (await loadUserIntakeProfile(userId)) || {};
+    const payload = buildProfileResponse(userRow, intake);
+    res.json(payload);
+  } catch (err) {
+    console.error("/api/profile error", err);
+    res.status(500).json({ error: true, message: "Failed to load profile" });
+  }
+});
+
+app.put("/api/profile", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const {
+      full_name = "",
+      email = "",
+      phone = "",
+      country = "",
+      age_band = "",
+      job_nature = "",
+      experience = "",
+      job_title = "",
+      sector = "",
+      learning_reason = "",
+      sessionId = null,
+    } = req.body || {};
+
+    if (!full_name || !email) {
+      return res.status(400).json({ error: true, message: "name and email required" });
+    }
+
+    await pool.query(
+      `UPDATE users SET name=$1, email=$2, phone=$3 WHERE id=$4`,
+      [full_name, email, phone, userId]
+    );
+
+    await saveUserIntakeProfile(userId, {
+      country,
+      age_band,
+      job_nature,
+      experience_years_band: experience,
+      job_title_exact: job_title,
+      sector,
+      learning_reason,
+      phone,
+      full_name,
+      email,
+    });
+
+    if (sessionId) {
+      await updateSessionIntake(sessionId, userId, {
+        country,
+        age_band,
+        job_nature,
+        experience_years_band: experience,
+        job_title_exact: job_title,
+        sector,
+        learning_reason,
+      });
+    }
+
+    const refreshedIntake = (await loadUserIntakeProfile(userId)) || {};
+    const userRow = await pool
+      .query("SELECT id, name, email, phone FROM users WHERE id=$1", [userId])
+      .then(r => r.rows[0] || {});
+
+    res.json(buildProfileResponse(userRow, refreshedIntake));
+  } catch (err) {
+    console.error("/api/profile update error", err);
+    res.status(500).json({ error: true, message: "Failed to update profile" });
+  }
+});
+
 // ===== requireAuth [ADDED] =====
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: "unauthorized" });
@@ -622,6 +847,113 @@ app.post("/api/lang", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("/api/lang error", err);
     return res.status(500).json({ error: true, message: "Failed to update language" });
+  }
+});
+
+app.get("/api/assessments", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const items = await listAssessments(userId);
+    const avg = items.length
+      ? Math.round(items.reduce((sum, a) => sum + (a.percent || 0), 0) / items.length)
+      : 0;
+    res.json({ assessments: items, average: avg });
+  } catch (err) {
+    console.error("/api/assessments error", err);
+    res.status(500).json({ error: true, message: "Failed to load assessments" });
+  }
+});
+
+app.post("/api/assessments", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { sessionId } = req.body || {};
+    if (!sessionId) return res.status(400).json({ error: true, message: "sessionId required" });
+    const record = await persistAssessmentResult(userId, sessionId);
+    res.json(record);
+  } catch (err) {
+    console.error("/api/assessments save error", err);
+    res.status(400).json({ error: true, message: err?.message || "Failed to save assessment" });
+  }
+});
+
+app.get("/api/tutorials", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { rows } = await pool.query(
+      `SELECT id, title, messages, source_session_id, created_at
+       FROM tutorials
+       WHERE user_id=$1
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    res.json({ tutorials: rows });
+  } catch (err) {
+    console.error("/api/tutorials error", err);
+    res.status(500).json({ error: true, message: "Failed to load tutorials" });
+  }
+});
+
+app.post("/api/tutorials", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { title = "", messages = [], sessionId = null } = req.body || {};
+    if (!title || !Array.isArray(messages)) {
+      return res.status(400).json({ error: true, message: "title and messages required" });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO tutorials (user_id, title, messages, source_session_id)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, title, messages, source_session_id, created_at`,
+      [userId, title, messages, sessionId]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("/api/tutorials save error", err);
+    res.status(500).json({ error: true, message: "Failed to save tutorial" });
+  }
+});
+
+app.delete("/api/tutorials/:id", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { id } = req.params;
+    await pool.query(`DELETE FROM tutorials WHERE id=$1 AND user_id=$2`, [id, userId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("/api/tutorials delete error", err);
+    res.status(500).json({ error: true, message: "Failed to delete tutorial" });
+  }
+});
+
+app.post("/api/session/new-assessment", requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const { currentSessionId = null, archiveTitle = "", archiveTranscript = [] } = req.body || {};
+
+    if (archiveTitle && Array.isArray(archiveTranscript) && archiveTranscript.length) {
+      const normalized = archiveTranscript.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        content: m.content || "",
+        time: m.time || new Date().toISOString(),
+      }));
+      await pool.query(
+        `INSERT INTO tutorials (user_id, title, messages, source_session_id)
+         VALUES ($1, $2, $3, $4)`,
+        [userId, archiveTitle, normalized, currentSessionId]
+      );
+    }
+
+    if (currentSessionId) {
+      await endChatSession(currentSessionId, userId);
+    }
+
+    const newSession = await createNewChatSession(userId);
+    res.json({ sessionId: newSession.id });
+  } catch (err) {
+    console.error("/api/session/new-assessment error", err);
+    res.status(500).json({ error: true, message: "Failed to start new assessment" });
   }
 });
 
@@ -1100,6 +1432,12 @@ app.post("/api/report", requireAuth, async (req, res) => {
 
     await persistSessionState(sessionId, session, { status: "report", reportState: report });
     await insertChatMessage(sessionId, "assistant", report.message || "");
+
+    try {
+      await persistAssessmentResult(userId, sessionId);
+    } catch (err) {
+      console.warn("Could not persist assessment result", err?.message || err);
+    }
 
     return res.json(report);
   } catch (err) {

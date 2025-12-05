@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body data-header="private">
+  <div class="dashboard-layout">
+    <aside class="dash-sidebar" aria-label="Dashboard navigation">
+      <div class="dash-brand">
+        <div class="brand-mark">IM</div>
+        <div class="brand-text">
+          <div class="brand-name">Learning Advisor</div>
+          <div class="brand-sub" data-i18n="brand.subtitle"></div>
+        </div>
+      </div>
+      <nav class="dash-nav" id="dashNav">
+        <button class="nav-btn active" data-section="overview" aria-controls="overviewSection">
+          <i class="fa-solid fa-chart-line"></i>
+          <span data-i18n="nav.overview"></span>
+        </button>
+        <button class="nav-btn" data-section="info" aria-controls="infoSection">
+          <i class="fa-solid fa-id-card"></i>
+          <span data-i18n="nav.info"></span>
+        </button>
+        <button class="nav-btn" data-section="assessments" aria-controls="assessmentsSection">
+          <i class="fa-solid fa-clipboard-check"></i>
+          <span data-i18n="nav.assessments"></span>
+        </button>
+        <button class="nav-btn" data-section="tutorials" aria-controls="tutorialsSection">
+          <i class="fa-solid fa-book-open"></i>
+          <span data-i18n="nav.tutorials"></span>
+        </button>
+        <button class="nav-btn" data-section="videos" aria-controls="videosSection">
+          <i class="fa-solid fa-video"></i>
+          <span data-i18n="nav.videos"></span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="dash-main">
+      <header class="dash-header">
+        <div class="header-text">
+          <h1 data-i18n="header.title"></h1>
+          <p data-i18n="header.subtitle"></p>
+        </div>
+        <div class="header-actions">
+          <button class="primary-btn" id="newAssessmentFromHeader">
+            <i class="fa-solid fa-plus"></i>
+            <span data-i18n="actions.newAssessment"></span>
+          </button>
+        </div>
+      </header>
+
+      <section class="dash-section" id="overviewSection">
+        <div class="cards-grid">
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="overview.points"></div>
+            <div class="stat-value" id="statTotalPoints">0</div>
+            <div class="stat-sub" data-i18n="overview.pointsSub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="overview.average"></div>
+            <div class="stat-value" id="statAverageScore">0%</div>
+            <div class="progress-bar" aria-hidden="true">
+              <div class="progress-fill" id="avgProgress"></div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="overview.assessments"></div>
+            <div class="stat-value" id="statAssessments">0</div>
+            <div class="stat-sub" data-i18n="overview.assessmentsSub"></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="overview.tutorials"></div>
+            <div class="stat-value" id="statTutorials">0</div>
+            <div class="stat-sub" data-i18n="overview.tutorialsSub"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2 data-i18n="overview.recentAssessments"></h2>
+            <div class="pill" id="recentAverage"></div>
+          </div>
+          <div id="recentAssessments" class="panel-body empty" data-i18n="overview.noAssessments"></div>
+        </div>
+      </section>
+
+      <section class="dash-section hidden" id="infoSection">
+        <div class="section-header">
+          <h2 data-i18n="info.title"></h2>
+          <div class="info-actions">
+            <button class="ghost-btn" id="cancelEdit" hidden><span data-i18n="actions.cancel"></span></button>
+            <button class="primary-btn" id="editToggle"><span data-i18n="actions.edit"></span></button>
+            <button class="primary-btn" id="saveProfile" hidden><span data-i18n="actions.save"></span></button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-body">
+            <div class="form-grid" id="profileForm">
+              <label class="form-field">
+                <span data-i18n="info.full_name"></span>
+                <input type="text" id="full_name" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.email"></span>
+                <input type="email" id="email" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.phone"></span>
+                <input type="tel" id="phone" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.country"></span>
+                <input type="text" id="country" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.age_band"></span>
+                <input type="text" id="age_band" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.job_nature"></span>
+                <input type="text" id="job_nature" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.experience"></span>
+                <input type="text" id="experience" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.job_title"></span>
+                <input type="text" id="job_title" disabled>
+              </label>
+              <label class="form-field">
+                <span data-i18n="info.sector"></span>
+                <input type="text" id="sector" disabled>
+              </label>
+              <label class="form-field span-2">
+                <span data-i18n="info.learning_reason"></span>
+                <input type="text" id="learning_reason" disabled>
+              </label>
+            </div>
+            <p class="helper" data-i18n="info.helper"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="dash-section hidden" id="assessmentsSection">
+        <div class="section-header">
+          <div>
+            <h2 data-i18n="assessments.title"></h2>
+            <p class="muted" data-i18n="assessments.subtitle"></p>
+          </div>
+          <div class="filters" id="assessmentFilters">
+            <button data-filter="newest" class="pill-btn active" data-i18n="filters.newest"></button>
+            <button data-filter="oldest" class="pill-btn" data-i18n="filters.oldest"></button>
+            <button data-filter="highest" class="pill-btn" data-i18n="filters.highest"></button>
+            <button data-filter="lowest" class="pill-btn" data-i18n="filters.lowest"></button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-body" id="assessmentsList" data-i18n="assessments.empty"></div>
+        </div>
+      </section>
+
+      <section class="dash-section hidden" id="tutorialsSection">
+        <div class="section-header">
+          <div>
+            <h2 data-i18n="tutorials.title"></h2>
+            <p class="muted" data-i18n="tutorials.subtitle"></p>
+          </div>
+          <div class="filters" id="tutorialFilters">
+            <button data-filter="newest" class="pill-btn active" data-i18n="filters.newest"></button>
+            <button data-filter="oldest" class="pill-btn" data-i18n="filters.oldest"></button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-body" id="tutorialsList" data-i18n="tutorials.empty"></div>
+        </div>
+      </section>
+
+      <section class="dash-section hidden" id="videosSection">
+        <div class="panel">
+          <div class="panel-body center">
+            <div class="video-placeholder">
+              <i class="fa-solid fa-video"></i>
+            </div>
+            <h3 data-i18n="videos.title"></h3>
+            <p class="muted" data-i18n="videos.subtitle"></p>
+            <button class="primary-btn" id="browseVideos" type="button" aria-label="browse videos">
+              <span data-i18n="videos.cta"></span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal hidden" id="tutorialModal" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle"></h3>
+        <button class="ghost-btn" id="closeModal" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="modalMessages"></div>
+    </div>
+  </div>
+
+  <script defer src="/js/common/i18n.js"></script>
+  <script defer src="/js/common/header.js"></script>
+  <script defer src="/dashboard.js"></script>
+</body>
+</html>
