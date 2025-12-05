@@ -121,7 +121,7 @@
     const syncHeaderMetrics = () => {
       const rect = header.getBoundingClientRect();
       const height = Math.ceil(rect.height);
-      const offset = height + 16; // مسافة أمان بسيطة تحت الهيدر
+      const offset = height ; // مسافة أمان بسيطة تحت الهيدر
       const root = document.documentElement;
       root.style.setProperty("--header-height", `${height}px`);
       root.style.setProperty("--header-offset", `${offset}px`);
