@@ -36,7 +36,6 @@
       <div class="header-inner">
         <a href="index.html" class="brand-link" aria-label="Home">
           <img src="assets/imp-logo.jpeg" alt="IMP logo" class="brand-logo" />
-          <span class="brand-wordmark">Learning Advisor</span>
         </a>
 
         <nav class="header-nav" aria-label="Main navigation"></nav>

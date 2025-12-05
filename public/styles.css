@@ -2,7 +2,7 @@
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-arabic: 'Noto Sans Arabic', system-ui, -apple-system, sans-serif;
     --radius: 12px;
-    --header-height: 72px;
+    --header-height:80px;
     --header-offset: calc(var(--header-height) + 16px);
 
     /* Light theme */
