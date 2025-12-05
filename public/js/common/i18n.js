@@ -34,19 +34,10 @@
     const lang = SUPPORTED.has(langArg) ? langArg : getLocale();
     const html = document.documentElement;
 
-    // اضبط اللغة والاتجاه على العنصر الجذري (ومزامنة مع الـ body)
-    const dir = lang === "ar" ? "rtl" : "ltr";
+    // Keep layout LTR per current design; toggle lang classes for CSS if needed
     html.setAttribute("lang", lang === "ar" ? "ar" : "en");
-    html.setAttribute("dir", dir);
     html.classList.toggle("lang-ar", lang === "ar");
     html.classList.toggle("lang-en", lang !== "ar");
-
-    const body = document.body;
-    if (body) {
-      body.setAttribute("dir", dir);
-      body.classList.toggle("lang-ar", lang === "ar");
-      body.classList.toggle("lang-en", lang !== "ar");
-    }
 
     // Toggle any [data-lang-content] blocks
     document.querySelectorAll("[data-lang-content]").forEach((el) => {

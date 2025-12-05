@@ -1,75 +1,83 @@
 (function () {
   "use strict";
 
-  const LABELS = {
-    en: {
-      home: "Home",
-      dashboard: "Dashboard",
-      chat: "Chat",
-      login: "Login",
-      signup: "Sign up",
-      logout: "Logout",
-      language: "العربية",
-    },
-    ar: {
-      home: "الرئيسية",
-      dashboard: "لوحة التحكم",
-      chat: "الشات",
-      login: "تسجيل الدخول",
-      signup: "إنشاء حساب",
-      logout: "تسجيل الخروج",
-      language: "English",
-    },
-  };
-
-  function createLink(href, className, icon, labelKey) {
-    const a = document.createElement("a");
-    a.href = href;
-    a.className = className;
-    a.innerHTML = `<i class="${icon}"></i><span data-label="${labelKey}"></span>`;
-    return a;
-  }
-
-  function buildHeader(mode) {
-    const header = document.createElement("header");
+  // يبني نفس بنية الهيدر القديم (نفس الكلاسات) علشان يرث CSS كما هو
+  function buildLegacyHeader(mode) {
+    const header = document.createElement("div");
     header.className = "chat-header";
 
     header.innerHTML = `
       <div class="header-inner">
-        <a href="index.html" class="brand-link" aria-label="Home">
-          <img src="assets/imp-logo.jpeg" alt="IMP logo" class="brand-logo" />
-          <span class="brand-wordmark">Learning Advisor</span>
-        </a>
+        <div class="header-left">
+          <a href="index.html" class="brand-link" aria-label="Home">
+            <img src="assets/imp-logo.jpeg" alt="IMP logo" class="brand-logo">
+          </a>
+        </div>
 
-        <nav class="header-nav" aria-label="Main navigation"></nav>
+        <div class="header-right">
+          <nav class="header-nav"></nav>
 
-        <div class="header-actions">
-          <button class="lang-btn" type="button" id="langSwitch">
-            <i class="fa-solid fa-language"></i>
-            <span class="lang-text"></span>
-          </button>
+          <div class="lang-toggle">
+            <!-- زر لغة واحد بدل زرين -->
+            <button class="lang-btn" id="langSwitch">
+              <i class="fa-solid fa-language"></i>
+              <span class="lang-text">English</span>
+            </button>
+          </div>
         </div>
       </div>
     `;
 
     const nav = header.querySelector(".header-nav");
-    const actions = header.querySelector(".header-actions");
     const langBtn = header.querySelector("#langSwitch");
+    const langText = header.querySelector(".lang-text");
 
-    // الروابط الأساسية حسب نوع الصفحة
-    const homeLink = createLink("index.html", "header-link", "fa-solid fa-house", "home");
-    nav.appendChild(homeLink);
+    function syncLangButton() {
+      const cur = (window.LA_I18N && window.LA_I18N.getLocale()) || "en";
+      langText.textContent = cur === "ar" ? "English" : "العربية";
+    }
 
-    if (mode === "private") {
-      const dashLink = createLink("dashboard.html", "header-link", "fa-solid fa-chart-line", "dashboard");
-      const chatLink = createLink("app.html", "header-link", "fa-solid fa-comments", "chat");
-      nav.appendChild(dashLink);
+    langBtn.addEventListener("click", function () {
+      const cur = (window.LA_I18N && window.LA_I18N.getLocale()) || "en";
+      const next = cur === "ar" ? "en" : "ar";
+      if (window.LA_I18N) window.LA_I18N.setLocale(next);
+      syncLangButton();
+    });
+
+    if (mode === "public-home") {
+      // زر Login صغير في الهيدر
+      const loginLink = document.createElement("a");
+      loginLink.href = "login.html";
+      loginLink.className = "lang-btn header-login";
+      loginLink.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i> <span>Login</span>`;
+      header.querySelector(".header-right")
+            .insertBefore(loginLink, header.querySelector(".lang-toggle"));
+    } else if (mode === "public-auth") {
+      // لا شيء إضافي — شعار + زر لغة فقط
+    } else if (mode === "private") {
+      const chatLink = document.createElement("a");
+      chatLink.href = "app.html";
+      chatLink.className = "lang-btn header-link";
+      chatLink.innerHTML = `<i class="fa-solid fa-comments"></i> <span>${
+        document.documentElement.classList.contains("lang-ar") ? "الشات" : "Chat"
+      }</span>`;
+
+      const dashLink = document.createElement("a");
+      dashLink.href = "dashboard.html";
+      dashLink.className = "lang-btn header-link";
+      dashLink.innerHTML = `<i class="fa-solid fa-chart-line"></i> <span>${
+        document.documentElement.classList.contains("lang-ar") ? "لوحة التحكم" : "Dashboard"
+      }</span>`;
+
       nav.appendChild(chatLink);
+      nav.appendChild(dashLink);
 
       const logoutBtn = document.createElement("button");
       logoutBtn.type = "button";
-      logoutBtn.className = "header-logout";
-      logoutBtn.innerHTML = `<i class="fa-solid fa-arrow-right-from-bracket"></i><span data-label="logout"></span>`;
+      logoutBtn.className = "lang-btn header-logout";
+      logoutBtn.innerHTML = `<i class="fa-solid fa-arrow-right-from-bracket"></i> <span>${
+        document.documentElement.classList.contains("lang-ar") ? "تسجيل الخروج" : "Logout"
+      }</span>`;
       logoutBtn.addEventListener("click", function () {
         if (window.LA_AUTH && typeof window.LA_AUTH.logout === "function") {
           window.LA_AUTH.logout();
@@ -77,40 +85,12 @@
           window.location.href = "index.html";
         }
       });
-      actions.insertBefore(logoutBtn, langBtn);
-    } else if (mode === "public-home") {
-      const loginLink = createLink("login.html", "header-login", "fa-solid fa-right-to-bracket", "login");
-      const signupLink = createLink("signup.html", "header-signup", "fa-solid fa-user-plus", "signup");
-      actions.insertBefore(loginLink, langBtn);
-      actions.insertBefore(signupLink, langBtn);
+
+      header.querySelector(".header-right")
+            .insertBefore(logoutBtn, header.querySelector(".lang-toggle"));
     }
 
-    function syncLangButton(lang) {
-      const cur = LABELS[lang] ? lang : "en";
-      langBtn.querySelector(".lang-text").textContent = LABELS[cur].language;
-      header.setAttribute("dir", lang === "ar" ? "rtl" : "ltr");
-
-      header.querySelectorAll("[data-label]").forEach((node) => {
-        const key = node.getAttribute("data-label");
-        const text = LABELS[cur][key] || LABELS.en[key] || "";
-        node.textContent = text;
-      });
-    }
-
-    langBtn.addEventListener("click", function () {
-      const cur = (window.LA_I18N && window.LA_I18N.getLocale()) || "en";
-      const next = cur === "ar" ? "en" : "ar";
-      if (window.LA_I18N) window.LA_I18N.setLocale(next);
-    });
-
-    window.addEventListener("la:locale-changed", function (ev) {
-      syncLangButton(ev?.detail?.lang || "en");
-    });
-
-    // تهيئة أولية
-    const initial = (window.LA_I18N && window.LA_I18N.getLocale()) || "en";
-    syncLangButton(initial);
-
+    syncLangButton();
     return header;
   }
 
@@ -118,11 +98,11 @@
     const body = document.body;
     const mode = body.getAttribute("data-header") || "public-home";
 
+    // لو لسه كتلة الهيدر القديمة موجودة في الصفحة، منفضّل ما نضيفش واحد جديد
     if (document.querySelector(".chat-header")) return;
 
-    const header = buildHeader(mode);
+    const header = buildLegacyHeader(mode);
     body.insertBefore(header, body.firstChild);
-    body.classList.add("has-topbar");
 
     if (mode === "public-auth") {
       const inCardBrand = document.querySelector(".auth-brand");
@@ -131,10 +111,6 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    try {
-      initUnifiedHeader();
-    } catch (e) {
-      console.error("Header init error", e);
-    }
+    try { initUnifiedHeader(); } catch (e) { console.error("Header init error", e); }
   });
 })();
