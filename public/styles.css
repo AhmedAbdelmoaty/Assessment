@@ -470,8 +470,7 @@ body.has-topbar {
 }
 
 body.has-topbar .dashboard-layout,
-body.has-topbar .landing-section,
-body.has-topbar .auth-wrap {
+body.has-topbar .landing-section {
     padding-top: 0;
 }
 
