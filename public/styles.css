@@ -314,6 +314,64 @@ body.has-topbar {
     gap: 20px;
 }
 
+.menu-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+    transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.menu-toggle:hover {
+    background: var(--muted);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
+}
+
+.menu-toggle:focus-visible {
+    outline: 3px solid var(--primary-15);
+    outline-offset: 2px;
+}
+
+.menu-toggle-icon,
+.menu-toggle-icon::before,
+.menu-toggle-icon::after {
+    display: block;
+    width: 18px;
+    height: 2px;
+    background: var(--foreground);
+    border-radius: 99px;
+    position: relative;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.menu-toggle-icon::before,
+.menu-toggle-icon::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+}
+
+.menu-toggle-icon::before { top: -6px; }
+.menu-toggle-icon::after { top: 6px; }
+
+.chat-header.menu-open .menu-toggle-icon {
+    transform: rotate(45deg);
+}
+
+.chat-header.menu-open .menu-toggle-icon::before {
+    transform: translateY(6px) rotate(90deg);
+}
+
+.chat-header.menu-open .menu-toggle-icon::after {
+    opacity: 0;
+}
+
 .brand-link {
     display: inline-flex;
     align-items: center;
@@ -336,6 +394,15 @@ body.has-topbar {
     letter-spacing: 0.3px;
 }
 
+.header-menu {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
 .header-nav {
     display: flex;
     align-items: center;
@@ -348,6 +415,11 @@ body.has-topbar {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.header-menu.is-open {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .header-link {
@@ -440,6 +512,71 @@ body.has-topbar {
     flex-direction: row-reverse;
 }
 
+@media (max-width: 991px) {
+    .chat-header {
+        min-height: 72px;
+    }
+
+    .chat-header .header-inner {
+        padding: 0 16px;
+        gap: 14px;
+        justify-content: space-between;
+    }
+
+    .menu-toggle {
+        display: inline-flex;
+    }
+
+    .header-menu {
+        position: fixed;
+        top: var(--header-height);
+        inset-inline: 0;
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+        padding: 16px;
+        gap: 16px;
+        flex-direction: column;
+        align-items: stretch;
+        opacity: 0;
+        transform: translateY(-6px);
+        pointer-events: none;
+        visibility: hidden;
+        z-index: 119;
+    }
+
+    .header-menu.is-open {
+        pointer-events: auto;
+        visibility: visible;
+    }
+
+    .header-nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .header-actions {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .header-link,
+    .header-login,
+    .header-signup,
+    .header-logout,
+    .lang-btn {
+        width: 100%;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .brand-link {
+        margin-inline-end: auto;
+    }
+}
+
 @media (max-width: 768px) {
     .chat-header {
         min-height: 64px;
@@ -452,7 +589,7 @@ body.has-topbar {
     }
 
     .brand-logo {
-        height: 32px;
+        height: 46px;
     }
 
     .brand-wordmark {

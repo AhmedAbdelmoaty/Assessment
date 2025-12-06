@@ -20,6 +20,8 @@
     },
   };
 
+  let syncHeaderMetrics = () => {};
+
   function createLink(href, className, icon, labelKey) {
     const a = document.createElement("a");
     a.href = href;
@@ -38,13 +40,19 @@
           <img src="assets/imp-logo.jpeg" alt="IMP logo" class="brand-logo" />
         </a>
 
-        <nav class="header-nav" aria-label="Main navigation"></nav>
+        <button class="menu-toggle" type="button" aria-label="Toggle menu" aria-expanded="false">
+          <span class="menu-toggle-icon" aria-hidden="true"></span>
+        </button>
 
-        <div class="header-actions">
-          <button class="lang-btn" type="button" id="langSwitch">
-            <i class="fa-solid fa-language"></i>
-            <span class="lang-text"></span>
-          </button>
+        <div class="header-menu" data-state="closed">
+          <nav class="header-nav" aria-label="Main navigation"></nav>
+
+          <div class="header-actions">
+            <button class="lang-btn" type="button" id="langSwitch">
+              <i class="fa-solid fa-language"></i>
+              <span class="lang-text"></span>
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -52,6 +60,34 @@
     const nav = header.querySelector(".header-nav");
     const actions = header.querySelector(".header-actions");
     const langBtn = header.querySelector("#langSwitch");
+    const menuToggle = header.querySelector(".menu-toggle");
+    const menuWrapper = header.querySelector(".header-menu");
+
+    const isMobile = () => window.matchMedia("(max-width: 991px)").matches;
+
+    const closeMenu = () => {
+      menuWrapper.classList.remove("is-open");
+      header.classList.remove("menu-open");
+      menuToggle?.setAttribute("aria-expanded", "false");
+      menuWrapper.dataset.state = "closed";
+      syncHeaderMetrics();
+    };
+
+    const toggleMenu = () => {
+      const nextState = !menuWrapper.classList.contains("is-open");
+      if (nextState && !isMobile()) return;
+      menuWrapper.classList.toggle("is-open", nextState);
+      header.classList.toggle("menu-open", nextState);
+      menuToggle?.setAttribute("aria-expanded", nextState ? "true" : "false");
+      menuWrapper.dataset.state = nextState ? "open" : "closed";
+      syncHeaderMetrics();
+    };
+
+    header._closeMenu = closeMenu;
+    header._isMobile = isMobile;
+    header._menuWrapper = menuWrapper;
+    header._menuToggle = menuToggle;
+    header._toggleMenu = toggleMenu;
 
     if (mode === "private") {
       const dashLink = createLink("dashboard.html", "header-link", "fa-solid fa-chart-line", "dashboard");
@@ -69,6 +105,7 @@
         } else {
           window.location.href = "index.html";
         }
+        closeMenu();
       });
       actions.insertBefore(logoutBtn, langBtn);
     } else if (mode === "public-home") {
@@ -90,6 +127,18 @@
       });
     }
 
+    menuToggle?.addEventListener("click", toggleMenu);
+
+    menuWrapper?.addEventListener("click", (ev) => {
+      const actionable = ev.target.closest("a, button");
+      if (actionable) closeMenu();
+    });
+
+    document.addEventListener("click", (ev) => {
+      if (!menuWrapper?.classList.contains("is-open")) return;
+      if (!header.contains(ev.target)) closeMenu();
+    });
+
     langBtn.addEventListener("click", function () {
       const cur = (window.LA_I18N && window.LA_I18N.getLocale()) || "en";
       const next = cur === "ar" ? "en" : "ar";
@@ -98,6 +147,7 @@
 
     window.addEventListener("la:locale-changed", function (ev) {
       syncLangButton(ev?.detail?.lang || "en");
+      closeMenu();
     });
 
     // تهيئة أولية
@@ -118,10 +168,13 @@
     body.classList.add("has-topbar");
 
     // اضبط المتغيرات بناءً على ارتفاع الهيدر الفعلي (ديناميكي على كل الصفحات)
-    const syncHeaderMetrics = () => {
+    syncHeaderMetrics = () => {
       const rect = header.getBoundingClientRect();
       const height = Math.ceil(rect.height);
-      const offset = height ; // مسافة أمان بسيطة تحت الهيدر
+      const menuHeight = header._menuWrapper?.classList.contains("is-open")
+        ? header._menuWrapper.scrollHeight
+        : 0;
+      const offset = header._isMobile && header._isMobile() ? height + menuHeight : height;
       const root = document.documentElement;
       root.style.setProperty("--header-height", `${height}px`);
       root.style.setProperty("--header-offset", `${offset}px`);
@@ -133,7 +186,12 @@
       const resizeObserver = new ResizeObserver(() => syncHeaderMetrics());
       resizeObserver.observe(header);
     }
-    window.addEventListener("resize", syncHeaderMetrics);
+    window.addEventListener("resize", () => {
+      if (header._isMobile && !header._isMobile()) {
+        header._closeMenu?.();
+      }
+      syncHeaderMetrics();
+    });
 
     window.addEventListener("la:locale-changed", syncHeaderMetrics);
 
