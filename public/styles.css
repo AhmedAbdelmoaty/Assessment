@@ -660,6 +660,10 @@ body.has-topbar .landing-section {
 
 .message-bubble.user {
     justify-content: flex-end;
+    gap: 0;
+}
+.message-bubble {
+    direction: ltr;
 }
 
 .message-avatar {
@@ -679,8 +683,7 @@ body.has-topbar .landing-section {
 }
 
 .message-bubble.user .message-avatar {
-    background: var(--muted);
-    color: var(--muted-foreground);
+    display: none;
 }
 
 .message-content {
@@ -1223,13 +1226,6 @@ body.has-topbar .landing-section {
 }
 
 /* RTL Adjustments */
-[dir="rtl"] .message-bubble.system {
-    justify-content: flex-end;
-}
-
-[dir="rtl"] .message-bubble.user {
-    justify-content: flex-start;
-}
 
 [dir="rtl"] .chat-header {
     flex-direction: row-reverse;

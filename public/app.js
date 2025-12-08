@@ -960,10 +960,7 @@
         const bubble = document.createElement("div");
         bubble.className = "message-bubble user";
         bubble.innerHTML = `
-            <div class="message-content">${escapeHtml(text)}</div>
-            <div class="message-avatar">
-                <i class="fas fa-user"></i>
-            </div>
+            <div class="message-content" dir="auto">${escapeHtml(text)}</div>
         `;
         chatMessages.appendChild(bubble);
         scrollToBottom();
@@ -981,7 +978,7 @@
             <div class="message-avatar">
                 <i class="fas fa-robot"></i>
             </div>
-            <div class="message-content">${formatTutorMessage(text)}</div>
+            <div class="message-content" dir="auto">${formatTutorMessage(text)}</div>
         `;
         chatMessages.appendChild(bubble);
         scrollToBottom();
