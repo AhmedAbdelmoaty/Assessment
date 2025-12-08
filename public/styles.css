@@ -667,8 +667,8 @@ body.has-topbar .landing-section {
 }
 
 .message-avatar {
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     flex-shrink: 0;
     display: flex;
@@ -1185,9 +1185,17 @@ body.has-topbar .landing-section {
     .hero-subtitle {
         font-size: 16px;
     }
+    .chat-messages {
+        padding: 12px;
+    }
 
+    .message-bubble {
+        margin-bottom: 10px;
+        gap: 8px;
+    }
     .message-content {
         max-width: 85%;
+        padding: 9px 10px;
     }
 
     /* Grid layout for choices on mobile */
@@ -1224,7 +1232,31 @@ body.has-topbar .landing-section {
         font-size: 12px;
     }
 }
+.input-container {
+    padding: 16px;
+}
 
+.input-wrapper {
+    gap: 10px;
+}
+
+.chat-input {
+    padding: 12px 16px;
+}
+
+.send-button {
+    width: 44px;
+    height: 44px;
+}
+
+.floating-action {
+    right: 16px;
+    bottom: 88px;
+}
+
+[dir="rtl"] .floating-action {
+    left: 16px;
+}
 /* RTL Adjustments */
 
 [dir="rtl"] .chat-header {
