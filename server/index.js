@@ -1128,6 +1128,39 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
   return { newChoices, newCorrectIndex };
 }
 
+function isValidQuestionPayload(q) {
+  return (
+    q &&
+    q.kind === "question" &&
+    Array.isArray(q.choices) &&
+    q.choices.length >= 2 &&
+    Number.isInteger(q.correct_index) &&
+    q.correct_index >= 0 &&
+    q.correct_index < q.choices.length &&
+    typeof q.prompt === "string" &&
+    q.prompt.trim() !== ""
+  );
+}
+
+function buildFallbackQuestion(level = "L1", lang = "en") {
+  const prompt =
+    lang === "ar"
+      ? "سؤال بسيط للتجربة: ما نتيجة 2 + 2؟"
+      : "Quick check: what is 2 + 2?";
+
+  const choices = lang === "ar" ? ["4", "3", "5", "1"] : ["4", "3", "5", "1"];
+
+  return {
+    kind: "question",
+    level,
+    cluster: "basics",
+    prompt,
+    choices,
+    correct_index: 0,
+    difficulty: "easy",
+  };
+}
+
 // ===== Assessment (كما هو) =====
 app.post("/api/assess/next", requireAuth, async (req, res) => {
   try {
@@ -1165,20 +1198,30 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       avoid_stems,
     });
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "system", content: systemPrompt }],
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 2048,
-    });
+    let q = null;
 
-    const q = JSON.parse(response.choices[0].message.content);
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "system", content: systemPrompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+        top_p: 1,
+        max_completion_tokens: 2048,
+      });
 
-    if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
-      console.error("Invalid question schema from model:", q);
-      return res.status(500).json({ error: "Invalid question format from model" });
+      try {
+        q = JSON.parse(response?.choices?.[0]?.message?.content || "{}");
+      } catch (parseErr) {
+        console.warn("Assessment question JSON parse failed:", parseErr?.message || parseErr);
+      }
+    } catch (modelErr) {
+      console.warn("Assessment model call failed, using fallback.", modelErr?.message || modelErr);
+    }
+
+    if (!isValidQuestionPayload(q)) {
+      console.warn("Invalid question payload from model, using fallback.", { payload: q });
+      q = buildFallbackQuestion(A.currentLevel, session.lang || "en");
     }
 
     const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);

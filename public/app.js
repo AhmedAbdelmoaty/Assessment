@@ -744,7 +744,7 @@
         isProcessing = false;
     }
 
-    async function startAssessment() {
+    async function startAssessment(retryCount = 0) {
         if (assessmentFetchInFlight) return;
         assessmentFetchInFlight = true;
         showTypingIndicator();
@@ -756,7 +756,16 @@
                 body: JSON.stringify({ sessionId }),
             });
 
+            if (!response.ok) {
+                throw new Error(`Bad status ${response.status}`);
+            }
+
             const mcq = await response.json();
+
+            if (!mcq || mcq.kind !== "question") {
+                throw new Error("Invalid MCQ payload");
+            }
+
             currentMCQ = mcq;
 
             hideTypingIndicator();
@@ -774,11 +783,16 @@
         } catch (error) {
             console.error("Error getting assessment question:", error);
             hideTypingIndicator();
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "عذراً، حدث خطأ في التقييم."
-                    : "Sorry, an error occurred during assessment.",
-            );
+
+            if (retryCount < 1) {
+                setTimeout(() => startAssessment(retryCount + 1), 600);
+            } else {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ في التقييم."
+                        : "Sorry, an error occurred during assessment.",
+                );
+            }
         } finally {
             assessmentFetchInFlight = false;
         }
