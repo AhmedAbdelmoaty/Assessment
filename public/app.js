@@ -10,26 +10,9 @@
     let reportRequested = false;
     let assessmentFetchInFlight = false;
     let isProcessing = false;
-    let isBootstrapping = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
     let initialStateHydrated = false;
-    let currentUserId = null;
-
-    function isInteractionLocked() {
-        return isProcessing || isBootstrapping;
-    }
-
-    function updateInteractionLockUI() {
-        const locked = isInteractionLocked();
-        if (sendBtn) sendBtn.disabled = locked;
-        if (chatInput) chatInput.disabled = locked;
-    }
-
-    function setProcessingState(nextState) {
-        isProcessing = nextState;
-        updateInteractionLockUI();
-    }
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -68,97 +51,6 @@
         } catch (e) {
             return null;
         }
-    }
-
-    function getActiveSessionId() {
-        return sessionId || getStoredSessionId();
-    }
-
-    function logWithContext(level, message, details = {}) {
-        const logger = console[level] || console.log;
-        const context = {
-            sessionId: getActiveSessionId(),
-            userId: currentUserId,
-            ...details,
-        };
-        logger(`[CLIENT] ${message}`, context);
-
-        if (window.LA_TELEMETRY?.captureEvent) {
-            try {
-                window.LA_TELEMETRY.captureEvent("client_log", {
-                    level,
-                    message,
-                    ...context,
-                });
-            } catch (telemetryErr) {
-                console.warn("Telemetry capture failed", telemetryErr);
-            }
-        }
-    }
-
-    async function tryRefreshAuth() {
-        try {
-            if (window.LA_AUTH?.refreshToken) {
-                await window.LA_AUTH.refreshToken();
-                return true;
-            }
-        } catch (err) {
-            logWithContext("warn", "Token refresh via LA_AUTH failed", { error: err?.message });
-        }
-
-        try {
-            const resp = await fetch("/api/auth/refresh", { method: "POST" });
-            return resp.ok;
-        } catch (err) {
-            logWithContext("warn", "Token refresh endpoint failed", { error: err?.message });
-            return false;
-        }
-    }
-
-    function wait(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    async function requestWithRetry(url, options = {}, retryConfig = {}) {
-        const {
-            maxAttempts = 3,
-            baseDelay = 400,
-            backoffFactor = 2,
-            timeoutMs = 8000,
-        } = retryConfig;
-
-        let attempt = 0;
-        let lastError = null;
-
-        while (attempt < maxAttempts) {
-            attempt += 1;
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-            try {
-                const resp = await fetch(url, { ...options, signal: controller.signal });
-                clearTimeout(timer);
-
-                if (resp.status >= 500 && resp.status < 600 && attempt < maxAttempts) {
-                    lastError = new Error(`Server error: ${resp.status}`);
-                    const delay = baseDelay * Math.pow(backoffFactor, attempt - 1);
-                    await wait(delay);
-                    continue;
-                }
-
-                return resp;
-            } catch (err) {
-                clearTimeout(timer);
-                lastError = err;
-
-                if (attempt >= maxAttempts) break;
-
-                const delay = baseDelay * Math.pow(backoffFactor, attempt - 1);
-                await wait(delay);
-            }
-        }
-
-        throw lastError || new Error("Request failed after retries");
     }
 
     function parsePersistedContent(raw) {
@@ -380,19 +272,12 @@
 
     async function authGuardAndLoad() {
         try {
-            const persisted = getStoredSessionId();
-            if (persisted) {
-                sessionId = persisted;
-            }
             const meResp = await fetch("/api/auth/me");
             if (!meResp.ok) {
                 window.location.href = "/login.html";
                 return false;
             }
             const me = await meResp.json();
-            if (me?.user?.id) {
-                currentUserId = me.user.id;
-            }
             const langFromProfile = me?.user?.locale;
             const preferred = getPreferredLocale();
             const resolvedLang = preferred || langFromProfile || "en";
@@ -530,28 +415,28 @@
 
     function setupInputHandlers() {
         chatInput.addEventListener("keypress", function (e) {
-            if (e.key === "Enter" && !isInteractionLocked()) {
+            if (e.key === "Enter" && !isProcessing) {
                 sendMessage();
             }
         });
 
         // Choice chips delegation
         document.addEventListener("click", function (e) {
-            if (e.target.classList.contains("choice-chip") && !isInteractionLocked()) {
+            if (e.target.classList.contains("choice-chip") && !isProcessing) {
                 handleChoiceSelection(e.target);
             }
         });
 
         // MCQ choice delegation
         document.addEventListener("click", function (e) {
-            if (e.target.closest(".mcq-choice") && !isInteractionLocked()) {
+            if (e.target.closest(".mcq-choice") && !isProcessing) {
                 handleMCQSelection(e.target.closest(".mcq-choice"));
             }
         });
 
         // Dropdown delegation
         document.addEventListener("click", function (e) {
-            if (e.target.classList.contains("dropdown-item") && !isInteractionLocked()) {
+            if (e.target.classList.contains("dropdown-item") && !isProcessing) {
                 handleDropdownSelection(e.target);
             }
         });
@@ -576,7 +461,7 @@
         if (!initialStateHydrated) return;
         showTypingIndicator();
         try {
-            const existingSession = getActiveSessionId();
+            const existingSession = sessionId || getStoredSessionId();
             const response = await fetch("/api/intake/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -612,142 +497,54 @@
     }
 
     async function startNewAssessmentSession() {
-        if (isInteractionLocked()) return;
-
-        const persisted = getStoredSessionId();
-        if (!sessionId && persisted) {
-            setSessionId(persisted);
-        }
-
-        const hasExistingContext = Boolean(
-            getActiveSessionId() && (initialStateHydrated || chatMessages.children.length),
-        );
-
-        if (hasExistingContext && currentSection === "chat") {
-            logWithContext("info", "Existing assessment context found; skipping new start");
-            return;
-        }
-
-        isBootstrapping = true;
-        setProcessingState(true);
+        if (isProcessing) return;
+        isProcessing = true;
         showTypingIndicator();
-
-        const startCall = () =>
-            requestWithRetry(
-                "/api/chat/new",
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId: getActiveSessionId() }),
-                },
-                {
-                    maxAttempts: 3,
-                    baseDelay: 500,
-                    backoffFactor: 2,
-                    timeoutMs: 8000,
-                },
-            );
-
         try {
-            let resp = await startCall();
+            const resp = await fetch("/api/chat/new", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId }),
+            });
 
-            if (resp.status === 401 || resp.status === 403) {
-                const refreshed = await tryRefreshAuth();
-                if (!refreshed) {
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى."
-                            : "Your session expired. Please sign in again.",
-                    );
-                    logWithContext("warn", "Auth refresh failed when starting assessment", {
-                        status: resp.status,
-                    });
-                    return;
-                }
-                resp = await startCall();
-            }
-
-            let data = {};
-            try {
-                data = await resp.json();
-            } catch (parseErr) {
-                logWithContext("error", "Failed to parse start session response", {
-                    status: resp.status,
-                    error: parseErr?.message,
-                });
-            }
+            const data = await resp.json();
+            hideTypingIndicator();
 
             if (!resp.ok || !data?.session?.id) {
-                const messageByStatus = {
-                    timeout:
-                        currentLang === "ar"
-                            ? "انتهت مهلة الاتصال أثناء بدء التقييم. حاول مجدداً."
-                            : "The request timed out while starting your assessment. Please try again.",
-                    server:
-                        currentLang === "ar"
-                            ? "الخدمة تواجه مشكلة. حاول لاحقاً أو تواصل مع الدعم."
-                            : "We're having trouble starting your assessment. Please try again shortly.",
-                    validation:
-                        currentLang === "ar"
-                            ? data?.message || "تعذر بدء تقييم جديد حالياً."
-                            : data?.message || "Could not start a new assessment right now.",
-                };
-
-                const statusKey =
-                    resp.status >= 500
-                        ? "server"
-                        : resp.status === 408 || resp.status === 504
-                        ? "timeout"
-                        : "validation";
-
-                addSystemMessage(messageByStatus[statusKey]);
-                logWithContext("error", "Start assessment failed", {
-                    status: resp.status,
-                    error: data?.message,
-                });
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "تعذر بدء تقييم جديد حالياً."
+                        : "Could not start a new assessment right now.",
+                );
                 return;
             }
 
-            const newSessionId = data.session.id;
-            setSessionId(newSessionId);
-
             resetChatState();
+            setSessionId(data.session.id);
             applyStateFromServer(data.state || {});
             updateProgress(currentStep === "assessment" ? 1 : 0);
 
-            if (
-                currentStep === "assessment" &&
-                !(data.state?.assessment?.currentQuestion)
-            ) {
+            if (currentStep === "assessment" && !(data.state?.assessment?.currentQuestion)) {
                 startAssessment();
             }
         } catch (err) {
-            const isTimeout = err?.name === "AbortError";
-            const errMsg = isTimeout
-                ? currentLang === "ar"
-                    ? "انتهت مهلة الاتصال أثناء بدء التقييم."
-                    : "The request timed out while starting the assessment."
-                : currentLang === "ar"
-                ? "حصلت مشكلة في فتح تقييم جديد."
-                : "There was a problem starting a new assessment.";
-            addSystemMessage(errMsg);
-            logWithContext("error", "Failed to start new assessment", {
-                error: err?.message,
-                isTimeout,
-            });
-        } finally {
             hideTypingIndicator();
-            setProcessingState(false);
-            isBootstrapping = false;
-            updateInteractionLockUI();
+            console.error("Failed to start new assessment", err);
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "حصلت مشكلة في فتح تقييم جديد."
+                    : "There was a problem starting a new assessment.",
+            );
+        } finally {
+            isProcessing = false;
         }
     }
 
     async function sendMessage() {
         const message = chatInput.value.trim();
-        if (!message || isInteractionLocked()) return;
+        if (!message || isProcessing) return;
 
-        setProcessingState(true);
+        isProcessing = true;
         addUserMessage(message);
         chatInput.value = "";
 
@@ -757,7 +554,7 @@
             await sendTeachingMessage(message);
         }
 
-        setProcessingState(false);
+        isProcessing = false;
     }
 
     async function handleIntakeAnswer(answer) {
@@ -892,14 +689,14 @@
         }
 
         // غير ذلك: نكمّل عادي
-        setProcessingState(true);
+        isProcessing = true;
         addUserMessage(choice);
 
         if (currentStep === "intake") {
             await handleIntakeAnswer(choice);
         }
 
-        setProcessingState(false);
+        isProcessing = false;
     }
 
     async function handleMCQSelection(choice) {
@@ -910,7 +707,7 @@
         siblings.forEach((c) => c.classList.remove("selected"));
         choice.classList.add("selected");
 
-        setProcessingState(true);
+        isProcessing = true;
         const idx = parseInt(choice.getAttribute("data-idx"), 10);
         const choiceLabelOnly = (
             choice.querySelector("span")?.textContent || ""
@@ -921,7 +718,7 @@
 
         // اللي يتبعت للسيرفر = فهرس الاختيار فقط (رقم)
         await submitMCQAnswer(idx);
-        setProcessingState(false);
+        isProcessing = false;
     }
 
     async function handleDropdownSelection(item) {
@@ -937,14 +734,14 @@
         const wrap = item.closest(".dropdown-container");
         if (wrap) wrap.remove();
 
-        setProcessingState(true);
+        isProcessing = true;
         addUserMessage(country);
 
         if (currentStep === "intake") {
             await handleIntakeAnswer(country);
         }
 
-        setProcessingState(false);
+        isProcessing = false;
     }
 
     async function startAssessment() {
