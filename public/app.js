@@ -174,24 +174,16 @@
 
         if (currentStep === "assessment" && state.assessment?.currentQuestion) {
             const signature = getMCQSignature(state.assessment.currentQuestion);
-            const fallbackSignature = state.assessment.currentQuestion
-            ? getMCQSignature({ ...state.assessment.currentQuestion, qid: null })
-            : null;
             const mcqWithSignature = signature
                 ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
                 : null;
-            const mcqWithFallback = !mcqWithSignature && fallbackSignature
-            ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(fallbackSignature)}"]`)
-            : null;
 
-            if (!mcqWithSignature && !mcqWithFallback) {
+            if (!mcqWithSignature) {
                 currentMCQ = state.assessment.currentQuestion;
                 addMCQQuestion(currentMCQ);
-            } else {
-                currentMCQ = state.assessment.currentQuestion;
             }
-            const activeSig = (mcqWithSignature?.getAttribute("data-mcq-id") || signature || fallbackSignature || "").toString();
-            lockAllMcqsExcept(activeSig);
+
+            lockAllMcqsExcept(signature);
             return;
         }
 
