@@ -223,6 +223,49 @@
   box-shadow: 0 12px 28px rgba(0,0,0,0.06);
 }
 
+.assessment-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.assessment-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.progress-label {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.progress-value {
+  min-width: 48px;
+  text-align: right;
+  font-weight: 700;
+  color: #111827;
+}
+
+.progress-fill.maroon {
+  background: #8b1a30;
+}
+
 .assessment-meta { color: var(--muted-foreground); font-size: 13px; }
 .score-pill {
   min-width: 64px;

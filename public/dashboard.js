@@ -299,12 +299,20 @@
       const card = document.createElement("div");
       card.className = "assessment-card";
       card.innerHTML = `
-        <div>
-          <div class="assessment-title">${t("labels.level")}: ${item.levels_summary ? Object.keys(item.levels_summary).join(" • ") : ""}</div>
+        <div class="assessment-content">
           <div class="assessment-meta">${t("labels.date")}: ${new Date(item.finished_at).toLocaleString()}</div>
+          <div class="assessment-progress">
+            <div class="progress-label">${t("labels.score")}</div>
+            <div class="progress-row">
+              <div class="progress-track">
+                <div class="progress-fill maroon" style="width: 0%"></div>
+              </div>
+              <div class="progress-value">${item.percent || 0}%</div>
+            </div>
+          </div>
         </div>
-        <div class="score-pill">${item.percent || 0}%</div>
       `;
+      animateBar(card.querySelector(".progress-fill"), item.percent || 0);
       container.appendChild(card);
     });
   }
@@ -319,7 +327,9 @@
 
     const recent = document.getElementById("recentAssessments");
     recent.innerHTML = "";
-    const top3 = [...state.assessments].sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at)).slice(0, 3);
+    const top3 = [...state.assessments]
+      .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at))
+      .slice(0, 3);
     if (!top3.length) {
       recent.textContent = t("overview.noAssessments");
       recent.classList.add("empty");
@@ -330,12 +340,20 @@
       const row = document.createElement("div");
       row.className = "assessment-card";
       row.innerHTML = `
-        <div>
-          <div class="assessment-title">${t("labels.date")}: ${new Date(item.finished_at).toLocaleDateString()}</div>
-          <div class="assessment-meta">${t("labels.level")}: ${item.levels_summary ? Object.keys(item.levels_summary).join(" • ") : ""}</div>
+        <div class="assessment-content">
+          <div class="assessment-meta">${t("labels.date")}: ${new Date(item.finished_at).toLocaleDateString()}</div>
+          <div class="assessment-progress">
+            <div class="progress-label">${t("labels.score")}</div>
+            <div class="progress-row">
+              <div class="progress-track">
+                <div class="progress-fill maroon" style="width: 0%"></div>
+              </div>
+              <div class="progress-value">${item.percent || 0}%</div>
+            </div>
+          </div>
         </div>
-        <div class="score-pill">${item.percent || 0}%</div>
       `;
+      animateBar(row.querySelector(".progress-fill"), item.percent || 0);
       recent.appendChild(row);
     });
   }
