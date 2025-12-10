@@ -744,11 +744,22 @@
         isProcessing = false;
     }
 
-    async function startAssessment() {
+    async function startAssessment(attempt = 0)) {
         if (assessmentFetchInFlight) return;
         assessmentFetchInFlight = true;
         showTypingIndicator();
+        const handleAssessmentFailure = (message, { retryable = false } = {}) => {
+            hideTypingIndicator();
 
+            if (retryable && attempt < 1) {
+                // جرّب مرة ثانية تلقائيًا قبل إظهار رسالة خطأ
+                assessmentFetchInFlight = false;
+                setTimeout(() => startAssessment(attempt + 1), 350);
+                return;
+            }
+
+            addSystemMessage(message);
+        };
         try {
             const response = await fetch("/api/assess/next", {
                 method: "POST",
@@ -756,7 +767,57 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const mcq = await response.json();
+            if (response.status === 401) {
+                hideTypingIndicator();
+                window.location.href = "/login.html";
+                return;
+            }
+
+            if (!response.ok) {
+                let serverMessage = "";
+                try {
+                    const errJson = await response.json();
+                    serverMessage = errJson?.message || errJson?.error || "";
+                } catch (_) {
+                    // ignore parsing errors
+                }
+
+                const fallbackMessage =
+                    serverMessage ||
+                    (currentLang === "ar"
+                        ? "تعذّر تحميل سؤال التقييم. سنحاول مرة أخرى تلقائيًا."
+                        : "Unable to load the assessment question. We’ll retry automatically.");
+                handleAssessmentFailure(fallbackMessage, { retryable: true });
+                return;
+            }
+
+            const mcq = await response.json().catch(() => null);
+
+            if (!mcq || mcq.error) {
+                const fallbackMessage =
+                    mcq?.message ||
+                    (currentLang === "ar"
+                        ? "حدث خطأ في جلب بيانات السؤال. سنحاول مرة أخرى تلقائيًا."
+                        : "There was an issue fetching the question data. We’ll retry automatically.");
+                handleAssessmentFailure(fallbackMessage, { retryable: true });
+                return;
+            }
+
+            const hasPrompt = typeof mcq.prompt === "string" && mcq.prompt.trim();
+            const hasChoices = Array.isArray(mcq.choices) && mcq.choices.length > 0;
+            const hasLevel = typeof mcq.level === "string" && mcq.level.trim();
+            const hasNumbers =
+                typeof mcq.questionNumber === "number" && typeof mcq.totalQuestions === "number";
+
+            if (!hasPrompt || !hasChoices || !hasLevel || !hasNumbers) {
+                const fallbackMessage =
+                    currentLang === "ar"
+                        ? "بيانات السؤال غير مكتملة. سنحاول مرة أخرى تلقائيًا."
+                        : "The question data is incomplete. We’ll retry automatically.";
+                handleAssessmentFailure(fallbackMessage, { retryable: true });
+                return;
+            }
+
             currentMCQ = mcq;
 
             hideTypingIndicator();
@@ -773,12 +834,12 @@
             lockAllMcqsExcept(signature);
         } catch (error) {
             console.error("Error getting assessment question:", error);
-            hideTypingIndicator();
-            addSystemMessage(
+            const fallbackMessage =
+
                 currentLang === "ar"
-                    ? "عذراً، حدث خطأ في التقييم."
-                    : "Sorry, an error occurred during assessment.",
-            );
+                    ? "عذراً، حدث خطأ في التقييم. سنحاول مرة أخرى تلقائيًا."
+                    : "Sorry, an error occurred during assessment. We’ll retry automatically.";
+            handleAssessmentFailure(fallbackMessage, { retryable: true });
         } finally {
             assessmentFetchInFlight = false;
         }
