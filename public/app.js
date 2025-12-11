@@ -9,10 +9,32 @@
     let currentMCQ = null;
     let reportRequested = false;
     let assessmentFetchInFlight = false;
+    let assessmentRunToken = 0; // لتجاهل أي ردود قديمة تصل بعد الانتقال لتقييم جديد
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
     let initialStateHydrated = false;
+
+    // === Helpers ===
+    async function parseJsonResponse(response, contextLabel = "") {
+        const label = contextLabel || "response";
+        const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+        // لو السيرفر رجّع رد مش JSON (زي HTML من redirect)، نعتبره خطأ واضح
+        if (!contentType.includes("application/json")) {
+            const rawText = await response.text().catch(() => "");
+            console.error(`[CLIENT] ${label}: Expected JSON but got`, contentType, rawText);
+            return { ok: false, data: null };
+        }
+
+        try {
+            const data = await response.json();
+            return { ok: true, data };
+        } catch (err) {
+            console.error(`[CLIENT] ${label}: Failed to parse JSON`, err);
+            return { ok: false, data: null };
+        }
+    }
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -70,6 +92,7 @@
         currentMCQ = null;
         reportRequested = false;
         assessmentFetchInFlight = false;
+        assessmentRunToken += 1; // أي طلبات قديمة للتقييم يتم تجاهل ردودها
         awaitingCustomInput = false;
         teachingActive = false;
     }
@@ -137,9 +160,19 @@
                             lang: currentLang,
                         }),
                     });
-                    const nextData = await resp.json();
+                    const { ok, data } = await parseJsonResponse(resp, "intake/next (auto)");
                     hideTypingIndicator();
-                    renderIntakeStep(nextData);
+
+                    if (!resp.ok || !ok || !data) {
+                        addSystemMessage(
+                            currentLang === "ar"
+                                ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
+                                : "Sorry, an error occurred. Please try again.",
+                        );
+                        return;
+                    }
+
+                    renderIntakeStep(data);
                 } catch (err) {
                     hideTypingIndicator();
                     console.error("Failed to auto-advance intake", err);
@@ -189,9 +222,8 @@
 
         if (currentStep === "assessment" && !state.assessment?.currentQuestion) {
             lockAllMcqsExcept(null);
-
             if (!assessmentFetchInFlight) {
-                startAssessment();
+                beginAssessmentPipeline("hydrate-no-question");
             }
             return;
         }
@@ -471,16 +503,26 @@
                 }),
             });
 
-            const data = await response.json();
+            const { ok, data } = await parseJsonResponse(response, "intake/next (start)");
+            hideTypingIndicator();
+
+            if (!response.ok || !ok || !data) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
+                        : "Sorry, an error occurred. Please try again.",
+                );
+                return;
+            }
+
             console.log("[CLIENT] Initial intake response:", data);
 
             if (data.sessionId) setSessionId(data.sessionId);
-            hideTypingIndicator();
 
             if (data.done && data.skipTo === "assessment") {
                 currentStep = "assessment";
                 updateProgress(1);
-                startAssessment();
+                beginAssessmentPipeline("intake-complete");
                 return;
             }
 
@@ -507,10 +549,10 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const data = await resp.json();
+            const { ok, data } = await parseJsonResponse(resp, "chat/new");
             hideTypingIndicator();
 
-            if (!resp.ok || !data?.session?.id) {
+            if (!resp.ok || !ok || !data?.session?.id) {
                 addSystemMessage(
                     currentLang === "ar"
                         ? "تعذر بدء تقييم جديد حالياً."
@@ -525,7 +567,7 @@
             updateProgress(currentStep === "assessment" ? 1 : 0);
 
             if (currentStep === "assessment" && !(data.state?.assessment?.currentQuestion)) {
-                startAssessment();
+                beginAssessmentPipeline("new-assessment");
             }
         } catch (err) {
             hideTypingIndicator();
@@ -572,11 +614,20 @@
                 }),
             });
 
-            const data = await response.json();
+            const { ok, data } = await parseJsonResponse(response, "intake/next (answer)");
+            hideTypingIndicator();
+
+            if (!response.ok || !ok || !data) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
+                        : "Sorry, an error occurred. Please try again.",
+                );
+                return;
+            }
+
             console.log("[CLIENT] Intake response:", data);
             if (data.sessionId) setSessionId(data.sessionId);
-
-            hideTypingIndicator();
 
             // Handle validation error
             if (data.error) {
@@ -592,21 +643,18 @@
             }
 
             // Handle completion
-            if (data.done) {
-                if (data.message) {
-                    addSystemMessage(data.message);
-                }
-                if (data.skipTo === "assessment") {
+                if (data.done) {
+                    if (data.message) {
+                        addSystemMessage(data.message);
+                    }
                     currentStep = "assessment";
                     updateProgress(1);
-                    setTimeout(() => startAssessment(), 500);
+                    setTimeout(
+                        () => beginAssessmentPipeline("intake-answer-complete"),
+                        data.skipTo === "assessment" ? 300 : 600,
+                    );
                     return;
                 }
-                currentStep = "assessment";
-                updateProgress(1);
-                setTimeout(() => startAssessment(), 1000);
-                return;
-            }
 
             // Render next step
             renderIntakeStep(data);
@@ -631,27 +679,37 @@
 
         // Show prompt message
         addSystemMessage(data.prompt);
-        // لو الرسالة افتتاحية فقط، نطلب الخطوة التالية فورًا (بدون انتظار إدخال)
-        if (data.autoNext) {
-            // استدعاء فوري للخطوة التالية بنفس الجلسة
-            showTypingIndicator();
-            try {
-                const resp = await fetch("/api/intake/next", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        sessionId, // نفس الجلسة اللي رجعت مع الافتتاحية
-                        lang: currentLang, // اللغة الحالية
-                    }),
-                });
-                const nextData = await resp.json();
-                hideTypingIndicator();
-                renderIntakeStep(nextData); // نعرض سؤال الاسم كرسالة منفصلة
-            } catch (e) {
-                hideTypingIndicator();
-                console.error("Error fetching next step after opening:", e);
-            }
-            return; // ننهي هنا لأننا هنكمّل بعرض الخطوة التالية
+            // لو الرسالة افتتاحية فقط، نطلب الخطوة التالية فورًا (بدون انتظار إدخال)
+            if (data.autoNext) {
+                // استدعاء فوري للخطوة التالية بنفس الجلسة
+                showTypingIndicator();
+                try {
+                    const resp = await fetch("/api/intake/next", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            sessionId, // نفس الجلسة اللي رجعت مع الافتتاحية
+                            lang: currentLang, // اللغة الحالية
+                        }),
+                    });
+                    const { ok, data: nextData } = await parseJsonResponse(resp, "intake/next (opening)");
+                    hideTypingIndicator();
+
+                    if (!resp.ok || !ok || !nextData) {
+                        addSystemMessage(
+                            currentLang === "ar"
+                                ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
+                                : "Sorry, an error occurred. Please try again.",
+                        );
+                        return;
+                    }
+
+                    renderIntakeStep(nextData); // نعرض سؤال الاسم كرسالة منفصلة
+                } catch (e) {
+                    hideTypingIndicator();
+                    console.error("Error fetching next step after opening:", e);
+                }
+                return; // ننهي هنا لأننا هنكمّل بعرض الخطوة التالية
         }
 
         // Render input based on type
@@ -744,8 +802,18 @@
         isProcessing = false;
     }
 
-    async function startAssessment() {
+    function beginAssessmentPipeline(reason = "") {
+        // نبدأ جولة جديدة من التقييم مع إبطال أي ردود قديمة
+        assessmentRunToken += 1;
+        assessmentFetchInFlight = false;
+        currentStep = "assessment";
+        removeInteractiveUI();
+        startAssessment(reason);
+    }
+
+    async function startAssessment(reason = "") {
         if (assessmentFetchInFlight) return;
+        const runToken = assessmentRunToken;
         assessmentFetchInFlight = true;
         showTypingIndicator();
 
@@ -756,10 +824,27 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const mcq = await response.json();
-            currentMCQ = mcq;
-
+            const { ok, data: mcq } = await parseJsonResponse(
+                response,
+                `assess/next ${reason}`,
+            );
             hideTypingIndicator();
+
+            // لو الرد متأخر عن الجولة الحالية، نتجاهله بدون إظهار خطأ
+            if (runToken !== assessmentRunToken) {
+                return;
+            }
+
+            if (!response.ok || !ok || !mcq) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ في التقييم."
+                        : "Sorry, an error occurred during assessment.",
+                );
+                return;
+            }
+
+            currentMCQ = mcq;
 
             const signature = getMCQSignature(mcq);
             const exists = signature
@@ -774,13 +859,19 @@
         } catch (error) {
             console.error("Error getting assessment question:", error);
             hideTypingIndicator();
-            addSystemMessage(
-                currentLang === "ar"
-                    ? "عذراً، حدث خطأ في التقييم."
-                    : "Sorry, an error occurred during assessment.",
-            );
+            // لا نظهر رسالة لو كانت الجولة الحالية قد أُبطلت
+            if (runToken === assessmentRunToken) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ في التقييم."
+                        : "Sorry, an error occurred during assessment.",
+                );
+            }
         } finally {
-            assessmentFetchInFlight = false;
+            // لا نغيّر العلم إلا لو كنا في الجولة الصحيحة، حتى لا نكسر جولة أحدث
+            if (runToken === assessmentRunToken) {
+                assessmentFetchInFlight = false;
+            }
         }
     }
 
@@ -800,8 +891,17 @@
                 }),
             });
 
-            const result = await response.json();
+            const { ok, data: result } = await parseJsonResponse(response, "assess/answer");
             hideTypingIndicator();
+
+            if (!response.ok || !ok || !result) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ في معالجة الإجابة."
+                        : "Sorry, an error occurred processing your answer.",
+                );
+                return;
+            }
 
             // لا نعرض "صح/غلط" للمستخدم؛ فقط نكمل التدفق
             if (result.nextAction === "complete") {
@@ -837,8 +937,17 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const report = await response.json();
+            const { ok, data: report } = await parseJsonResponse(response, "report");
             hideTypingIndicator();
+
+            if (!response.ok || !ok || !report) {
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "عذراً، حدث خطأ أثناء إنشاء التقرير."
+                        : "Sorry, an error occurred while generating the report.",
+                );
+                return;
+            }
 
             // 1) اعرض الفقرة السردية (لو موجودة) كرسالة من المساعد
             if (
