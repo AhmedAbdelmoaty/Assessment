@@ -100,7 +100,11 @@
     function getMCQSignature(mcq) {
         if (!mcq) return "";
         if (mcq.qid) return mcq.qid;
-        const parts = [mcq.level || "", mcq.questionNumber || "", (mcq.prompt || "").trim()];
+        const parts = [
+            mcq.level || "",
+            mcq.questionNumber || "",
+            (mcq.prompt || "").trim(),
+        ];
         return parts.join("::");
     }
 
@@ -175,7 +179,9 @@
         if (currentStep === "assessment" && state.assessment?.currentQuestion) {
             const signature = getMCQSignature(state.assessment.currentQuestion);
             const mcqWithSignature = signature
-                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
+                ? chatMessages.querySelector(
+                      `.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`,
+                  )
                 : null;
 
             if (!mcqWithSignature) {
@@ -187,11 +193,21 @@
             return;
         }
 
-        if (currentStep === "assessment" && !state.assessment?.currentQuestion) {
+        if (
+            currentStep === "assessment" &&
+            !state.assessment?.currentQuestion
+        ) {
             lockAllMcqsExcept(null);
 
             if (!assessmentFetchInFlight) {
+                console.log(
+                    "[CLIENT] applyStateFromServer triggering startAssessment",
+                );
                 startAssessment();
+            } else {
+                console.log(
+                    "[CLIENT] applyStateFromServer skipping startAssessment (already in flight)",
+                );
             }
             return;
         }
@@ -202,12 +218,16 @@
             }
             currentStep = "report";
             reportRequested = true;
-            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages
+                .querySelectorAll(".mcq-container")
+                .forEach((el) => el.classList.add("mcq-locked"));
             return;
         }
 
         if (currentStep === "report" && !state.report?.message) {
-            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages
+                .querySelectorAll(".mcq-container")
+                .forEach((el) => el.classList.add("mcq-locked"));
             if (!reportRequested) {
                 reportRequested = true;
                 generateReport();
@@ -220,14 +240,19 @@
         }
 
         if (currentStep !== "assessment") {
-            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages
+                .querySelectorAll(".mcq-container")
+                .forEach((el) => el.classList.add("mcq-locked"));
         }
     }
 
     // === AUTH GUARD + LOAD PERSISTED CHAT ===
     function getPreferredLocale() {
         try {
-            if (window.LA_I18N && typeof window.LA_I18N.getLocale === "function") {
+            if (
+                window.LA_I18N &&
+                typeof window.LA_I18N.getLocale === "function"
+            ) {
                 return window.LA_I18N.getLocale();
             }
         } catch (e) {
@@ -312,35 +337,38 @@
         return true;
     }
 
-
     // Initialize
     (async function init() {
-      // 0) حماية الصفحة + تحميل الرسائل (لو فشل → هيحوّل لـ login.html)
-      const ok = await authGuardAndLoad();
-      if (!ok) return;
+        // 0) حماية الصفحة + تحميل الرسائل (لو فشل → هيحوّل لـ login.html)
+        const ok = await authGuardAndLoad();
+        if (!ok) return;
 
-      // 1) لغة/أزرار عامة
-      setupLanguageToggle();
-      setupSendButton();
-      setupInputHandlers();
-      setupNewAssessmentButton();
-      syncLanguageWithServer(currentLang);
+        // 1) لغة/أزرار عامة
+        setupLanguageToggle();
+        setupSendButton();
+        setupInputHandlers();
+        setupNewAssessmentButton();
+        syncLanguageWithServer(currentLang);
 
-      // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
-      if (startBtn && landingSection) {
-        setupStartButton();
-        return; // في الحالة دي هنستنى الضغط على Start
-      }
+        // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
+        if (startBtn && landingSection) {
+            setupStartButton();
+            return; // في الحالة دي هنستنى الضغط على Start
+        }
 
-      // 3) أما في app.html (لا يوجد landing/start) → شغّل الشات فورًا
-      if (chatSection) chatSection.classList.add("active");
-      currentSection = "chat";
-      updateProgress(0);
+        // 3) أما في app.html (لا يوجد landing/start) → شغّل الشات فورًا
+        if (chatSection) chatSection.classList.add("active");
+        currentSection = "chat";
+        updateProgress(0);
 
-      // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
-      if (!chatMessages.children.length && currentStep === "intake" && initialStateHydrated) {
-        startIntakeFlow();
-      }
+        // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
+        if (
+            !chatMessages.children.length &&
+            currentStep === "intake" &&
+            initialStateHydrated
+        ) {
+            startIntakeFlow();
+        }
     })();
 
     function setupLanguageToggle() {
@@ -398,16 +426,15 @@
     });
 
     function setupStartButton() {
-      if (!startBtn) return;
-      startBtn.addEventListener("click", function() {
-        landingSection && (landingSection.style.display = "none");
-        chatSection && chatSection.classList.add("active");
-        currentSection = "chat";
-        updateProgress(0);
-        startIntakeFlow();
-      });
+        if (!startBtn) return;
+        startBtn.addEventListener("click", function () {
+            landingSection && (landingSection.style.display = "none");
+            chatSection && chatSection.classList.add("active");
+            currentSection = "chat";
+            updateProgress(0);
+            startIntakeFlow();
+        });
     }
-
 
     function setupSendButton() {
         sendBtn.addEventListener("click", sendMessage);
@@ -507,14 +534,29 @@
                 body: JSON.stringify({ sessionId }),
             });
 
+            // Check for non-200 status code immediately
+            if (!resp.ok) {
+                hideTypingIndicator();
+                console.error(
+                    "API /api/chat/new failed with status:",
+                    resp.status,
+                );
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? "تعذر بدء تقييم جديد حالياً. (خطأ في الخادم)"
+                        : "Could not start a new assessment right now. (Server Error)",
+                );
+                return;
+            }
+
             const data = await resp.json();
             hideTypingIndicator();
 
-            if (!resp.ok || !data?.session?.id) {
+            if (!data?.session?.id) {
                 addSystemMessage(
                     currentLang === "ar"
-                        ? "تعذر بدء تقييم جديد حالياً."
-                        : "Could not start a new assessment right now.",
+                        ? "تعذر بدء تقييم جديد حالياً. (بيانات غير صالحة)"
+                        : "Could not start a new assessment right now. (Invalid Data)",
                 );
                 return;
             }
@@ -524,16 +566,20 @@
             applyStateFromServer(data.state || {});
             updateProgress(currentStep === "assessment" ? 1 : 0);
 
-            if (currentStep === "assessment" && !(data.state?.assessment?.currentQuestion)) {
+            // Call startAssessment() now that we are sure the session is created
+            if (currentStep === "assessment" && !assessmentFetchInFlight) {
                 startAssessment();
             }
         } catch (err) {
             hideTypingIndicator();
-            console.error("Failed to start new assessment", err);
+            console.error(
+                "Failed to start new assessment (Network/JSON Error)",
+                err,
+            );
             addSystemMessage(
                 currentLang === "ar"
-                    ? "حصلت مشكلة في فتح تقييم جديد."
-                    : "There was a problem starting a new assessment.",
+                    ? "حصلت مشكلة في فتح تقييم جديد. (خطأ في الاتصال)"
+                    : "There was a problem starting a new assessment. (Connection Error)",
             );
         } finally {
             isProcessing = false;
@@ -572,6 +618,29 @@
                 }),
             });
 
+            // Check for non-200 status code immediately
+            if (!response.ok) {
+                hideTypingIndicator();
+                console.error(
+                    "API /api/intake/next failed with status:",
+                    response.status,
+                );
+                // Attempt to read JSON error message if available
+                let errorText = await response.text();
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    errorText = errorJson.message || errorText;
+                } catch (e) {
+                    // Not a JSON response, use status text
+                }
+                addSystemMessage(
+                    currentLang === "ar"
+                        ? `خطأ في الخادم أثناء جمع البيانات: ${errorText}`
+                        : `Server error during intake: ${errorText}`,
+                );
+                return;
+            }
+
             const data = await response.json();
             console.log("[CLIENT] Intake response:", data);
             if (data.sessionId) setSessionId(data.sessionId);
@@ -596,27 +665,28 @@
                 if (data.message) {
                     addSystemMessage(data.message);
                 }
+                // Remove setTimeout and call startAssessment directly for reliability
                 if (data.skipTo === "assessment") {
                     currentStep = "assessment";
                     updateProgress(1);
-                    setTimeout(() => startAssessment(), 500);
+                    startAssessment(); // Call directly
                     return;
                 }
                 currentStep = "assessment";
                 updateProgress(1);
-                setTimeout(() => startAssessment(), 1000);
+                startAssessment(); // Call directly
                 return;
             }
 
             // Render next step
             renderIntakeStep(data);
         } catch (error) {
-            console.error("Error in intake:", error);
+            console.error("Error in intake (Network/JSON parse):", error);
             hideTypingIndicator();
             addSystemMessage(
                 currentLang === "ar"
-                    ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
-                    : "Sorry, an error occurred. Please try again.",
+                    ? "عذراً، حدث خطأ في الاتصال أو تحليل البيانات. يرجى المحاولة مرة أخرى."
+                    : "Sorry, a connection or data parsing error occurred. Please try again.",
             );
         }
     }
@@ -745,7 +815,12 @@
     }
 
     async function startAssessment() {
-        if (assessmentFetchInFlight) return;
+        if (assessmentFetchInFlight) {
+            console.log(
+                "[CLIENT] Assessment fetch already in progress, skipping duplicate call",
+            );
+            return;
+        }
         assessmentFetchInFlight = true;
         showTypingIndicator();
 
@@ -763,7 +838,9 @@
 
             const signature = getMCQSignature(mcq);
             const exists = signature
-                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
+                ? chatMessages.querySelector(
+                      `.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`,
+                  )
                 : null;
 
             if (!exists) {
@@ -779,9 +856,11 @@
                     ? "عذراً، حدث خطأ في التقييم."
                     : "Sorry, an error occurred during assessment.",
             );
+            return false; // Indicate failure
         } finally {
             assessmentFetchInFlight = false;
         }
+        return true; // Indicate success
     }
 
     async function submitMCQAnswer(userAnswer) {
@@ -920,14 +999,14 @@
 
         // 2) Standardize any dash-only divider lines to exactly '---'
         //    (lines made only of dashes/spaces -> '---')
-        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, '---');
+        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, "---");
 
         // 3) Ensure '---' is the ONLY separator: no extra blank lines before/after
         //    Any amount of newlines/spaces around '---' => exactly '\n---\n'
-        t = t.replace(/\n*\s*---\s*\n*/g, '\n---\n');
+        t = t.replace(/\n*\s*---\s*\n*/g, "\n---\n");
 
         // 4) Collapse 3+ consecutive newlines anywhere to just 2 (i.e., one blank line)
-        t = t.replace(/\n{3,}/g, '\n\n');
+        t = t.replace(/\n{3,}/g, "\n\n");
 
         // 5) Trim edges (and also remove extra leading/trailing blank lines)
         t = t.trim();
@@ -947,12 +1026,18 @@
         // 2) headings first (match per-line)
         //    - handle #### before ### to avoid double-processing (kept as in original)
         let html = safe
-           .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
-           .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
-           .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
+            .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
+            .replace(
+                /^###\s+(.+)$/gm,
+                '<div class="msg-h3" dir="auto">$1</div>',
+            )
+            .replace(
+                /^##\s+(.+)$/gm,
+                '<div class="msg-h2" dir="auto">$1</div>',
+            );
 
         // 3) bold (**...**) — non-greedy
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
         return html;
     }
