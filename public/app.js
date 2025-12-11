@@ -1428,31 +1428,10 @@ ${mcq.choices
     }
 
     function updateProgress(step, completed = false) {
-        const steps = document.querySelectorAll(".progress-step");
-        const progressFill = document.querySelector(".progress-fill");
-
-        steps.forEach((s, index) => {
-            if (index < step) {
-                s.classList.add("completed");
-                s.classList.remove("active");
-            } else if (index === step) {
-                s.classList.add("active");
-                s.classList.remove("completed");
-                if (completed) {
-                    s.classList.add("completed");
-                    s.classList.remove("active");
-                }
-            } else {
-                s.classList.remove("active", "completed");
-            }
-        });
-
-        const progress = (step / (steps.length - 1)) * 100;
-        progressFill.style.width = progress + "%";
-
-        if (completed) {
-            progressFill.style.width = "100%";
-        }
+        // تم إزالة شريط التقدّم من الواجهة،
+        // فخلّينا الدالة دي فاضية علشان
+        // أي استدعاء لـ updateProgress ما يسببش أخطاء.
+        return;
     }
 
     function scrollToBottom() {

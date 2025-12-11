@@ -1181,8 +1181,10 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       return res.status(500).json({ error: "Invalid question format from model" });
     }
 
-    const { newChoices, newCorrectIndex } = shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
+    const { newChoices, newCorrectIndex } =
+      shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
 
+    // 👇 ده السؤال الحالي اللي بنخزنه في حالة الجلسة
     const current = {
       level: q.level || A.currentLevel,
       cluster: q.cluster,
@@ -1190,33 +1192,54 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
       prompt: q.prompt,
       choices: newChoices,
       correct_index: newCorrectIndex,
-      qid: `${A.currentLevel}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    };
-    A.currentQuestion = current;
 
+      // معرّف فريد للسؤال في هذه الجلسة
+      qid: `${A.currentLevel}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`,
+
+      // أضفنا هنا نفس معلومات الترقيم اللي بتظهر للمستخدم
+      questionNumber: question_index,
+      totalQuestions: 2,
+    };
+
+    A.currentQuestion = current;
     if (attempt_type === "first") {
+
       A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
+
       A.stemsCurrentAttempt.push(current.prompt);
+
     }
 
     if (question_index === 1 && current.cluster) {
-      if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
-        A.usedClustersCurrentAttempt.push(current.cluster);
-      }
-    }
 
+      if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
+
+        A.usedClustersCurrentAttempt.push(current.cluster);
+
+      }
+
+    }
+    // 👇 ده الـ payload اللي بيتخزن في chat_messages و بيرجع للـ frontend
     const mcqPayload = {
       kind: "question",
+
+      // مهم جدًا: نحمل نفس الـ qid للـ frontend وللـ DB
+      qid: current.qid,
+
       level: current.level,
       cluster: current.cluster,
       prompt: current.prompt,
       choices: current.choices,
       correct_answer: "__hidden__",
       rationale: "",
-      questionNumber: question_index,
-      totalQuestions: 2,
+      // نرجّع نفس الأرقام من current لضمان التطابق دائمًا
+      questionNumber: current.questionNumber,
+      totalQuestions: current.totalQuestions,
       lang: session.lang || "en",
     };
+
 
     await persistSessionState(sessionId, session, { status: "assessment" });
     await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
