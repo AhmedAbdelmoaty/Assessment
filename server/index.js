@@ -120,6 +120,9 @@ app.use(session({
 
 // ===== In-memory store (موجود لديك، أبقيته كما هو) =====
 const sessions = new Map();
+// قفل بسيط في الذاكرة علشان نمنع توليد أكتر من سؤال
+// لنفس جلسة الشات في نفس اللحظة
+const assessmentGenerationLocks = new Set(); // key = sessionId
 
 // ===== OpenAI client (كما هو) =====
 const openai = new OpenAI({
@@ -1129,6 +1132,7 @@ function shuffleChoicesAndUpdateCorrectIndex(choices, correctIndex) {
 }
 
 // ===== Assessment (كما هو) =====
+// ===== Assessment (كما هو مع إضافة قفل) =====
 app.post("/api/assess/next", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
@@ -1140,115 +1144,195 @@ app.post("/api/assess/next", requireAuth, async (req, res) => {
     const session = await getSession(sessionId, userId);
     session.currentStep = "assessment";
 
-    const A = session.assessment;
+    const A = session.assessment || {};
+    // (1) لو في سؤال حالي متخزّن للجلسة → رجّعه كما هو
+    if (A && A.currentQuestion) {
+      const q = A.currentQuestion;
 
-    const profile = {
-      job_nature: session.intake.job_nature || "",
-      experience_years_band: session.intake.experience_years_band || "",
-      job_title_exact: session.intake.job_title_exact || "",
-      sector: session.intake.sector || "",
-      learning_reason: session.intake.learning_reason || "",
-    };
+      const mcqPayload = {
+        kind: "question",
+        qid: q.qid,
+        prompt: q.prompt,
+        choices: q.choices,
+        level: q.level,
+        cluster: q.cluster,
+        difficulty: q.difficulty,
+        questionNumber: q.questionNumber || A.questionIndexInAttempt || 1,
+        totalQuestions: q.totalQuestions || 2,
+      };
 
-    const attempt_type = A.attempts === 0 ? "first" : "retry";
-    const question_index = A.questionIndexInAttempt || 1;
-    const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
-    const avoid_stems = attempt_type === "retry" ? (A.lastAttemptStems[A.currentLevel] || []) : [];
-
-    const systemPrompt = getQuestionPromptSingle({
-      lang: session.lang,
-      level: A.currentLevel,
-      profile,
-      attempt_type,
-      question_index,
-      used_clusters_current_attempt,
-      avoid_stems,
-    });
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "system", content: systemPrompt }],
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      top_p: 1,
-      max_completion_tokens: 2048,
-    });
-
-    const q = JSON.parse(response.choices[0].message.content);
-
-    if (!q || q.kind !== "question" || !Array.isArray(q.choices) || typeof q.correct_index !== "number") {
-      console.error("Invalid question schema from model:", q);
-      return res.status(500).json({ error: "Invalid question format from model" });
+      // ❗ مهم: هنا لا بنكلم الموديل ولا بنسجّل رسالة جديدة في chat_messages
+      return res.json(mcqPayload);
     }
 
-    const { newChoices, newCorrectIndex } =
-      shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
+    const lockKey = sessionId;
 
-    // 👇 ده السؤال الحالي اللي بنخزنه في حالة الجلسة
-    const current = {
-      level: q.level || A.currentLevel,
-      cluster: q.cluster,
-      difficulty: q.difficulty || (question_index === 1 ? "easy" : "harder"),
-      prompt: q.prompt,
-      choices: newChoices,
-      correct_index: newCorrectIndex,
+    // 1) لو بالفعل في سؤال حالي محفوظ للجلسة → رجّعه زي ما هو
+    if (A.currentQuestion) {
+      const existing = A.currentQuestion;
 
-      // معرّف فريد للسؤال في هذه الجلسة
-      qid: `${A.currentLevel}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`,
+      const mcqPayload = {
+        kind: "question",
+        qid: existing.qid,
+        prompt: existing.prompt,
+        choices: existing.choices,
+        level: existing.level,
+        cluster: existing.cluster,
+        difficulty: existing.difficulty,
+        questionNumber: existing.questionNumber || 1,
+        totalQuestions: existing.totalQuestions || 2,
+      };
 
-      // أضفنا هنا نفس معلومات الترقيم اللي بتظهر للمستخدم
-      questionNumber: question_index,
-      totalQuestions: 2,
-    };
-
-    A.currentQuestion = current;
-    if (attempt_type === "first") {
-
-      A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
-
-      A.stemsCurrentAttempt.push(current.prompt);
-
+      return res.json(mcqPayload);
     }
 
-    if (question_index === 1 && current.cluster) {
+    // 2) لو في ريكوست تاني شغال بيولّد سؤال لنفس الجلسة
+    //    استنى لحد ما يخلص وبعدين رجّع نفس السؤال
+    if (assessmentGenerationLocks.has(lockKey)) {
+      const startedAt = Date.now();
+      const MAX_WAIT_MS = 15000; // 15 ثانية حد أقصى
 
-      if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
-
-        A.usedClustersCurrentAttempt.push(current.cluster);
-
+      while (assessmentGenerationLocks.has(lockKey) && Date.now() - startedAt < MAX_WAIT_MS) {
+        await new Promise((r) => setTimeout(r, 200)); // استنى 200ms
       }
 
+      // بعد الانتظار، جرّب تقرأ الحالة من جديد
+      const freshSession = await getSession(sessionId, userId);
+      const freshA = freshSession.assessment || {};
+
+      if (freshSession.currentStep === "assessment" && freshA.currentQuestion) {
+        const existing = freshA.currentQuestion;
+
+        const mcqPayload = {
+          kind: "question",
+          qid: existing.qid,
+          prompt: existing.prompt,
+          choices: existing.choices,
+          level: existing.level,
+          cluster: existing.cluster,
+          difficulty: existing.difficulty,
+          questionNumber: existing.questionNumber || 1,
+          totalQuestions: existing.totalQuestions || 2,
+        };
+
+        return res.json(mcqPayload);
+      }
+      // لو مفيش سؤال بعد الانتظار → نولّد سؤال جديد عادي
     }
-    // 👇 ده الـ payload اللي بيتخزن في chat_messages و بيرجع للـ frontend
-    const mcqPayload = {
-      kind: "question",
 
-      // مهم جدًا: نحمل نفس الـ qid للـ frontend وللـ DB
-      qid: current.qid,
+    // 3) من هنا هنكون إحنا "المالك" الوحيد لتوليد السؤال
+    assessmentGenerationLocks.add(lockKey);
+    try {
+      const profile = {
+        job_nature: session.intake.job_nature || "",
+        experience_years_band: session.intake.experience_years_band || "",
+        job_title_exact: session.intake.job_title_exact || "",
+        sector: session.intake.sector || "",
+        learning_reason: session.intake.learning_reason || "",
+      };
 
-      level: current.level,
-      cluster: current.cluster,
-      prompt: current.prompt,
-      choices: current.choices,
-      correct_answer: "__hidden__",
-      rationale: "",
-      // نرجّع نفس الأرقام من current لضمان التطابق دائمًا
-      questionNumber: current.questionNumber,
-      totalQuestions: current.totalQuestions,
-      lang: session.lang || "en",
-    };
+      const attempt_type = A.attempts === 0 ? "first" : "retry";
+      const question_index = A.questionIndexInAttempt || 1;
+      const used_clusters_current_attempt = A.usedClustersCurrentAttempt || [];
+      const avoid_stems =
+        attempt_type === "retry" ? (A.lastAttemptStems?.[A.currentLevel] || []) : [];
 
+      const systemPrompt = getQuestionPromptSingle({
+        lang: session.lang,
+        level: A.currentLevel,
+        profile,
+        attempt_type,
+        question_index,
+        used_clusters_current_attempt,
+        avoid_stems,
+      });
 
-    await persistSessionState(sessionId, session, { status: "assessment" });
-    await insertChatMessage(sessionId, "assistant", { _type: "mcq", payload: mcqPayload });
-    return res.json(mcqPayload);
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "system", content: systemPrompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+        top_p: 1,
+        max_completion_tokens: 2048,
+      });
+
+      const q = JSON.parse(response.choices[0].message.content);
+
+      if (
+        !q ||
+        q.kind !== "question" ||
+        !Array.isArray(q.choices) ||
+        typeof q.correct_index !== "number"
+      ) {
+        console.error("Invalid question schema from model:", q);
+        return res
+          .status(500)
+          .json({ error: "Invalid question format from model" });
+      }
+
+      const { newChoices, newCorrectIndex } =
+        shuffleChoicesAndUpdateCorrectIndex(q.choices, q.correct_index);
+
+      const current = {
+        level: q.level || A.currentLevel,
+        cluster: q.cluster,
+        difficulty: q.difficulty || (question_index === 1 ? "easy" : "harder"),
+        prompt: q.prompt,
+        choices: newChoices,
+        correct_index: newCorrectIndex,
+        qid: `${A.currentLevel}-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}`,
+        questionNumber: question_index,
+        totalQuestions: 2,
+      };
+
+      // تحديث حالة التقييم
+      A.currentQuestion = current;
+
+      if (attempt_type === "first") {
+        A.stemsCurrentAttempt = A.stemsCurrentAttempt || [];
+        A.stemsCurrentAttempt.push(current.prompt);
+      }
+
+      if (question_index === 1 && current.cluster) {
+        A.usedClustersCurrentAttempt = A.usedClustersCurrentAttempt || [];
+        if (!A.usedClustersCurrentAttempt.includes(current.cluster)) {
+          A.usedClustersCurrentAttempt.push(current.cluster);
+        }
+      }
+
+      const mcqPayload = {
+        kind: "question",
+        qid: current.qid,
+        prompt: current.prompt,
+        choices: current.choices,
+        level: current.level,
+        cluster: current.cluster,
+        difficulty: current.difficulty,
+        questionNumber: current.questionNumber,
+        totalQuestions: current.totalQuestions,
+      };
+
+      await persistSessionState(sessionId, session, { status: "assessment" });
+      await insertChatMessage(sessionId, "assistant", {
+        _type: "mcq",
+        payload: mcqPayload,
+      });
+
+      return res.json(mcqPayload);
+    } finally {
+      // مهم جدًا: نفك القفل في كل الحالات (سواء حصل error أو لا)
+      assessmentGenerationLocks.delete(lockKey);
+    }
   } catch (err) {
-    console.error("Assessment next error:", err);
-    res.status(500).json({ error: "Server error during assessment" });
+    console.error("/api/assess/next error:", err?.message || err);
+    return res
+      .status(500)
+      .json({ error: true, message: "Server error during assessment" });
   }
 });
+
 
 app.post("/api/assess/answer", requireAuth, async (req, res) => {
   try {

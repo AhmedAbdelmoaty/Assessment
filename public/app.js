@@ -598,12 +598,6 @@
             applyStateFromServer(data.state || {});
             updateProgress(currentStep === "assessment" ? 1 : 0);
 
-            if (
-                currentStep === "assessment" &&
-                !data.state?.assessment?.currentQuestion
-            ) {
-                beginAssessmentPipeline("new-assessment");
-            }
         } catch (err) {
             hideTypingIndicator();
             console.error("Failed to start new assessment", err);
@@ -844,11 +838,15 @@
     }
 
     function beginAssessmentPipeline(reason = "") {
-        // نبدأ جولة جديدة من التقييم مع إبطال أي ردود قديمة
+        // لو فيه طلب سؤال شغّال بالفعل، ما نبدأش واحد جديد
+        if (assessmentFetchInFlight) return;
+
+        // نبدأ جولة جديدة ونبطل أي رد قديم
         assessmentRunToken += 1;
-        assessmentFetchInFlight = false;
         currentStep = "assessment";
         removeInteractiveUI();
+
+        // startAssessment هي اللي هتضبط assessmentFetchInFlight + typing indicator
         startAssessment(reason);
     }
 
