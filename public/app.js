@@ -9,38 +9,10 @@
     let currentMCQ = null;
     let reportRequested = false;
     let assessmentFetchInFlight = false;
-    let assessmentRunToken = 0; // لتجاهل أي ردود قديمة تصل بعد الانتقال لتقييم جديد
     let isProcessing = false;
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
     let initialStateHydrated = false;
-
-    // === Helpers ===
-    async function parseJsonResponse(response, contextLabel = "") {
-        const label = contextLabel || "response";
-        const contentType = (
-            response.headers.get("content-type") || ""
-        ).toLowerCase();
-
-        // لو السيرفر رجّع رد مش JSON (زي HTML من redirect)، نعتبره خطأ واضح
-        if (!contentType.includes("application/json")) {
-            const rawText = await response.text().catch(() => "");
-            console.error(
-                `[CLIENT] ${label}: Expected JSON but got`,
-                contentType,
-                rawText,
-            );
-            return { ok: false, data: null };
-        }
-
-        try {
-            const data = await response.json();
-            return { ok: true, data };
-        } catch (err) {
-            console.error(`[CLIENT] ${label}: Failed to parse JSON`, err);
-            return { ok: false, data: null };
-        }
-    }
     function removeInteractiveUI() {
         // يشيل أي اختيارات ظاهرة قبل الانتقال للسؤال التالي
         document
@@ -98,7 +70,6 @@
         currentMCQ = null;
         reportRequested = false;
         assessmentFetchInFlight = false;
-        assessmentRunToken += 1; // أي طلبات قديمة للتقييم يتم تجاهل ردودها
         awaitingCustomInput = false;
         teachingActive = false;
     }
@@ -129,11 +100,7 @@
     function getMCQSignature(mcq) {
         if (!mcq) return "";
         if (mcq.qid) return mcq.qid;
-        const parts = [
-            mcq.level || "",
-            mcq.questionNumber || "",
-            (mcq.prompt || "").trim(),
-        ];
+        const parts = [mcq.level || "", mcq.questionNumber || "", (mcq.prompt || "").trim()];
         return parts.join("::");
     }
 
@@ -170,22 +137,9 @@
                             lang: currentLang,
                         }),
                     });
-                    const { ok, data } = await parseJsonResponse(
-                        resp,
-                        "intake/next (auto)",
-                    );
+                    const nextData = await resp.json();
                     hideTypingIndicator();
-
-                    if (!resp.ok || !ok || !data) {
-                        addSystemMessage(
-                            currentLang === "ar"
-                                ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
-                                : "Sorry, an error occurred. Please try again.",
-                        );
-                        return;
-                    }
-
-                    renderIntakeStep(data);
+                    renderIntakeStep(nextData);
                 } catch (err) {
                     hideTypingIndicator();
                     console.error("Failed to auto-advance intake", err);
@@ -221,9 +175,7 @@
         if (currentStep === "assessment" && state.assessment?.currentQuestion) {
             const signature = getMCQSignature(state.assessment.currentQuestion);
             const mcqWithSignature = signature
-                ? chatMessages.querySelector(
-                      `.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`,
-                  )
+                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
                 : null;
 
             if (!mcqWithSignature) {
@@ -235,13 +187,11 @@
             return;
         }
 
-        if (
-            currentStep === "assessment" &&
-            !state.assessment?.currentQuestion
-        ) {
+        if (currentStep === "assessment" && !state.assessment?.currentQuestion) {
             lockAllMcqsExcept(null);
+
             if (!assessmentFetchInFlight) {
-                beginAssessmentPipeline("hydrate-no-question");
+                startAssessment();
             }
             return;
         }
@@ -252,16 +202,12 @@
             }
             currentStep = "report";
             reportRequested = true;
-            chatMessages
-                .querySelectorAll(".mcq-container")
-                .forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
             return;
         }
 
         if (currentStep === "report" && !state.report?.message) {
-            chatMessages
-                .querySelectorAll(".mcq-container")
-                .forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
             if (!reportRequested) {
                 reportRequested = true;
                 generateReport();
@@ -274,19 +220,14 @@
         }
 
         if (currentStep !== "assessment") {
-            chatMessages
-                .querySelectorAll(".mcq-container")
-                .forEach((el) => el.classList.add("mcq-locked"));
+            chatMessages.querySelectorAll(".mcq-container").forEach((el) => el.classList.add("mcq-locked"));
         }
     }
 
     // === AUTH GUARD + LOAD PERSISTED CHAT ===
     function getPreferredLocale() {
         try {
-            if (
-                window.LA_I18N &&
-                typeof window.LA_I18N.getLocale === "function"
-            ) {
+            if (window.LA_I18N && typeof window.LA_I18N.getLocale === "function") {
                 return window.LA_I18N.getLocale();
             }
         } catch (e) {
@@ -371,38 +312,35 @@
         return true;
     }
 
+
     // Initialize
     (async function init() {
-        // 0) حماية الصفحة + تحميل الرسائل (لو فشل → هيحوّل لـ login.html)
-        const ok = await authGuardAndLoad();
-        if (!ok) return;
+      // 0) حماية الصفحة + تحميل الرسائل (لو فشل → هيحوّل لـ login.html)
+      const ok = await authGuardAndLoad();
+      if (!ok) return;
 
-        // 1) لغة/أزرار عامة
-        setupLanguageToggle();
-        setupSendButton();
-        setupInputHandlers();
-        setupNewAssessmentButton();
-        syncLanguageWithServer(currentLang);
+      // 1) لغة/أزرار عامة
+      setupLanguageToggle();
+      setupSendButton();
+      setupInputHandlers();
+      setupNewAssessmentButton();
+      syncLanguageWithServer(currentLang);
 
-        // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
-        if (startBtn && landingSection) {
-            setupStartButton();
-            return; // في الحالة دي هنستنى الضغط على Start
-        }
+      // 2) لو الصفحة فيها Landing + زر Start (زي index.html القديمة) فعّل الزر
+      if (startBtn && landingSection) {
+        setupStartButton();
+        return; // في الحالة دي هنستنى الضغط على Start
+      }
 
-        // 3) أما في app.html (لا يوجد landing/start) → شغّل الشات فورًا
-        if (chatSection) chatSection.classList.add("active");
-        currentSection = "chat";
-        updateProgress(0);
+      // 3) أما في app.html (لا يوجد landing/start) → شغّل الشات فورًا
+      if (chatSection) chatSection.classList.add("active");
+      currentSection = "chat";
+      updateProgress(0);
 
-        // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
-        if (
-            !chatMessages.children.length &&
-            currentStep === "intake" &&
-            initialStateHydrated
-        ) {
-            startIntakeFlow();
-        }
+      // لو ما فيش رسائل ولسه في مرحلة الـ intake نبدأ التدفق
+      if (!chatMessages.children.length && currentStep === "intake" && initialStateHydrated) {
+        startIntakeFlow();
+      }
     })();
 
     function setupLanguageToggle() {
@@ -460,15 +398,16 @@
     });
 
     function setupStartButton() {
-        if (!startBtn) return;
-        startBtn.addEventListener("click", function () {
-            landingSection && (landingSection.style.display = "none");
-            chatSection && chatSection.classList.add("active");
-            currentSection = "chat";
-            updateProgress(0);
-            startIntakeFlow();
-        });
+      if (!startBtn) return;
+      startBtn.addEventListener("click", function() {
+        landingSection && (landingSection.style.display = "none");
+        chatSection && chatSection.classList.add("active");
+        currentSection = "chat";
+        updateProgress(0);
+        startIntakeFlow();
+      });
     }
+
 
     function setupSendButton() {
         sendBtn.addEventListener("click", sendMessage);
@@ -532,29 +471,16 @@
                 }),
             });
 
-            const { ok, data } = await parseJsonResponse(
-                response,
-                "intake/next (start)",
-            );
-            hideTypingIndicator();
-
-            if (!response.ok || !ok || !data) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
-                        : "Sorry, an error occurred. Please try again.",
-                );
-                return;
-            }
-
+            const data = await response.json();
             console.log("[CLIENT] Initial intake response:", data);
 
             if (data.sessionId) setSessionId(data.sessionId);
+            hideTypingIndicator();
 
             if (data.done && data.skipTo === "assessment") {
                 currentStep = "assessment";
                 updateProgress(1);
-                beginAssessmentPipeline("intake-complete");
+                startAssessment();
                 return;
             }
 
@@ -581,10 +507,10 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const { ok, data } = await parseJsonResponse(resp, "chat/new");
+            const data = await resp.json();
             hideTypingIndicator();
 
-            if (!resp.ok || !ok || !data?.session?.id) {
+            if (!resp.ok || !data?.session?.id) {
                 addSystemMessage(
                     currentLang === "ar"
                         ? "تعذر بدء تقييم جديد حالياً."
@@ -598,11 +524,8 @@
             applyStateFromServer(data.state || {});
             updateProgress(currentStep === "assessment" ? 1 : 0);
 
-            if (
-                currentStep === "assessment" &&
-                !data.state?.assessment?.currentQuestion
-            ) {
-                beginAssessmentPipeline("new-assessment");
+            if (currentStep === "assessment" && !(data.state?.assessment?.currentQuestion)) {
+                startAssessment();
             }
         } catch (err) {
             hideTypingIndicator();
@@ -649,23 +572,11 @@
                 }),
             });
 
-            const { ok, data } = await parseJsonResponse(
-                response,
-                "intake/next (answer)",
-            );
-            hideTypingIndicator();
-
-            if (!response.ok || !ok || !data) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
-                        : "Sorry, an error occurred. Please try again.",
-                );
-                return;
-            }
-
+            const data = await response.json();
             console.log("[CLIENT] Intake response:", data);
             if (data.sessionId) setSessionId(data.sessionId);
+
+            hideTypingIndicator();
 
             // Handle validation error
             if (data.error) {
@@ -685,12 +596,15 @@
                 if (data.message) {
                     addSystemMessage(data.message);
                 }
+                if (data.skipTo === "assessment") {
+                    currentStep = "assessment";
+                    updateProgress(1);
+                    setTimeout(() => startAssessment(), 500);
+                    return;
+                }
                 currentStep = "assessment";
                 updateProgress(1);
-                setTimeout(
-                    () => beginAssessmentPipeline("intake-answer-complete"),
-                    data.skipTo === "assessment" ? 300 : 600,
-                );
+                setTimeout(() => startAssessment(), 1000);
                 return;
             }
 
@@ -730,21 +644,8 @@
                         lang: currentLang, // اللغة الحالية
                     }),
                 });
-                const { ok, data: nextData } = await parseJsonResponse(
-                    resp,
-                    "intake/next (opening)",
-                );
+                const nextData = await resp.json();
                 hideTypingIndicator();
-
-                if (!resp.ok || !ok || !nextData) {
-                    addSystemMessage(
-                        currentLang === "ar"
-                            ? "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى."
-                            : "Sorry, an error occurred. Please try again.",
-                    );
-                    return;
-                }
-
                 renderIntakeStep(nextData); // نعرض سؤال الاسم كرسالة منفصلة
             } catch (e) {
                 hideTypingIndicator();
@@ -843,18 +744,8 @@
         isProcessing = false;
     }
 
-    function beginAssessmentPipeline(reason = "") {
-        // نبدأ جولة جديدة من التقييم مع إبطال أي ردود قديمة
-        assessmentRunToken += 1;
-        assessmentFetchInFlight = false;
-        currentStep = "assessment";
-        removeInteractiveUI();
-        startAssessment(reason);
-    }
-
-    async function startAssessment(reason = "") {
+    async function startAssessment() {
         if (assessmentFetchInFlight) return;
-        const runToken = assessmentRunToken;
         assessmentFetchInFlight = true;
         showTypingIndicator();
 
@@ -865,33 +756,14 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const { ok, data: mcq } = await parseJsonResponse(
-                response,
-                `assess/next ${reason}`,
-            );
-            hideTypingIndicator();
-
-            // لو الرد متأخر عن الجولة الحالية، نتجاهله بدون إظهار خطأ
-            if (runToken !== assessmentRunToken) {
-                return;
-            }
-
-            if (!response.ok || !ok || !mcq) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ في التقييم."
-                        : "Sorry, an error occurred during assessment.",
-                );
-                return;
-            }
-
+            const mcq = await response.json();
             currentMCQ = mcq;
+
+            hideTypingIndicator();
 
             const signature = getMCQSignature(mcq);
             const exists = signature
-                ? chatMessages.querySelector(
-                      `.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`,
-                  )
+                ? chatMessages.querySelector(`.mcq-container[data-mcq-id="${CSS.escape(signature)}"]`)
                 : null;
 
             if (!exists) {
@@ -902,19 +774,13 @@
         } catch (error) {
             console.error("Error getting assessment question:", error);
             hideTypingIndicator();
-            // لا نظهر رسالة لو كانت الجولة الحالية قد أُبطلت
-            if (runToken === assessmentRunToken) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ في التقييم."
-                        : "Sorry, an error occurred during assessment.",
-                );
-            }
+            addSystemMessage(
+                currentLang === "ar"
+                    ? "عذراً، حدث خطأ في التقييم."
+                    : "Sorry, an error occurred during assessment.",
+            );
         } finally {
-            // لا نغيّر العلم إلا لو كنا في الجولة الصحيحة، حتى لا نكسر جولة أحدث
-            if (runToken === assessmentRunToken) {
-                assessmentFetchInFlight = false;
-            }
+            assessmentFetchInFlight = false;
         }
     }
 
@@ -934,20 +800,8 @@
                 }),
             });
 
-            const { ok, data: result } = await parseJsonResponse(
-                response,
-                "assess/answer",
-            );
+            const result = await response.json();
             hideTypingIndicator();
-
-            if (!response.ok || !ok || !result) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ في معالجة الإجابة."
-                        : "Sorry, an error occurred processing your answer.",
-                );
-                return;
-            }
 
             // لا نعرض "صح/غلط" للمستخدم؛ فقط نكمل التدفق
             if (result.nextAction === "complete") {
@@ -983,20 +837,8 @@
                 body: JSON.stringify({ sessionId }),
             });
 
-            const { ok, data: report } = await parseJsonResponse(
-                response,
-                "report",
-            );
+            const report = await response.json();
             hideTypingIndicator();
-
-            if (!response.ok || !ok || !report) {
-                addSystemMessage(
-                    currentLang === "ar"
-                        ? "عذراً، حدث خطأ أثناء إنشاء التقرير."
-                        : "Sorry, an error occurred while generating the report.",
-                );
-                return;
-            }
 
             // 1) اعرض الفقرة السردية (لو موجودة) كرسالة من المساعد
             if (
@@ -1078,14 +920,14 @@
 
         // 2) Standardize any dash-only divider lines to exactly '---'
         //    (lines made only of dashes/spaces -> '---')
-        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, "---");
+        t = t.replace(/^[ \t]*-{3,}[ \t]*$/gm, '---');
 
         // 3) Ensure '---' is the ONLY separator: no extra blank lines before/after
         //    Any amount of newlines/spaces around '---' => exactly '\n---\n'
-        t = t.replace(/\n*\s*---\s*\n*/g, "\n---\n");
+        t = t.replace(/\n*\s*---\s*\n*/g, '\n---\n');
 
         // 4) Collapse 3+ consecutive newlines anywhere to just 2 (i.e., one blank line)
-        t = t.replace(/\n{3,}/g, "\n\n");
+        t = t.replace(/\n{3,}/g, '\n\n');
 
         // 5) Trim edges (and also remove extra leading/trailing blank lines)
         t = t.trim();
@@ -1105,18 +947,12 @@
         // 2) headings first (match per-line)
         //    - handle #### before ### to avoid double-processing (kept as in original)
         let html = safe
-            .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
-            .replace(
-                /^###\s+(.+)$/gm,
-                '<div class="msg-h3" dir="auto">$1</div>',
-            )
-            .replace(
-                /^##\s+(.+)$/gm,
-                '<div class="msg-h2" dir="auto">$1</div>',
-            );
+           .replace(/^####\s+(.+)$/gm, '<div class="rt-h3">$1</div>')
+           .replace(/^###\s+(.+)$/gm, '<div class="msg-h3" dir="auto">$1</div>')
+           .replace(/^##\s+(.+)$/gm, '<div class="msg-h2" dir="auto">$1</div>');
 
         // 3) bold (**...**) — non-greedy
-        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
         return html;
     }
