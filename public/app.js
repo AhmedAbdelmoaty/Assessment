@@ -204,21 +204,27 @@
         if (!state) return;
         if (state.sessionId) setSessionId(state.sessionId);
         currentStep = state.currentStep || currentStep;
+
+        // لو اللغة في الحالة مختلفة عن اللغة الحالية غيرها
         if (state.lang && state.lang !== currentLang) {
             requestLanguageChange(state.lang);
         }
+
         initialStateHydrated = true;
 
+        // ===== 1) مرحلة الـ intake =====
         if (currentStep === "intake") {
             if (state.pendingIntakeStep) {
                 renderPendingIntakeInteraction(state.pendingIntakeStep);
             } else if (!chatMessages.children.length) {
+                // لا يوجد رسائل → ابدأ الانتِيك
                 startIntakeFlow();
             }
             return;
         }
 
-        if (currentStep === "assessment" && state.assessment?.currentQuestion) {
+        // ===== 2) مرحلة التقييم – يوجد سؤال حالي =====
+        if (currentStep === "assessment" && state.assessment && state.assessment.currentQuestion) {
             const signature = getMCQSignature(state.assessment.currentQuestion);
             const mcqWithSignature = signature
                 ? chatMessages.querySelector(
@@ -235,10 +241,8 @@
             return;
         }
 
-        if (
-            currentStep === "assessment" &&
-            !state.assessment?.currentQuestion
-        ) {
+        // ===== 3) مرحلة التقييم – لا يوجد سؤال حالي =====
+        if (currentStep === "assessment" && (!state.assessment || !state.assessment.currentQuestion)) {
             lockAllMcqsExcept(null);
             if (!assessmentFetchInFlight) {
                 beginAssessmentPipeline("hydrate-no-question");
@@ -246,37 +250,49 @@
             return;
         }
 
-        if (currentStep === "report" && state.report?.message) {
-            if (!chatMessages.textContent.includes(state.report.message)) {
-                addSystemMessage(state.report.message);
-            }
-            currentStep = "report";
-            reportRequested = true;
+        // ===== 4) مرحلة التقرير =====
+        if (currentStep === "report") {
+            // دائمًا اقفل كل أسئلة MCQ
             chatMessages
                 .querySelectorAll(".mcq-container")
                 .forEach((el) => el.classList.add("mcq-locked"));
-            return;
-        }
 
-        if (currentStep === "report" && !state.report?.message) {
-            chatMessages
-                .querySelectorAll(".mcq-container")
-                .forEach((el) => el.classList.add("mcq-locked"));
-            if (!reportRequested) {
+            if (state.report && state.report.message) {
+                // اعرض نص التقرير لو مش متعرض
+                if (!chatMessages.textContent.includes(state.report.message)) {
+                    addSystemMessage(state.report.message);
+                }
+
+                currentStep = "report";
                 reportRequested = true;
-                generateReport();
+
+                // لو الشرح لسه مش active → أظهر زر "ابدأ الشرح"
+                const teachingState = state.teaching || {};
+                const teachingMode = teachingState.mode || "idle";
+                if (teachingMode !== "active") {
+                    addStartTeachingCTA();
+                }
+            } else {
+                // لا يوجد تقرير محفوظ لكن إحنا في خطوة report → اطلب توليد تقرير
+                if (!reportRequested) {
+                    reportRequested = true;
+                    generateReport();
+                }
             }
+
             return;
         }
 
+        // ===== 5) مرحلة الشرح =====
         if (currentStep === "teaching") {
+            // فعّل وضع الشرح في الفرونت
             teachingActive = true;
-        }
 
-        if (currentStep !== "assessment") {
-            chatMessages
-                .querySelectorAll(".mcq-container")
-                .forEach((el) => el.classList.add("mcq-locked"));
+            // امسح أي CTA قديم لو موجود
+            const ctas = document.querySelectorAll(".teaching-cta");
+            ctas.forEach((el) => el.remove());
+
+            return;
         }
     }
 
