@@ -189,13 +189,14 @@
         currentMCQ = null;
         reportRequested = false;
         assessmentFetchInFlight = false;
-        assessmentRunToken += 1; // أي طلبات قديمة للتقييم يتم تجاهل ردودها
+        assessmentRunToken += 1;
         awaitingCustomInput = false;
         teachingActive = false;
         setTeachingPending(false);
         setTeachingReplyPending(false);
         seenMessageIds.clear();
     }
+
 
     function renderPersistedMessages(messages) {
         addServerMessages(messages);
@@ -380,7 +381,7 @@
             // فعّل وضع الشرح في الفرونت
             teachingActive = true;
 
-            // امسح أي CTA قديم لو موجود
+            // امسح أي زر "ابدأ الشرح" قديم لو موجود
             const ctas = document.querySelectorAll(".teaching-cta");
             ctas.forEach((el) => el.remove());
 
@@ -389,6 +390,71 @@
 
             return;
         }
+
+    }
+    function startTeachingInflightWatcher() {
+        // لو في تايمر شغال بالفعل ما نعملش حاجة
+        if (teachingPollTimer) return;
+
+        // لو لسه ما حمّلناش الحالة من السيرفر، نستنى
+        if (!initialStateHydrated) return;
+
+        // نعرض فقاعة الكتابة كأن البوت لسه بيحضّر الرد
+        showTypingIndicator();
+
+        let tries = 0;
+        const MAX_TRIES = 30; // 30 محاولة × 2 ثانية ≈ دقيقة
+
+        teachingPollTimer = setInterval(async () => {
+            tries += 1;
+            if (tries > MAX_TRIES) {
+                clearInterval(teachingPollTimer);
+                teachingPollTimer = null;
+                hideTypingIndicator();
+                return;
+            }
+
+            try {
+                const resp = await fetch("/api/chat/current");
+                if (!resp.ok) {
+                    // لو حصل مشكلة (مثلاً السيشن انتهت) نوقف بهدوء
+                    clearInterval(teachingPollTimer);
+                    teachingPollTimer = null;
+                    hideTypingIndicator();
+                    return;
+                }
+
+                const data = await resp.json();
+                const messages = Array.isArray(data.messages)
+                    ? data.messages
+                    : [];
+
+                // لو ظهر عدد رسائل أكبر من آخر مرة شفناها
+                if (messages.length > lastMessageCount) {
+                    const newMessages = messages.slice(lastMessageCount);
+                    lastMessageCount = messages.length;
+
+                    // نرسم الرسائل الجديدة بس
+                    renderPersistedMessages(newMessages);
+
+                    // هل من ضمن الرسائل الجديدة رد من المساعد؟
+                    const hasAssistant = newMessages.some(
+                        (m) => (m.sender || "") === "assistant",
+                    );
+
+                    if (hasAssistant) {
+                        clearInterval(teachingPollTimer);
+                        teachingPollTimer = null;
+                        hideTypingIndicator();
+                    }
+                }
+            } catch (err) {
+                console.warn("teaching watcher error", err);
+                clearInterval(teachingPollTimer);
+                teachingPollTimer = null;
+                hideTypingIndicator();
+            }
+        }, 2000); // كل 2 ثانية
     }
 
     // === AUTH GUARD + LOAD PERSISTED CHAT ===
@@ -474,9 +540,15 @@
                 }
                 if (Array.isArray(data.messages)) {
                     renderPersistedMessages(data.messages);
+                    // 👇 هنا بنسجّل عدد الرسائل اللي كانت موجودة في السيرفر
+                    lastMessageCount = data.messages.length;
+                } else {
+                    lastMessageCount = 0;
                 }
+
                 applyStateFromServer(data.state);
             }
+
         } catch (e) {
             console.warn("Failed to load persisted chat:", e);
         }
