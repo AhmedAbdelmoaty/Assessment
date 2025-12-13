@@ -14,6 +14,11 @@
     let awaitingCustomInput = false;
     let teachingActive = false; // وضع الشرح شغال/لأ
     let initialStateHydrated = false;
+    let teachingStartPending = false; // تتبع بدء الشرح قيد الانتظار
+    let teachingStartPolling = false;
+    const seenMessageIds = new Set();
+
+    const TEACHING_PENDING_KEY_PREFIX = "teachingPending:";
 
     // === Helpers ===
     async function parseJsonResponse(response, contextLabel = "") {
@@ -53,6 +58,10 @@
         return v === "other" || v === "أخرى" || v === "اخري" || v === "اخرى";
     }
 
+    function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
     // DOM elements
     const langButtons = document.querySelectorAll(".lang-btn[data-lang]");
     const html = document.documentElement;
@@ -70,6 +79,32 @@
             localStorage.setItem("chatSessionId", id);
         } catch (e) {
             console.warn("Failed to persist sessionId", e);
+        }
+    }
+
+    function getTeachingPendingKey(id) {
+        return `${TEACHING_PENDING_KEY_PREFIX}${id || ""}`;
+    }
+
+    function setTeachingPending(flag) {
+        teachingStartPending = !!flag;
+        if (!sessionId) return;
+        try {
+            const key = getTeachingPendingKey(sessionId);
+            if (flag) localStorage.setItem(key, "1");
+            else localStorage.removeItem(key);
+        } catch (_) {
+            // ignore
+        }
+    }
+
+    function hydrateTeachingPendingFlag() {
+        if (!sessionId) return;
+        try {
+            const key = getTeachingPendingKey(sessionId);
+            teachingStartPending = localStorage.getItem(key) === "1";
+        } catch (_) {
+            teachingStartPending = false;
         }
     }
 
@@ -92,6 +127,33 @@
         return { _type: "text", text: raw };
     }
 
+    function renderPersistedMessage(msg) {
+        if (!msg) return { rendered: false, isAssistant: false };
+        const mid = msg.id || msg.ID || msg.Id;
+        if (mid && seenMessageIds.has(mid)) {
+            return { rendered: false, isAssistant: false };
+        }
+
+        const parsed = parsePersistedContent(msg?.content || "");
+
+        if (parsed._type === "mcq" && parsed.payload) {
+            currentMCQ = parsed.payload;
+            addMCQQuestion(parsed.payload);
+        } else {
+            const txt = (parsed.text || "").toString();
+            if (txt) {
+                if ((msg?.sender || "") === "user") addUserMessage(txt);
+                else addSystemMessage(txt);
+            }
+        }
+
+        if (mid) {
+            seenMessageIds.add(mid);
+        }
+
+        return { rendered: true, isAssistant: (msg?.sender || "") === "assistant" };
+    }
+
     function resetChatState() {
         chatMessages.innerHTML = "";
         currentStep = "assessment";
@@ -101,21 +163,19 @@
         assessmentRunToken += 1; // أي طلبات قديمة للتقييم يتم تجاهل ردودها
         awaitingCustomInput = false;
         teachingActive = false;
+        setTeachingPending(false);
+        seenMessageIds.clear();
     }
 
     function renderPersistedMessages(messages) {
-        (messages || []).forEach((m) => {
-            const parsed = parsePersistedContent(m?.content || "");
-            if (parsed._type === "mcq" && parsed.payload) {
-                currentMCQ = parsed.payload;
-                addMCQQuestion(parsed.payload);
-                return;
-            }
+        addServerMessages(messages);
+    }
 
-            const txt = (parsed.text || "").toString();
-            if (!txt) return;
-            if ((m?.sender || "") === "user") addUserMessage(txt);
-            else addSystemMessage(txt);
+    function addServerMessages(messages) {
+        let assistantAdded = false;
+        (messages || []).forEach((m) => {
+            const { rendered, isAssistant } = renderPersistedMessage(m);
+            if (rendered && isAssistant) assistantAdded = true;
         });
 
         const mcqs = chatMessages.querySelectorAll(".mcq-container");
@@ -124,6 +184,8 @@
                 el.classList.add("mcq-locked");
             }
         });
+
+        return { assistantAdded };
     }
 
     function getMCQSignature(mcq) {
@@ -292,6 +354,8 @@
             const ctas = document.querySelectorAll(".teaching-cta");
             ctas.forEach((el) => el.remove());
 
+            resumeTeachingStartIfPending();
+
             return;
         }
     }
@@ -372,7 +436,10 @@
             const chatResp = await fetch("/api/chat/current");
             if (chatResp.ok) {
                 const data = await chatResp.json();
-                if (data.session?.id) setSessionId(data.session.id);
+                if (data.session?.id) {
+                    setSessionId(data.session.id);
+                    hydrateTeachingPendingFlag();
+                }
                 if (Array.isArray(data.messages)) {
                     renderPersistedMessages(data.messages);
                 }
@@ -539,6 +606,10 @@
         showTypingIndicator();
         try {
             const existingSession = sessionId || getStoredSessionId();
+            if (!sessionId && existingSession) {
+                setSessionId(existingSession);
+                hydrateTeachingPendingFlag();
+            }
             const response = await fetch("/api/intake/next", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1377,6 +1448,7 @@ ${mcq.choices
 
         btn.addEventListener("click", async () => {
             btn.disabled = true;
+            setTeachingPending(true);
             showTypingIndicator();
             try {
                 const resp = await fetch("/api/teach/start", {
@@ -1385,17 +1457,18 @@ ${mcq.choices
                     body: JSON.stringify({ sessionId }),
                 });
                 const data = await resp.json();
-                hideTypingIndicator();
-                btn.disabled = false;
+                    hideTypingIndicator();
+                    btn.disabled = false;
 
-                // فعّل وضع الشرح
-                teachingActive = true;
-                currentStep = "teaching";
+                    // فعّل وضع الشرح
+                    teachingActive = true;
+                    currentStep = "teaching";
+                    setTeachingPending(false);
 
-                // رسالة الافتتاح
-                if (data && data.message) {
-                    addSystemMessage(data.message);
-                } else {
+                    // رسالة الافتتاح
+                    if (data && data.message) {
+                        addSystemMessage(data.message);
+                    } else {
                     addSystemMessage(
                         currentLang === "ar"
                             ? "بدأنا الشرح."
@@ -1405,6 +1478,7 @@ ${mcq.choices
             } catch (e) {
                 hideTypingIndicator();
                 btn.disabled = false;
+                setTeachingPending(false);
                 addSystemMessage(
                     currentLang === "ar"
                         ? "تعذّر بدء الشرح."
@@ -1418,6 +1492,8 @@ ${mcq.choices
     }
 
     function showTypingIndicator() {
+        const existing = document.querySelector(".typing-indicator-bubble");
+        if (existing) return;
         const bubble = document.createElement("div");
         bubble.className = "message-bubble system typing-indicator-bubble";
         bubble.innerHTML = `
@@ -1439,6 +1515,59 @@ ${mcq.choices
         if (indicator) {
             indicator.remove();
         }
+    }
+
+    async function pollTeachingStartCompletion() {
+        if (teachingStartPolling || !teachingStartPending) return;
+        teachingStartPolling = true;
+        try {
+            let attempts = 0;
+            const maxAttempts = 25;
+            while (teachingStartPending && attempts < maxAttempts) {
+                attempts += 1;
+                await wait(1200);
+
+                try {
+                    const resp = await fetch("/api/chat/current");
+                    if (!resp.ok) continue;
+                    const data = await resp.json();
+                    if (data?.session?.id && !sessionId) setSessionId(data.session.id);
+
+                    const { assistantAdded } = addServerMessages(data.messages || []);
+                    const teachingState = data.state?.teaching || {};
+
+                    if (assistantAdded) {
+                        hideTypingIndicator();
+                        setTeachingPending(false);
+                        teachingActive = true;
+                        currentStep = "teaching";
+                        break;
+                    }
+
+                    if ((teachingState.mode || "") !== "active") {
+                        setTeachingPending(false);
+                        hideTypingIndicator();
+                        break;
+                    }
+                } catch (err) {
+                    console.warn("pollTeachingStartCompletion failed", err);
+                }
+            }
+
+            if (teachingStartPending) {
+                // منع التعليق لو نفد وقت الانتظار
+                setTeachingPending(false);
+                hideTypingIndicator();
+            }
+        } finally {
+            teachingStartPolling = false;
+        }
+    }
+
+    function resumeTeachingStartIfPending() {
+        if (!teachingStartPending) return;
+        showTypingIndicator();
+        pollTeachingStartCompletion();
     }
 
     function updateProgress(step, completed = false) {
